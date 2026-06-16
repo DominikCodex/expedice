@@ -94,3 +94,36 @@ UploadKompletaceAktualniTabulky
 ```
 
 Uploaduje list `KOMPLETACE` jako dávku typu `completion`, včetně zákaznických údajů, dopravy, platby, expedičního pořadí, Zásilkovny/DPD, stavu kompletace a příznaku vytištěného štítku.
+
+## Multi-shop predpriprava
+
+Backend uz pocita s vice e-shopy. Pripravene kody:
+
+- `iveronika_cz`
+- `iveronika_sk`
+- `galantra_cz`
+- `fidule_cz`
+- `mixed`
+- `unknown`
+
+Nove endpointy:
+
+- `GET /api/shops`
+- `GET /api/stock-sources`
+- `GET /api/expedition/overview`
+- `GET /api/datasets?shop=fidule_cz`
+- `GET /api/datasets?date=2026-06-17`
+
+Upload muze volitelne poslat:
+
+```json
+{
+  "shopCode": "fidule_cz",
+  "shopName": "Fidule.cz",
+  "sourceSystem": "shoptet"
+}
+```
+
+Pokud `shopCode` neprijde, backend se ho pokusi odhadnout podle cisla objednavky. Pokud jedna davka obsahuje vice e-shopu, dostane davka `shopCode` hodnotu `mixed`, ale jednotlive radky mohou mit vlastni `shopCode`.
+
+Architektonicky navrh je v `docs/multishop-expedition-blueprint.md`.

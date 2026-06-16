@@ -14,6 +14,79 @@ PRAGUE_TZ = ZoneInfo("Europe/Prague")
 
 app = Flask(__name__, static_folder=None)
 
+DEFAULT_SHOPS = [
+    {
+        "code": "iveronika_cz",
+        "name": "iVeronika.cz",
+        "domain": "iveronika.cz",
+        "currency": "CZK",
+        "country": "CZ",
+        "order_prefixes": ["170"],
+        "source_system": "shoptet",
+    },
+    {
+        "code": "iveronika_sk",
+        "name": "iVeronika.sk",
+        "domain": "iveronika.sk",
+        "currency": "EUR",
+        "country": "SK",
+        "order_prefixes": ["2018"],
+        "source_system": "shoptet",
+    },
+    {
+        "code": "galantra_cz",
+        "name": "Galantra.cz",
+        "domain": "galantra.cz",
+        "currency": "CZK",
+        "country": "CZ",
+        "order_prefixes": ["4200"],
+        "source_system": "shoptet",
+    },
+    {
+        "code": "fidule_cz",
+        "name": "Fidule.cz",
+        "domain": "fidule.cz",
+        "currency": "CZK",
+        "country": "CZ",
+        "order_prefixes": [],
+        "source_system": "shoptet",
+    },
+    {
+        "code": "mixed",
+        "name": "Vice e-shopu",
+        "domain": "",
+        "currency": "",
+        "country": "",
+        "order_prefixes": [],
+        "source_system": "mixed",
+    },
+    {
+        "code": "unknown",
+        "name": "Neurceny e-shop",
+        "domain": "",
+        "currency": "",
+        "country": "",
+        "order_prefixes": [],
+        "source_system": "unknown",
+    },
+]
+
+DEFAULT_STOCK_SOURCES = [
+    ("own_stock", "Nas sklad", "warehouse"),
+    ("galantra_stock", "Galantra sklad", "warehouse"),
+    ("milpex", "Milpex", "supplier"),
+    ("hotex", "Hotex", "supplier"),
+    ("manual", "Rucni kontrola", "manual"),
+    ("unknown", "Neurceny zdroj", "unknown"),
+]
+
+SHOP_BY_CODE = {shop["code"]: shop for shop in DEFAULT_SHOPS}
+PREFIX_TO_SHOP = {
+    prefix: shop["code"]
+    for shop in DEFAULT_SHOPS
+    for prefix in shop["order_prefixes"]
+}
+
 
 def database_url():
     return os.environ.get("DATABASE_URL", "")
@@ -31,9 +104,42 @@ def ensure_schema():
         with conn.cursor() as cur:
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS shops (
+                    code TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    domain TEXT,
+                    currency TEXT,
+                    country TEXT,
+                    order_prefixes JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    source_system TEXT NOT NULL DEFAULT 'shoptet',
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS stock_sources (
+                    code TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    source_type TEXT NOT NULL,
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    settings JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            seed_core_config(cur)
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS datasets (
                     id BIGSERIAL PRIMARY KEY,
                     dataset_kind TEXT NOT NULL DEFAULT 'sorting',
+                    shop_code TEXT,
+                    shop_name TEXT,
+                    source_system TEXT,
+                    external_batch_id TEXT,
                     dataset_date DATE NOT NULL,
                     dataset_time TIME NOT NULL,
                     uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -59,11 +165,16 @@ def ensure_schema():
                 ADD COLUMN IF NOT EXISTS dataset_kind TEXT NOT NULL DEFAULT 'sorting'
                 """
             )
+            cur.execute("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS shop_code TEXT")
+            cur.execute("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS shop_name TEXT")
+            cur.execute("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS source_system TEXT")
+            cur.execute("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS external_batch_id TEXT")
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS dataset_rows (
                     id BIGSERIAL PRIMARY KEY,
                     dataset_id BIGINT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+                    shop_code TEXT,
                     row_number INTEGER,
                     product_code TEXT,
                     variant_code TEXT,
@@ -82,11 +193,13 @@ def ensure_schema():
                 )
                 """
             )
+            cur.execute("ALTER TABLE dataset_rows ADD COLUMN IF NOT EXISTS shop_code TEXT")
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS completion_rows (
                     id BIGSERIAL PRIMARY KEY,
                     dataset_id BIGINT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+                    shop_code TEXT,
                     row_number INTEGER,
                     first_name TEXT,
                     last_name TEXT,
@@ -124,12 +237,89 @@ def ensure_schema():
                 )
                 """
             )
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS shop_code TEXT")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS audit_events (
+                    id BIGSERIAL PRIMARY KEY,
+                    event_type TEXT NOT NULL,
+                    dataset_id BIGINT REFERENCES datasets(id) ON DELETE SET NULL,
+                    shop_code TEXT,
+                    order_number TEXT,
+                    row_ref TEXT,
+                    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    actor TEXT
+                )
+                """
+            )
             cur.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_datasets_uploaded_at
                 ON datasets (uploaded_at DESC)
                 """
             )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_datasets_kind_date_shop
+                ON datasets (dataset_kind, dataset_date DESC, shop_code)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_dataset_rows_shop
+                ON dataset_rows (shop_code)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_completion_rows_shop
+                ON completion_rows (shop_code)
+                """
+            )
+
+
+def seed_core_config(cur):
+    for shop in DEFAULT_SHOPS:
+        cur.execute(
+            """
+            INSERT INTO shops (
+                code, name, domain, currency, country, order_prefixes,
+                source_system, active, settings
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, TRUE, '{}'::jsonb)
+            ON CONFLICT (code) DO UPDATE SET
+                name = EXCLUDED.name,
+                domain = EXCLUDED.domain,
+                currency = EXCLUDED.currency,
+                country = EXCLUDED.country,
+                order_prefixes = EXCLUDED.order_prefixes,
+                source_system = EXCLUDED.source_system,
+                active = TRUE
+            """,
+            (
+                shop["code"],
+                shop["name"],
+                shop["domain"],
+                shop["currency"],
+                shop["country"],
+                Json(shop["order_prefixes"]),
+                shop["source_system"],
+            ),
+        )
+
+    for code, name, source_type in DEFAULT_STOCK_SOURCES:
+        cur.execute(
+            """
+            INSERT INTO stock_sources (code, name, source_type, active, settings)
+            VALUES (%s, %s, %s, TRUE, '{}'::jsonb)
+            ON CONFLICT (code) DO UPDATE SET
+                name = EXCLUDED.name,
+                source_type = EXCLUDED.source_type,
+                active = TRUE
+            """,
+            (code, name, source_type),
+        )
             cur.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_dataset_rows_dataset_id
@@ -188,6 +378,55 @@ def int_from_text(value):
         return 0
 
 
+def normalize_shop_code(value):
+    return clean_text(value).strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def shop_name_from_code(shop_code):
+    return SHOP_BY_CODE.get(shop_code, {}).get("name", shop_code or "")
+
+
+def infer_shop_code_from_order(order_number):
+    text = clean_text(order_number).strip()
+    if not text:
+        return ""
+
+    for prefix, shop_code in PREFIX_TO_SHOP.items():
+        if text.startswith(prefix):
+            return shop_code
+
+    return ""
+
+
+def infer_row_shop_code(item, fallback=""):
+    explicit = normalize_shop_code(item.get("shopCode") or item.get("shop_code") or item.get("shop"))
+    if explicit:
+        return explicit
+
+    inferred = infer_shop_code_from_order(item.get("orderNumber"))
+    return inferred or fallback
+
+
+def infer_dataset_shop_code(payload, rows):
+    explicit = normalize_shop_code(payload.get("shopCode") or payload.get("shop_code") or payload.get("shop"))
+    if explicit:
+        return explicit
+
+    found = set()
+    for item in rows:
+        if not isinstance(item, dict):
+            continue
+        shop_code = infer_row_shop_code(item)
+        if shop_code:
+            found.add(shop_code)
+
+    if len(found) == 1:
+        return next(iter(found))
+    if len(found) > 1:
+        return "mixed"
+    return "unknown"
+
+
 def payload_date_time(payload):
     now = local_now()
     dataset_date = clean_text(payload.get("datasetDate")) or now.strftime("%Y-%m-%d")
@@ -200,6 +439,10 @@ def dataset_summary(row):
     return {
         "id": row["id"],
         "datasetKind": row["dataset_kind"],
+        "shopCode": row.get("shop_code"),
+        "shopName": row.get("shop_name"),
+        "sourceSystem": row.get("source_system"),
+        "externalBatchId": row.get("external_batch_id"),
         "datasetDate": row["dataset_date"].isoformat(),
         "datasetTime": str(row["dataset_time"]),
         "uploadedAt": row["uploaded_at"].isoformat(),
@@ -218,6 +461,7 @@ def dataset_summary(row):
 def row_to_api(row):
     return {
         "id": row["id"],
+        "shopCode": row.get("shop_code"),
         "rowNumber": row["row_number"],
         "productCode": row["product_code"],
         "variantCode": row["variant_code"],
@@ -239,6 +483,7 @@ def row_to_api(row):
 def completion_row_to_api(row):
     return {
         "id": row["id"],
+        "shopCode": row.get("shop_code"),
         "rowNumber": row["row_number"],
         "firstName": row["first_name"],
         "lastName": row["last_name"],
@@ -299,6 +544,128 @@ def health():
     return jsonify({"ok": True, "database": db_ok})
 
 
+@app.route("/api/shops")
+def list_shops():
+    auth_error = require_download_token_if_configured()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT code, name, domain, currency, country, order_prefixes,
+                       source_system, active, settings
+                FROM shops
+                ORDER BY
+                    CASE code
+                        WHEN 'mixed' THEN 998
+                        WHEN 'unknown' THEN 999
+                        ELSE 1
+                    END,
+                    name
+                """
+            )
+            shops = [
+                {
+                    "code": row["code"],
+                    "name": row["name"],
+                    "domain": row["domain"],
+                    "currency": row["currency"],
+                    "country": row["country"],
+                    "orderPrefixes": row["order_prefixes"],
+                    "sourceSystem": row["source_system"],
+                    "active": row["active"],
+                    "settings": row["settings"],
+                }
+                for row in cur.fetchall()
+            ]
+    return jsonify({"shops": shops})
+
+
+@app.route("/api/stock-sources")
+def list_stock_sources():
+    auth_error = require_download_token_if_configured()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT code, name, source_type, active, settings
+                FROM stock_sources
+                ORDER BY source_type, name
+                """
+            )
+            sources = [
+                {
+                    "code": row["code"],
+                    "name": row["name"],
+                    "sourceType": row["source_type"],
+                    "active": row["active"],
+                    "settings": row["settings"],
+                }
+                for row in cur.fetchall()
+            ]
+    return jsonify({"stockSources": sources})
+
+
+@app.route("/api/expedition/overview")
+def expedition_overview():
+    auth_error = require_download_token_if_configured()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    include_deleted = request.args.get("includeDeleted") == "1"
+    filters = []
+    params = []
+    if not include_deleted:
+        filters.append("status = 'active'")
+    if request.args.get("date"):
+        filters.append("dataset_date = %s")
+        params.append(request.args.get("date"))
+    where = f"WHERE {' AND '.join(filters)}" if filters else ""
+
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    dataset_date,
+                    dataset_time,
+                    dataset_kind,
+                    COALESCE(shop_code, 'unknown') AS shop_code,
+                    COALESCE(shop_name, '') AS shop_name,
+                    COUNT(*) AS batches,
+                    SUM(rows_count) AS rows_count,
+                    MAX(uploaded_at) AS latest_upload
+                FROM datasets
+                {where}
+                GROUP BY dataset_date, dataset_time, dataset_kind, shop_code, shop_name
+                ORDER BY dataset_date DESC, dataset_time DESC, dataset_kind, shop_code
+                """,
+                params,
+            )
+            overview = [
+                {
+                    "datasetDate": row["dataset_date"].isoformat(),
+                    "datasetTime": str(row["dataset_time"]),
+                    "datasetKind": row["dataset_kind"],
+                    "shopCode": row["shop_code"],
+                    "shopName": row["shop_name"] or shop_name_from_code(row["shop_code"]),
+                    "batches": row["batches"],
+                    "rowsCount": row["rows_count"],
+                    "latestUpload": row["latest_upload"].isoformat() if row["latest_upload"] else None,
+                }
+                for row in cur.fetchall()
+            ]
+    return jsonify({"overview": overview})
+
+
 @app.route("/api/datasets/upload", methods=["POST"])
 def upload_dataset():
     auth_error = require_upload_token()
@@ -319,21 +686,30 @@ def upload_dataset():
     dataset_kind = clean_text(payload.get("datasetKind")) or "sorting"
     if dataset_kind not in ("sorting", "completion"):
         return jsonify({"error": "datasetKind must be sorting or completion"}), 400
+    shop_code = infer_dataset_shop_code(payload, rows)
+    shop_name = clean_text(payload.get("shopName")) or shop_name_from_code(shop_code)
+    source_system = clean_text(payload.get("sourceSystem")) or "excel"
+    external_batch_id = clean_text(payload.get("externalBatchId"))
 
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
                 INSERT INTO datasets (
-                    dataset_kind, dataset_date, dataset_time, uploaded_at_local, label, source,
+                    dataset_kind, shop_code, shop_name, source_system, external_batch_id,
+                    dataset_date, dataset_time, uploaded_at_local, label, source,
                     workbook_name, worksheet_name, source_filename, rows_count,
                     headers, raw_payload
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING *
                 """,
                 (
                     dataset_kind,
+                    shop_code,
+                    shop_name,
+                    source_system,
+                    external_batch_id,
                     dataset_date,
                     dataset_time,
                     clean_text(payload.get("uploadedAtLocal")),
@@ -352,21 +728,23 @@ def upload_dataset():
             for item in rows:
                 if not isinstance(item, dict):
                     continue
+                row_shop_code = infer_row_shop_code(item, shop_code if shop_code != "mixed" else "")
                 if dataset_kind == "completion":
-                    insert_completion_row(cur, dataset["id"], item)
+                    insert_completion_row(cur, dataset["id"], item, row_shop_code)
                     continue
                 quantity = clean_text(item.get("quantity"))
                 cur.execute(
                     """
                     INSERT INTO dataset_rows (
-                        dataset_id, row_number, product_code, variant_code, variant,
+                        dataset_id, shop_code, row_number, product_code, variant_code, variant,
                         quantity_text, remaining, order_number, weight, sequence, info,
                         initial_quantity_text, paircode, history, cells, raw_row
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     """,
                     (
                         dataset["id"],
+                        row_shop_code,
                         item.get("rowNumber"),
                         clean_text(item.get("productCode")),
                         clean_text(item.get("variantCode")),
@@ -388,11 +766,11 @@ def upload_dataset():
     return jsonify({"ok": True, "dataset": dataset_summary(dataset), "rows": len(rows)})
 
 
-def insert_completion_row(cur, dataset_id, item):
+def insert_completion_row(cur, dataset_id, item, shop_code=""):
     cur.execute(
         """
         INSERT INTO completion_rows (
-            dataset_id, row_number, first_name, last_name, note, street_with_number,
+            dataset_id, shop_code, row_number, first_name, last_name, note, street_with_number,
             city, zip_code, phone, email, weight, cod_amount, payment_method,
             order_number, shipping_method, amount, quantity_text, paid_status,
             expedition_number, expedition_order_code, packeta_id, completion_status,
@@ -401,12 +779,13 @@ def insert_completion_row(cur, dataset_id, item):
             canceled_order_backup, label_printed, cells, raw_row
         )
         VALUES (
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         """,
         (
             dataset_id,
+            shop_code,
             item.get("rowNumber"),
             clean_text(item.get("firstName")),
             clean_text(item.get("lastName")),
@@ -454,11 +833,11 @@ def list_datasets():
     ensure_schema()
     include_deleted = request.args.get("includeDeleted") == "1"
     dataset_kind = request.args.get("kind")
-    datasets = fetch_datasets(include_deleted, dataset_kind)
+    datasets = fetch_datasets(include_deleted, dataset_kind, request.args.get("shop"), request.args.get("date"))
     return jsonify({"datasets": datasets})
 
 
-def fetch_datasets(include_deleted=False, dataset_kind=None):
+def fetch_datasets(include_deleted=False, dataset_kind=None, shop_code=None, dataset_date=None):
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             filters = []
@@ -468,6 +847,12 @@ def fetch_datasets(include_deleted=False, dataset_kind=None):
             if dataset_kind:
                 filters.append("dataset_kind = %s")
                 params.append(dataset_kind)
+            if shop_code:
+                filters.append("shop_code = %s")
+                params.append(normalize_shop_code(shop_code))
+            if dataset_date:
+                filters.append("dataset_date = %s")
+                params.append(dataset_date)
 
             where = f"WHERE {' AND '.join(filters)}" if filters else ""
             cur.execute(
@@ -485,7 +870,7 @@ def list_completion_datasets():
 
     ensure_schema()
     include_deleted = request.args.get("includeDeleted") == "1"
-    return jsonify({"datasets": fetch_datasets(include_deleted, "completion")})
+    return jsonify({"datasets": fetch_datasets(include_deleted, "completion", request.args.get("shop"), request.args.get("date"))})
 
 
 @app.route("/api/completion/latest")
@@ -524,7 +909,7 @@ def list_sorting_datasets():
 
     ensure_schema()
     include_deleted = request.args.get("includeDeleted") == "1"
-    return jsonify({"datasets": fetch_datasets(include_deleted, "sorting")})
+    return jsonify({"datasets": fetch_datasets(include_deleted, "sorting", request.args.get("shop"), request.args.get("date"))})
 
 
 @app.route("/api/datasets/latest")
@@ -642,6 +1027,8 @@ def datasets_csv():
     ensure_schema()
     include_deleted = request.args.get("includeDeleted") == "1"
     dataset_kind = request.args.get("kind")
+    shop_code = request.args.get("shop")
+    dataset_date = request.args.get("date")
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             filters = []
@@ -651,18 +1038,41 @@ def datasets_csv():
             if dataset_kind:
                 filters.append("dataset_kind = %s")
                 params.append(dataset_kind)
+            if shop_code:
+                filters.append("shop_code = %s")
+                params.append(normalize_shop_code(shop_code))
+            if dataset_date:
+                filters.append("dataset_date = %s")
+                params.append(dataset_date)
             where = f"WHERE {' AND '.join(filters)}" if filters else ""
             cur.execute(f"SELECT * FROM datasets {where} ORDER BY uploaded_at DESC, id DESC", params)
             rows = cur.fetchall()
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["id", "kind", "label", "dataset_date", "dataset_time", "uploaded_at", "rows_count", "status"])
+    writer.writerow(
+        [
+            "id",
+            "kind",
+            "shop_code",
+            "shop_name",
+            "source_system",
+            "label",
+            "dataset_date",
+            "dataset_time",
+            "uploaded_at",
+            "rows_count",
+            "status",
+        ]
+    )
     for row in rows:
         writer.writerow(
             [
                 row["id"],
                 row["dataset_kind"],
+                row["shop_code"],
+                row["shop_name"],
+                row["source_system"],
                 row["label"],
                 row["dataset_date"].isoformat(),
                 str(row["dataset_time"]),
@@ -710,6 +1120,7 @@ def dataset_csv():
     writer.writerow(
         [
             "rowNumber",
+            "shopCode",
             "productCode",
             "variantCode",
             "variant",
@@ -728,6 +1139,7 @@ def dataset_csv():
         writer.writerow(
             [
                 row["row_number"],
+                row["shop_code"],
                 row["product_code"],
                 row["variant_code"],
                 row["variant"],
@@ -789,6 +1201,7 @@ def completion_dataset_csv_response(cur, dataset):
     writer.writerow(
         [
             "rowNumber",
+            "shopCode",
             "firstName",
             "lastName",
             "note",
@@ -826,6 +1239,7 @@ def completion_dataset_csv_response(cur, dataset):
         writer.writerow(
             [
                 row["row_number"],
+                row["shop_code"],
                 row["first_name"],
                 row["last_name"],
                 row["note"],
