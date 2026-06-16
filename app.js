@@ -101,13 +101,21 @@ function normalizeItem(item) {
     sequence: item.sequence || "",
     info: item.info || "",
     paircode: item.paircode || "",
-    brand: item.brand || "",
+    brand: item.brand || brandFromInfo(item.info),
     unitPrice: item.unitPrice || "",
     lineTotal: item.lineTotal || "",
     productName: item.productName || cleanInfo(item.info),
     externalId: item.externalId || "",
     image: item.image || "",
   };
+}
+
+function brandFromInfo(info) {
+  const parts = String(info || "")
+    .split("//")
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts.length > 1 ? parts[0] : "";
 }
 
 function cleanInfo(info) {
