@@ -3,179 +3,112 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Expediční rozhraní</title>
+    <title>Rozřazování zboží</title>
     <link rel="stylesheet" href="styles.css" />
+    <script defer src="seed-data.js"></script>
     <script defer src="app.js"></script>
   </head>
   <body>
     <main class="shell">
       <header class="topbar">
         <div>
-          <h1>Expediční rozhraní</h1>
-          <p>Místo Excelu: příjem zboží, rozřazování a expedice v jednom místě.</p>
+          <p class="eyebrow">Rozřazování zboží</p>
+          <h1>Odpis dorazivších položek</h1>
         </div>
-        <div class="data-actions">
-          <button id="export-data" class="ghost">Export dat</button>
-          <label class="ghost file-trigger" for="import-data">Import dat</label>
-          <input id="import-data" type="file" accept="application/json" />
+        <div class="metrics" aria-label="Souhrn">
+          <div>
+            <span id="metric-open">0</span>
+            <small>Zbývá ks</small>
+          </div>
+          <div>
+            <span id="metric-items">0</span>
+            <small>Položek</small>
+          </div>
+          <div>
+            <span id="metric-orders">0</span>
+            <small>Objednávek</small>
+          </div>
+          <div>
+            <span id="metric-done">0</span>
+            <small>Odepsáno ks</small>
+          </div>
         </div>
       </header>
 
-      <nav class="tabs">
-        <button data-tab="arrival" class="active">Příjem</button>
-        <button data-tab="sorting">Rozřazování</button>
-        <button data-tab="shipping">Expedice</button>
-      </nav>
-
-      <section class="panel" id="arrival" data-panel>
-        <h2>Příjem dorazivšího zboží</h2>
-        <form id="arrival-form" class="card">
-          <div class="grid">
-            <label>
-              Dodavatel
-              <input name="supplier" required />
-            </label>
-            <label>
-              Dodací list
-              <input name="document" required />
-            </label>
-            <label>
-              SKU
-              <input name="sku" required />
-            </label>
-            <label>
-              Název zboží
-              <input name="name" required />
-            </label>
-            <label>
-              Množství
-              <input name="quantity" type="number" min="1" value="1" required />
-            </label>
-            <label>
-              Očekávané místo
-              <select name="expectedLocation" required>
-                <option value="A">Zóna A</option>
-                <option value="B">Zóna B</option>
-                <option value="C">Zóna C</option>
-                <option value="D">Zóna D</option>
-                <option value="E">Zóna E</option>
-              </select>
-            </label>
-            <label class="full">
-              Poznámka
-              <input name="note" />
-            </label>
-          </div>
-          <button type="submit" class="primary">Zapsat příjem</button>
-        </form>
-
-        <article class="card">
-          <h3>Poslední doručení</h3>
-          <div id="arrival-stats" class="stats"></div>
-          <table>
-            <thead>
-              <tr>
-                <th>Čas</th>
-                <th>Dodavatel</th>
-                <th>Dodací list</th>
-                <th>SKU</th>
-                <th>Zboží</th>
-                <th>Množství</th>
-                <th>Exp. místo</th>
-                <th>Stav</th>
-              </tr>
-            </thead>
-            <tbody id="arrival-body"></tbody>
-          </table>
-        </article>
+      <section class="control-strip" aria-label="Ovládání rozřazování">
+        <label class="field scan-field">
+          <span>EAN / skener</span>
+          <input id="ean-input" inputmode="numeric" autocomplete="off" autofocus />
+        </label>
+        <label class="field search-field">
+          <span>Ruční hledání</span>
+          <input id="manual-search" autocomplete="off" />
+        </label>
+        <label class="toggle">
+          <input id="show-zero" type="checkbox" />
+          <span>Nulové</span>
+        </label>
+        <label class="toggle">
+          <input id="show-images" type="checkbox" checked />
+          <span>Obrázky</span>
+        </label>
+        <button id="export-data" type="button" class="secondary">Export</button>
+        <label class="secondary file-trigger" for="import-data">Import</label>
+        <input id="import-data" type="file" accept="application/json" />
+        <button id="reset-seed" type="button" class="danger">Načíst Excel seed</button>
       </section>
 
-      <section class="panel hidden" id="sorting" data-panel>
-        <h2>Rozřazování dorazivšího zboží</h2>
-        <p>
-          Vyber položku, nastav aktuální místo uložení a přesuň ji do stavové fáze
-          <strong>Rozřazeno</strong>.
-        </p>
-        <div class="toolbar">
-          <input id="sorting-filter" placeholder="Filtr (dodavatel, sku, poznámka...)" />
+      <section id="scan-message" class="message neutral" aria-live="polite"></section>
+
+      <section id="candidates-panel" class="candidate-panel hidden">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Vyžaduje výběr</p>
+            <h2>Kandidáti pro poslední sken</h2>
+          </div>
+          <button id="clear-candidates" type="button" class="secondary">Zavřít</button>
         </div>
-        <article class="card">
-          <table>
-            <thead>
-              <tr>
-                <th>Čas</th>
-                <th>Dodavatel</th>
-                <th>SKU</th>
-                <th>Zboží</th>
-                <th>Množství</th>
-                <th>Očekávané místo</th>
-                <th>Aktuální místo</th>
-                <th>Nové místo</th>
-                <th>Akce</th>
-              </tr>
-            </thead>
-            <tbody id="sorting-body"></tbody>
-          </table>
-        </article>
+        <div id="candidate-list" class="candidate-list"></div>
       </section>
 
-      <section class="panel hidden" id="shipping" data-panel>
-        <h2>Expediční příprava</h2>
-        <form id="shipment-form" class="card">
-          <h3>Vytvořit expedici</h3>
-          <div class="grid">
-            <label>
-              Číslo objednávky
-              <input name="orderNumber" required />
-            </label>
-            <label>
-              Dopravce
-              <input name="carrier" required />
-            </label>
-            <label>
-              Poznámka
-              <input name="shipmentNote" />
-            </label>
-            <label>
-              Termín odeslání
-              <input name="shipAt" type="date" required />
-            </label>
+      <section class="workspace">
+        <section class="table-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Pracovní seznam</p>
+              <h2>Zboží k rozřazení</h2>
+            </div>
+            <div id="row-count" class="row-count">0 řádků</div>
           </div>
-          <p class="hint">Zaškrtni položky rozřazené (ještě neodeslané), které chceš zahrnout do expedice.</p>
-          <article class="card">
+          <div class="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th></th>
-                  <th>SKU</th>
-                  <th>Zboží</th>
-                  <th>Množství</th>
-                  <th>Aktuální místo</th>
-                  <th>Poznámka</th>
+                  <th>Obj.</th>
+                  <th>Poř.</th>
+                  <th>Kód</th>
+                  <th>Varianta</th>
+                  <th>Zbývá</th>
+                  <th>Značka</th>
+                  <th>Název</th>
+                  <th>Obr.</th>
+                  <th>Akce</th>
                 </tr>
               </thead>
-              <tbody id="shipment-candidates"></tbody>
+              <tbody id="sorting-body"></tbody>
             </table>
-          </article>
-          <button type="submit" class="primary">Vytvořit expedici</button>
-        </form>
+          </div>
+        </section>
 
-        <article class="card">
-          <h3>Vytvořené expedice</h3>
-          <table>
-            <thead>
-              <tr>
-                <th>Objednávka</th>
-                <th>Dopravce</th>
-                <th>Položek</th>
-                <th>Termín</th>
-                <th>Stav</th>
-                <th>Akce</th>
-              </tr>
-            </thead>
-            <tbody id="shipments-body"></tbody>
-          </table>
-        </article>
+        <aside class="history-panel">
+          <div class="section-head compact">
+            <div>
+              <p class="eyebrow">Historie</p>
+              <h2>Poslední odpisy</h2>
+            </div>
+          </div>
+          <div id="history-list" class="history-list"></div>
+        </aside>
       </section>
     </main>
   </body>

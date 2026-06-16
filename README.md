@@ -1,29 +1,24 @@
-# Expediční rozhraní (MVP)
+# Rozřazování zboží
 
-Toto je lokální jednoduché webové rozhraní, které nahrazuje tabulkový proces pro:
+První MVP rozhraní nahrazuje rozřazovací UserForm z Excelu.
 
-- příjem dorazivšího zboží,
-- rozřazování do zón skladu,
-- vytvoření a odeslání expedic.
+## Spuštění
 
-## Jak spustit
+Otevři `index.html` v prohlížeči.
 
-1. Otevři složku `Expedice Excel`.
-2. Spusť jednoduše:
-   - dvojklikem na `index.html`, nebo
-   - lokálním serverem:  
-     `python -m http.server` a v prohlížeči otevři `http://localhost:8000`.
-3. První spuštění je prázdný, data se ukládají do `localStorage` (prohlížeč).
+Data se ukládají lokálně v prohlížeči. Pro přenos nebo zálohu použij tlačítka `Export` a `Import`.
 
-## Co umí
+## Aktuální funkce
 
-- Přidávání příjmu položek (dodavatel, dodací list, sku, název, množství, očekávané místo).
-- Rozřazení položek do zón A–E.
-- Vytvoření expedice z rozřazených položek.
-- Označení expedice jako odeslaná.
-- Export celého stavu do JSON a opětovný import.
+- Seed dat z dodaných souborů `zboží k rozřazení.xlsx` a `eany.xlsx`.
+- EAN vstup pro skener.
+- Automatický odpis 1 ks u jednoznačné EAN shody.
+- Výběr kandidátů u vícenásobné EAN shody.
+- Ruční hledání podle objednávky, kódu, varianty, značky, názvu nebo obrázku.
+- Odpis `-1`, navrácení `+1` a dvojklik na řádek pro rychlý odpis.
+- Historie posledních odpisů včetně vrácení.
+- Přepínač zobrazení nulových položek a obrázkových názvů.
 
-## Poznámky
+## Poznámka k Excelu
 
-- Toto je MVP pro rychlé nahrazení Excelu.
-- Pro spolupráci více lidí je vhodné doplnit backend a autentifikaci.
+Soubor `seed-data.js` je vygenerovaný z aktuálních ukázkových Excelů. Další krok bude udělat přímý import `.xlsx`, aby nebylo nutné seed generovat ručně.
