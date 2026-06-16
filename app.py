@@ -92,7 +92,7 @@ def ensure_schema():
 def require_upload_token():
     expected = os.environ.get("UPLOAD_TOKEN", "")
     if not expected:
-        return jsonify({"error": "UPLOAD_TOKEN is not configured"}), 500
+        return None
 
     provided = request.headers.get("X-Upload-Token") or request.args.get("token")
     if provided != expected:

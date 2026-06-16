@@ -30,8 +30,10 @@ Backend je ve `app.py` a Railway ho spouští přes `Procfile`.
 Railway proměnné:
 
 - `DATABASE_URL` - dodá Railway Postgres plugin
-- `UPLOAD_TOKEN` - tajný token pro upload a mazání dávek
+- `UPLOAD_TOKEN` - volitelný token pro upload a mazání dávek
 - `DOWNLOAD_TOKEN` - volitelný token pro stahování dat
+
+Pokud tokeny nejsou nastavené, API je otevřené bez autentizace.
 
 Endpointy:
 
@@ -49,9 +51,9 @@ Endpointy:
 
 VBA modul je v `vba/UploadRoztrideniZbozi.bas`.
 
-V horní části modulu nastav:
+V horní části modulu můžeš nastavit:
 
-- `UPLOAD_TOKEN` na stejnou hodnotu jako Railway proměnná `UPLOAD_TOKEN`
+- `UPLOAD_TOKEN`, pokud bude Railway proměnná `UPLOAD_TOKEN` aktivní
 - `SHEET_NAME`, pokud se list nebude jmenovat `EXCEL`
 
 Makro pro tlačítko:

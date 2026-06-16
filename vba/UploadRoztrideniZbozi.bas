@@ -1,9 +1,8 @@
 Attribute VB_Name = "UploadRoztrideniZbozi"
 Option Explicit
 
-' Upload token musi odpovidat Railway promenne UPLOAD_TOKEN.
 Private Const UPLOAD_URL As String = "https://expedice-production.up.railway.app/api/datasets/upload"
-Private Const UPLOAD_TOKEN As String = "CHANGE_ME"
+Private Const UPLOAD_TOKEN As String = ""
 Private Const SHEET_NAME As String = "EXCEL"
 
 Public Sub UploadRoztrideniAktualniTabulky()
@@ -146,17 +145,13 @@ Private Function PostJson(ByVal url As String, ByVal token As String, ByVal payl
         Err.Raise vbObjectError + 101, , "Nejdriv nastav UPLOAD_URL na Railway endpoint."
     End If
 
-    If token = "CHANGE_ME" Or Len(token) = 0 Then
-        Err.Raise vbObjectError + 102, , "Nejdriv nastav UPLOAD_TOKEN."
-    End If
-
     Dim http As Object
     Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
 
     http.Open "POST", url, False
     http.setTimeouts 10000, 10000, 30000, 30000
     http.setRequestHeader "Content-Type", "application/json; charset=utf-8"
-    http.setRequestHeader "X-Upload-Token", token
+    If Len(token) > 0 Then http.setRequestHeader "X-Upload-Token", token
     http.send Utf8Bytes(payload)
 
     If http.Status < 200 Or http.Status >= 300 Then
