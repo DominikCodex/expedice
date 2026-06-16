@@ -56,6 +56,14 @@ Endpointy:
 
 VBA modul je v `vba/UploadRoztrideniZbozi.bas`. Je pripraveny bez `Option Explicit` a bez `Attribute VB_Name`, aby sel snadneji vlozit do existujiciho makro sesitu.
 
+Pro rucni testovani v jednom existujicim VBA modulu je nejjednodussi pouzit jeden soubor:
+
+```text
+vba/ExpediceUploadJedenSkript.bas
+```
+
+Obsahuje upload roztřídění i kompletace v jednom paste-in skriptu.
+
 V horní části modulu můžeš nastavit:
 
 - `UPLOAD_TOKEN`, pokud bude Railway proměnná `UPLOAD_TOKEN` aktivní
