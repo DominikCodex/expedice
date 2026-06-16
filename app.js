@@ -303,15 +303,15 @@ function renderTable() {
       <td>${renderEans(item)}</td>
       <td>${escapeHtml(item.variant)}</td>
       <td><span class="qty ${item.remaining <= 0 ? "zero" : ""}">${item.remaining}</span></td>
-      <td>${escapeHtml(item.brand)}</td>
-      <td>${escapeHtml(item.productName || item.info)}</td>
-      <td>${imageCell}</td>
       <td>
         <div class="row-actions">
           <button type="button" data-action="deduct" data-id="${escapeHtml(item.id)}" ${item.remaining <= 0 ? "disabled" : ""}>-1</button>
           <button type="button" class="undo" data-action="restore" data-id="${escapeHtml(item.id)}">+1</button>
         </div>
       </td>
+      <td>${escapeHtml(item.brand)}</td>
+      <td>${escapeHtml(item.productName || item.info)}</td>
+      <td>${imageCell}</td>
     `;
     els.sortingBody.appendChild(tr);
   });
