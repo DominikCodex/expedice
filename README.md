@@ -22,3 +22,21 @@ Data se ukládají lokálně v prohlížeči. Pro přenos nebo zálohu použij t
 ## Poznámka k Excelu
 
 Soubor `seed-data.js` je vygenerovaný z aktuálních ukázkových Excelů. Další krok bude udělat přímý import `.xlsx`, aby nebylo nutné seed generovat ručně.
+
+## VBA upload do Railway API
+
+VBA modul je v `vba/UploadRoztrideniZbozi.bas`.
+
+Před použitím je potřeba v horní části modulu nastavit:
+
+- `UPLOAD_URL` na Railway endpoint `/api/datasets/upload`
+- `UPLOAD_TOKEN` na tajný upload token
+- `SHEET_NAME`, pokud se list nebude jmenovat `EXCEL`
+
+Makro pro tlačítko:
+
+```vb
+UploadRoztrideniAktualniTabulky
+```
+
+Upload vytvoří novou datovou dávku s dnešním datem a přesným časem.
