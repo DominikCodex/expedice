@@ -23,14 +23,35 @@ Data se ukládají lokálně v prohlížeči. Pro přenos nebo zálohu použij t
 
 Soubor `seed-data.js` je vygenerovaný z aktuálních ukázkových Excelů. Další krok bude udělat přímý import `.xlsx`, aby nebylo nutné seed generovat ručně.
 
+## Railway API
+
+Backend je ve `app.py` a Railway ho spouští přes `Procfile`.
+
+Railway proměnné:
+
+- `DATABASE_URL` - dodá Railway Postgres plugin
+- `UPLOAD_TOKEN` - tajný token pro upload a mazání dávek
+- `DOWNLOAD_TOKEN` - volitelný token pro stahování dat
+
+Endpointy:
+
+- `POST /api/datasets/upload` - upload nové dávky z Excelu
+- `GET /api/datasets` - seznam aktivních dávek
+- `GET /api/datasets?includeDeleted=1` - seznam včetně smazaných
+- `GET /api/datasets/latest` - poslední aktivní dávka
+- `GET /api/datasets/:id` - konkrétní dávka
+- `DELETE /api/datasets/:id` - měkké smazání dávky
+- `POST /api/datasets/:id/restore` - obnovení dávky
+- `GET /api/excel/datasets.csv` - seznam dávek pro Excel
+- `GET /api/excel/dataset.csv?id=123` - konkrétní dávka pro Excel
+
 ## VBA upload do Railway API
 
 VBA modul je v `vba/UploadRoztrideniZbozi.bas`.
 
-Před použitím je potřeba v horní části modulu nastavit:
+V horní části modulu nastav:
 
-- `UPLOAD_URL` na Railway endpoint `/api/datasets/upload`
-- `UPLOAD_TOKEN` na tajný upload token
+- `UPLOAD_TOKEN` na stejnou hodnotu jako Railway proměnná `UPLOAD_TOKEN`
 - `SHEET_NAME`, pokud se list nebude jmenovat `EXCEL`
 
 Makro pro tlačítko:
@@ -39,4 +60,10 @@ Makro pro tlačítko:
 UploadRoztrideniAktualniTabulky
 ```
 
-Upload vytvoří novou datovou dávku s dnešním datem a přesným časem.
+Upload jde na:
+
+```text
+https://expedice-production.up.railway.app/api/datasets/upload
+```
+
+Upload vytvoří novou datovou dávku s dnešním datem a přesným časem, takže jeden den může mít více verzí.

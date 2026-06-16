@@ -1,8 +1,8 @@
 Attribute VB_Name = "UploadRoztrideniZbozi"
 Option Explicit
 
-' Nastav po nasazeni Railway backendu.
-Private Const UPLOAD_URL As String = "https://YOUR-RAILWAY-APP.up.railway.app/api/datasets/upload"
+' Upload token musi odpovidat Railway promenne UPLOAD_TOKEN.
+Private Const UPLOAD_URL As String = "https://expedice-production.up.railway.app/api/datasets/upload"
 Private Const UPLOAD_TOKEN As String = "CHANGE_ME"
 Private Const SHEET_NAME As String = "EXCEL"
 
