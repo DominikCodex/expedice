@@ -288,7 +288,7 @@ function renderTable() {
   els.sortingBody.innerHTML = "";
 
   if (!rows.length) {
-    els.sortingBody.innerHTML = `<tr><td colspan="10" class="empty">Nic nenalezeno.</td></tr>`;
+    els.sortingBody.innerHTML = `<tr><td colspan="11" class="empty">Nic nenalezeno.</td></tr>`;
     return;
   }
 
@@ -312,14 +312,18 @@ function renderTable() {
       <td>${escapeHtml(item.variant)}</td>
       <td><span class="qty ${item.remaining <= 0 ? "zero" : ""}">${item.remaining}</span></td>
       <td>
-        <div class="row-actions">
+        <div class="row-actions deduct-actions">
           <button type="button" data-action="deduct" data-id="${escapeHtml(item.id)}" ${item.remaining <= 0 ? "disabled" : ""}>-1</button>
-          <button type="button" class="undo" data-action="restore" data-id="${escapeHtml(item.id)}">+1</button>
         </div>
       </td>
       <td>${escapeHtml(item.brand)}</td>
       <td>${escapeHtml(item.productName || item.info)}</td>
       <td>${imageCell}</td>
+      <td>
+        <div class="row-actions restore-actions">
+          <button type="button" class="undo" data-action="restore" data-id="${escapeHtml(item.id)}">+1</button>
+        </div>
+      </td>
     `;
     els.sortingBody.appendChild(tr);
   });

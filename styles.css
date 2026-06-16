@@ -491,6 +491,14 @@ tbody tr.done {
   gap: 6px;
 }
 
+.deduct-actions {
+  justify-content: flex-start;
+}
+
+.restore-actions {
+  justify-content: flex-end;
+}
+
 .row-actions button {
   min-width: 40px;
   padding: 6px 10px;
