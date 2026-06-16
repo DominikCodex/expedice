@@ -24,7 +24,7 @@
 body {
   margin: 0;
   min-height: 100vh;
-  overflow: hidden;
+  overflow: auto;
   color: var(--text);
   background:
     linear-gradient(90deg, rgba(31, 122, 91, 0.07) 1px, transparent 1px),
@@ -75,12 +75,9 @@ button:hover,
 
 .shell {
   width: 100vw;
-  height: 100vh;
+  min-height: 100vh;
   margin: 0;
   padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
 }
 
 .topbar {
@@ -375,23 +372,17 @@ input:focus {
 }
 
 .workspace {
-  flex: 1;
-  min-height: 0;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;
   gap: 12px;
 }
 
 .table-panel {
-  min-height: 0;
-  display: flex;
-  flex-direction: column;
+  min-width: 0;
 }
 
 .table-wrap {
-  overflow: auto;
-  flex: 1;
-  min-height: 0;
+  overflow-x: auto;
 }
 
 table {
@@ -529,17 +520,16 @@ tbody tr.done {
 
 .history-panel {
   align-self: start;
-  position: sticky;
-  top: 86px;
-  max-height: 100%;
+  position: static;
+  max-height: none;
   overflow: hidden;
 }
 
 .history-list {
   display: grid;
   gap: 8px;
-  max-height: calc(100vh - 172px);
-  overflow: auto;
+  max-height: none;
+  overflow: visible;
   padding: 12px;
 }
 
@@ -602,13 +592,8 @@ tbody tr.done {
 @media (max-width: 680px) {
   .shell {
     width: 100vw;
-    height: auto;
     min-height: 100vh;
     padding: 8px;
-  }
-
-  body {
-    overflow: auto;
   }
 
   .scan-result {
