@@ -1,0 +1,255 @@
+:root {
+  --bg: linear-gradient(135deg, #f2f5ff 0%, #f8f5ee 45%, #f3f9f6 100%);
+  --panel: rgba(255, 255, 255, 0.78);
+  --line: #d9dde8;
+  --text: #1f2d47;
+  --accent: #0e6fff;
+  --accent-2: #00a79d;
+  --muted: #58627e;
+  --ok: #1a8f5a;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+  color: var(--text);
+  background: var(--bg);
+  min-height: 100vh;
+}
+
+.shell {
+  max-width: 1200px;
+  margin: 24px auto;
+  padding: 0 16px 24px;
+}
+
+.topbar,
+nav.tabs,
+.toolbar,
+article.card {
+  box-shadow: 0 10px 24px rgba(38, 56, 97, 0.08);
+}
+
+.topbar {
+  padding: 20px;
+  border-radius: 14px;
+  background: var(--panel);
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  backdrop-filter: blur(8px);
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 8px;
+}
+
+.topbar p {
+  margin: 0;
+  color: var(--muted);
+}
+
+.data-actions {
+  display: flex;
+  gap: 10px;
+}
+
+button,
+label.file-trigger,
+.ghost,
+.primary {
+  border: 0;
+  padding: 10px 16px;
+  border-radius: 10px;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+button {
+  color: #fff;
+  background: var(--accent);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+}
+
+.primary {
+  background: linear-gradient(120deg, var(--accent), #2a7dff);
+}
+
+.ghost,
+label.file-trigger {
+  color: var(--text);
+  background: #fff;
+  border: 1px solid #cad3e6;
+}
+
+#import-data {
+  display: none;
+}
+
+.tabs {
+  margin: 18px 0;
+  display: flex;
+  gap: 12px;
+}
+
+.tabs button {
+  background: #fff;
+  color: var(--text);
+  border: 1px solid #cad3e6;
+}
+
+.tabs button.active {
+  background: linear-gradient(120deg, var(--accent), #2a7dff);
+  color: white;
+  border-color: transparent;
+}
+
+main .panel {
+  display: block;
+}
+
+main .panel.hidden {
+  display: none;
+}
+
+.card {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 16px;
+  margin-top: 12px;
+}
+
+.grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.grid label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.full {
+  grid-column: 1 / -1;
+}
+
+input,
+select {
+  padding: 10px 12px;
+  border-radius: 10px;
+  border: 1px solid #cad3e6;
+}
+
+.stats {
+  color: var(--muted);
+  margin: 4px 0 12px;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 12px;
+}
+
+th,
+td {
+  border-bottom: 1px solid var(--line);
+  padding: 10px 8px;
+  text-align: left;
+}
+
+.toolbar {
+  margin-top: 8px;
+  margin-bottom: 12px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+#sorting-filter {
+  width: 320px;
+}
+
+.badge {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 4px 8px;
+  background: #edf1ff;
+  color: #0f2e7c;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.badge.sorting {
+  background: #ecf8ff;
+  color: #1a6aa2;
+}
+
+.badge.ready {
+  background: #eaf8f1;
+  color: #16724a;
+}
+
+.badge.shipped {
+  background: #f2ecff;
+  color: #6130aa;
+}
+
+.hint {
+  margin: 12px 0;
+  color: var(--muted);
+}
+
+.item-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+td select,
+td button {
+  min-height: 34px;
+}
+
+td button {
+  padding: 8px 10px;
+}
+
+@media (max-width: 900px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+
+  .topbar {
+    flex-direction: column;
+  }
+
+  .tabs {
+    flex-wrap: wrap;
+  }
+
+  .tabs button {
+    width: calc(50% - 6px);
+  }
+
+  #sorting-filter {
+    width: 100%;
+  }
+
+  .toolbar {
+    justify-content: flex-start;
+  }
+}
