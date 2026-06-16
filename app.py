@@ -33,6 +33,7 @@ def ensure_schema():
                 """
                 CREATE TABLE IF NOT EXISTS datasets (
                     id BIGSERIAL PRIMARY KEY,
+                    dataset_kind TEXT NOT NULL DEFAULT 'sorting',
                     dataset_date DATE NOT NULL,
                     dataset_time TIME NOT NULL,
                     uploaded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -50,6 +51,12 @@ def ensure_schema():
                     deleted_by TEXT,
                     delete_reason TEXT
                 )
+                """
+            )
+            cur.execute(
+                """
+                ALTER TABLE datasets
+                ADD COLUMN IF NOT EXISTS dataset_kind TEXT NOT NULL DEFAULT 'sorting'
                 """
             )
             cur.execute(
@@ -77,6 +84,48 @@ def ensure_schema():
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS completion_rows (
+                    id BIGSERIAL PRIMARY KEY,
+                    dataset_id BIGINT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+                    row_number INTEGER,
+                    first_name TEXT,
+                    last_name TEXT,
+                    note TEXT,
+                    street_with_number TEXT,
+                    city TEXT,
+                    zip_code TEXT,
+                    phone TEXT,
+                    email TEXT,
+                    weight TEXT,
+                    cod_amount TEXT,
+                    payment_method TEXT,
+                    order_number TEXT,
+                    shipping_method TEXT,
+                    amount TEXT,
+                    quantity_text TEXT,
+                    paid_status TEXT,
+                    expedition_number TEXT,
+                    expedition_order_code TEXT,
+                    packeta_id TEXT,
+                    completion_status TEXT,
+                    order_id TEXT,
+                    street TEXT,
+                    house_number TEXT,
+                    dpd_flag TEXT,
+                    packeta_status TEXT,
+                    packeta_shipment_id TEXT,
+                    order_date TEXT,
+                    twisto_paid TEXT,
+                    dpd_order_and_pieces TEXT,
+                    canceled_order_backup TEXT,
+                    label_printed TEXT,
+                    cells JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    raw_row JSONB NOT NULL DEFAULT '{}'::jsonb
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_datasets_uploaded_at
                 ON datasets (uploaded_at DESC)
                 """
@@ -85,6 +134,12 @@ def ensure_schema():
                 """
                 CREATE INDEX IF NOT EXISTS idx_dataset_rows_dataset_id
                 ON dataset_rows (dataset_id)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_completion_rows_dataset_id
+                ON completion_rows (dataset_id)
                 """
             )
 
@@ -144,6 +199,7 @@ def payload_date_time(payload):
 def dataset_summary(row):
     return {
         "id": row["id"],
+        "datasetKind": row["dataset_kind"],
         "datasetDate": row["dataset_date"].isoformat(),
         "datasetTime": str(row["dataset_time"]),
         "uploadedAt": row["uploaded_at"].isoformat(),
@@ -175,6 +231,46 @@ def row_to_api(row):
         "initialQuantity": row["initial_quantity_text"],
         "paircode": row["paircode"],
         "history": row["history"],
+        "cells": row["cells"],
+        "raw": row["raw_row"],
+    }
+
+
+def completion_row_to_api(row):
+    return {
+        "id": row["id"],
+        "rowNumber": row["row_number"],
+        "firstName": row["first_name"],
+        "lastName": row["last_name"],
+        "note": row["note"],
+        "streetWithNumber": row["street_with_number"],
+        "city": row["city"],
+        "zipCode": row["zip_code"],
+        "phone": row["phone"],
+        "email": row["email"],
+        "weight": row["weight"],
+        "codAmount": row["cod_amount"],
+        "paymentMethod": row["payment_method"],
+        "orderNumber": row["order_number"],
+        "shippingMethod": row["shipping_method"],
+        "amount": row["amount"],
+        "quantity": row["quantity_text"],
+        "paidStatus": row["paid_status"],
+        "expeditionNumber": row["expedition_number"],
+        "expeditionOrderCode": row["expedition_order_code"],
+        "packetaId": row["packeta_id"],
+        "completionStatus": row["completion_status"],
+        "orderId": row["order_id"],
+        "street": row["street"],
+        "houseNumber": row["house_number"],
+        "dpdFlag": row["dpd_flag"],
+        "packetaStatus": row["packeta_status"],
+        "packetaShipmentId": row["packeta_shipment_id"],
+        "orderDate": row["order_date"],
+        "twistoPaid": row["twisto_paid"],
+        "dpdOrderAndPieces": row["dpd_order_and_pieces"],
+        "canceledOrderBackup": row["canceled_order_backup"],
+        "labelPrinted": row["label_printed"],
         "cells": row["cells"],
         "raw": row["raw_row"],
     }
@@ -220,20 +316,24 @@ def upload_dataset():
 
     dataset_date, dataset_time, label = payload_date_time(payload)
     headers = payload.get("headers") if isinstance(payload.get("headers"), list) else []
+    dataset_kind = clean_text(payload.get("datasetKind")) or "sorting"
+    if dataset_kind not in ("sorting", "completion"):
+        return jsonify({"error": "datasetKind must be sorting or completion"}), 400
 
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
                 INSERT INTO datasets (
-                    dataset_date, dataset_time, uploaded_at_local, label, source,
+                    dataset_kind, dataset_date, dataset_time, uploaded_at_local, label, source,
                     workbook_name, worksheet_name, source_filename, rows_count,
                     headers, raw_payload
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING *
                 """,
                 (
+                    dataset_kind,
                     dataset_date,
                     dataset_time,
                     clean_text(payload.get("uploadedAtLocal")),
@@ -251,6 +351,9 @@ def upload_dataset():
 
             for item in rows:
                 if not isinstance(item, dict):
+                    continue
+                if dataset_kind == "completion":
+                    insert_completion_row(cur, dataset["id"], item)
                     continue
                 quantity = clean_text(item.get("quantity"))
                 cur.execute(
@@ -285,6 +388,63 @@ def upload_dataset():
     return jsonify({"ok": True, "dataset": dataset_summary(dataset), "rows": len(rows)})
 
 
+def insert_completion_row(cur, dataset_id, item):
+    cur.execute(
+        """
+        INSERT INTO completion_rows (
+            dataset_id, row_number, first_name, last_name, note, street_with_number,
+            city, zip_code, phone, email, weight, cod_amount, payment_method,
+            order_number, shipping_method, amount, quantity_text, paid_status,
+            expedition_number, expedition_order_code, packeta_id, completion_status,
+            order_id, street, house_number, dpd_flag, packeta_status,
+            packeta_shipment_id, order_date, twisto_paid, dpd_order_and_pieces,
+            canceled_order_backup, label_printed, cells, raw_row
+        )
+        VALUES (
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+        )
+        """,
+        (
+            dataset_id,
+            item.get("rowNumber"),
+            clean_text(item.get("firstName")),
+            clean_text(item.get("lastName")),
+            clean_text(item.get("note")),
+            clean_text(item.get("streetWithNumber")),
+            clean_text(item.get("city")),
+            clean_text(item.get("zipCode")),
+            clean_text(item.get("phone")),
+            clean_text(item.get("email")),
+            clean_text(item.get("weight")),
+            clean_text(item.get("codAmount")),
+            clean_text(item.get("paymentMethod")),
+            clean_text(item.get("orderNumber")),
+            clean_text(item.get("shippingMethod")),
+            clean_text(item.get("amount")),
+            clean_text(item.get("quantity")),
+            clean_text(item.get("paidStatus")),
+            clean_text(item.get("expeditionNumber")),
+            clean_text(item.get("expeditionOrderCode")),
+            clean_text(item.get("packetaId")),
+            clean_text(item.get("completionStatus")),
+            clean_text(item.get("orderId")),
+            clean_text(item.get("street")),
+            clean_text(item.get("houseNumber")),
+            clean_text(item.get("dpdFlag")),
+            clean_text(item.get("packetaStatus")),
+            clean_text(item.get("packetaShipmentId")),
+            clean_text(item.get("orderDate")),
+            clean_text(item.get("twistoPaid")),
+            clean_text(item.get("dpdOrderAndPieces")),
+            clean_text(item.get("canceledOrderBackup")),
+            clean_text(item.get("labelPrinted")),
+            Json(item.get("cells") if isinstance(item.get("cells"), list) else []),
+            Json(item),
+        ),
+    )
+
+
 @app.route("/api/datasets")
 def list_datasets():
     auth_error = require_download_token_if_configured()
@@ -293,16 +453,78 @@ def list_datasets():
 
     ensure_schema()
     include_deleted = request.args.get("includeDeleted") == "1"
+    dataset_kind = request.args.get("kind")
+    datasets = fetch_datasets(include_deleted, dataset_kind)
+    return jsonify({"datasets": datasets})
+
+
+def fetch_datasets(include_deleted=False, dataset_kind=None):
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            if include_deleted:
-                cur.execute("SELECT * FROM datasets ORDER BY uploaded_at DESC, id DESC")
-            else:
-                cur.execute(
-                    "SELECT * FROM datasets WHERE status = 'active' ORDER BY uploaded_at DESC, id DESC"
-                )
-            datasets = [dataset_summary(row) for row in cur.fetchall()]
-    return jsonify({"datasets": datasets})
+            filters = []
+            params = []
+            if not include_deleted:
+                filters.append("status = 'active'")
+            if dataset_kind:
+                filters.append("dataset_kind = %s")
+                params.append(dataset_kind)
+
+            where = f"WHERE {' AND '.join(filters)}" if filters else ""
+            cur.execute(
+                f"SELECT * FROM datasets {where} ORDER BY uploaded_at DESC, id DESC",
+                params,
+            )
+            return [dataset_summary(row) for row in cur.fetchall()]
+
+
+@app.route("/api/completion/datasets")
+def list_completion_datasets():
+    auth_error = require_download_token_if_configured()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    include_deleted = request.args.get("includeDeleted") == "1"
+    return jsonify({"datasets": fetch_datasets(include_deleted, "completion")})
+
+
+@app.route("/api/completion/latest")
+def latest_completion_dataset():
+    auth_error = require_download_token_if_configured()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT id FROM datasets
+                WHERE status = 'active' AND dataset_kind = 'completion'
+                ORDER BY uploaded_at DESC, id DESC
+                LIMIT 1
+                """
+            )
+            row = cur.fetchone()
+    if not row:
+        return jsonify({"error": "No active completion dataset found"}), 404
+    return get_dataset(row["id"])
+
+
+@app.route("/api/completion/<int:dataset_id>")
+def get_completion_dataset(dataset_id):
+    return get_dataset(dataset_id)
+
+
+@app.route("/api/sorting/datasets")
+def list_sorting_datasets():
+    auth_error = require_download_token_if_configured()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    include_deleted = request.args.get("includeDeleted") == "1"
+    return jsonify({"datasets": fetch_datasets(include_deleted, "sorting")})
 
 
 @app.route("/api/datasets/latest")
@@ -336,11 +558,18 @@ def get_dataset(dataset_id):
             dataset = cur.fetchone()
             if not dataset:
                 return jsonify({"error": "Dataset not found"}), 404
-            cur.execute(
-                "SELECT * FROM dataset_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
-                (dataset_id,),
-            )
-            rows = [row_to_api(row) for row in cur.fetchall()]
+            if dataset["dataset_kind"] == "completion":
+                cur.execute(
+                    "SELECT * FROM completion_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
+                    (dataset_id,),
+                )
+                rows = [completion_row_to_api(row) for row in cur.fetchall()]
+            else:
+                cur.execute(
+                    "SELECT * FROM dataset_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
+                    (dataset_id,),
+                )
+                rows = [row_to_api(row) for row in cur.fetchall()]
 
     return jsonify({"dataset": dataset_summary(dataset), "rows": rows})
 
@@ -412,23 +641,28 @@ def datasets_csv():
 
     ensure_schema()
     include_deleted = request.args.get("includeDeleted") == "1"
+    dataset_kind = request.args.get("kind")
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            if include_deleted:
-                cur.execute("SELECT * FROM datasets ORDER BY uploaded_at DESC, id DESC")
-            else:
-                cur.execute(
-                    "SELECT * FROM datasets WHERE status = 'active' ORDER BY uploaded_at DESC, id DESC"
-                )
+            filters = []
+            params = []
+            if not include_deleted:
+                filters.append("status = 'active'")
+            if dataset_kind:
+                filters.append("dataset_kind = %s")
+                params.append(dataset_kind)
+            where = f"WHERE {' AND '.join(filters)}" if filters else ""
+            cur.execute(f"SELECT * FROM datasets {where} ORDER BY uploaded_at DESC, id DESC", params)
             rows = cur.fetchall()
 
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["id", "label", "dataset_date", "dataset_time", "uploaded_at", "rows_count", "status"])
+    writer.writerow(["id", "kind", "label", "dataset_date", "dataset_time", "uploaded_at", "rows_count", "status"])
     for row in rows:
         writer.writerow(
             [
                 row["id"],
+                row["dataset_kind"],
                 row["label"],
                 row["dataset_date"].isoformat(),
                 str(row["dataset_time"]),
@@ -461,6 +695,9 @@ def dataset_csv():
             dataset = cur.fetchone()
             if not dataset:
                 return jsonify({"error": "Dataset not found"}), 404
+
+            if dataset["dataset_kind"] == "completion":
+                return completion_dataset_csv_response(cur, dataset)
 
             cur.execute(
                 "SELECT * FROM dataset_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
@@ -508,6 +745,122 @@ def dataset_csv():
 
     filename = f"dataset-{dataset['id']}.csv"
     return csv_response(output.getvalue(), filename)
+
+
+@app.route("/api/excel/completion.csv")
+def completion_csv():
+    auth_error = require_download_token_if_configured()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    dataset_id = request.args.get("id")
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if dataset_id:
+                cur.execute(
+                    "SELECT * FROM datasets WHERE id = %s AND dataset_kind = 'completion'",
+                    (dataset_id,),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT * FROM datasets
+                    WHERE status = 'active' AND dataset_kind = 'completion'
+                    ORDER BY uploaded_at DESC, id DESC
+                    LIMIT 1
+                    """
+                )
+            dataset = cur.fetchone()
+            if not dataset:
+                return jsonify({"error": "Completion dataset not found"}), 404
+            return completion_dataset_csv_response(cur, dataset)
+
+
+def completion_dataset_csv_response(cur, dataset):
+    cur.execute(
+        "SELECT * FROM completion_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
+        (dataset["id"],),
+    )
+    rows = cur.fetchall()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "rowNumber",
+            "firstName",
+            "lastName",
+            "note",
+            "streetWithNumber",
+            "city",
+            "zipCode",
+            "phone",
+            "email",
+            "weight",
+            "codAmount",
+            "paymentMethod",
+            "orderNumber",
+            "shippingMethod",
+            "amount",
+            "quantity",
+            "paidStatus",
+            "expeditionNumber",
+            "expeditionOrderCode",
+            "packetaId",
+            "completionStatus",
+            "orderId",
+            "street",
+            "houseNumber",
+            "dpdFlag",
+            "packetaStatus",
+            "packetaShipmentId",
+            "orderDate",
+            "twistoPaid",
+            "dpdOrderAndPieces",
+            "canceledOrderBackup",
+            "labelPrinted",
+        ]
+    )
+    for row in rows:
+        writer.writerow(
+            [
+                row["row_number"],
+                row["first_name"],
+                row["last_name"],
+                row["note"],
+                row["street_with_number"],
+                row["city"],
+                row["zip_code"],
+                row["phone"],
+                row["email"],
+                row["weight"],
+                row["cod_amount"],
+                row["payment_method"],
+                row["order_number"],
+                row["shipping_method"],
+                row["amount"],
+                row["quantity_text"],
+                row["paid_status"],
+                row["expedition_number"],
+                row["expedition_order_code"],
+                row["packeta_id"],
+                row["completion_status"],
+                row["order_id"],
+                row["street"],
+                row["house_number"],
+                row["dpd_flag"],
+                row["packeta_status"],
+                row["packeta_shipment_id"],
+                row["order_date"],
+                row["twisto_paid"],
+                row["dpd_order_and_pieces"],
+                row["canceled_order_backup"],
+                row["label_printed"],
+            ]
+        )
+
+    return csv_response(output.getvalue(), f"completion-{dataset['id']}.csv")
 
 
 def csv_response(text, filename):
