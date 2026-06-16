@@ -344,17 +344,15 @@ function renderHistory() {
     const sign = entry.type === "deduct" ? "-" : "+";
     const canUndo = entry.type === "deduct" && !entry.undone;
     const undone = entry.undone ? " (vráceno)" : "";
+    const source = entry.ean ? `EAN ${entry.ean}` : entry.mode || "ručně";
     div.innerHTML = `
-      <strong>${escapeHtml(sign)}${entry.amount} ks - ${escapeHtml(entry.variantCode || entry.productCode)}${escapeHtml(undone)}</strong>
-      <div>${escapeHtml(entry.variant || entry.productName || "")}</div>
-      <div class="history-meta">
-        ${escapeHtml(formatTime(entry.at))} | obj. ${escapeHtml(entry.orderNumber)} | poř. ${escapeHtml(entry.sequence || "-")} | zůstává ${escapeHtml(entry.remainingAfter)}
+      <div class="history-main">
+        <strong>${escapeHtml(sign)}${entry.amount} ks${escapeHtml(undone)}</strong>
+        <span class="history-code">${escapeHtml(entry.variantCode || entry.productCode)}</span>
+        <span class="history-sequence">poř. ${escapeHtml(entry.sequence || "-")}</span>
       </div>
-      ${
-        entry.ean
-          ? `<div class="history-meta">EAN ${escapeHtml(entry.ean)} | ${escapeHtml(entry.mode || "")}</div>`
-          : `<div class="history-meta">${escapeHtml(entry.mode || "ručně")}</div>`
-      }
+      <div class="history-meta">${escapeHtml(formatTime(entry.at))} | obj. ${escapeHtml(entry.orderNumber)} | zůstává ${escapeHtml(entry.remainingAfter)} | ${escapeHtml(source)}</div>
+      <div class="history-name">${escapeHtml(entry.variant || entry.productName || "")}</div>
       ${
         canUndo
           ? `<div class="history-actions"><button type="button" data-action="undo-history" data-id="${escapeHtml(entry.id)}">Vrátit</button></div>`

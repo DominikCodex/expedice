@@ -535,40 +535,82 @@ tbody tr.done {
 
 .history-list {
   display: grid;
-  gap: 8px;
+  gap: 5px;
   max-height: none;
   overflow: visible;
-  padding: 12px;
+  padding: 8px;
 }
 
 .history-item {
   display: grid;
-  gap: 6px;
-  padding: 10px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 3px 8px;
+  padding: 7px 8px;
   border: 1px solid var(--line);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--surface-2);
 }
 
-.history-item strong {
-  font-size: 13px;
+.history-main {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  align-items: baseline;
+  min-width: 0;
+}
+
+.history-main strong {
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.history-code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 12px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.history-sequence {
+  color: #000;
+  font-size: 12px;
+  font-weight: 900;
+  white-space: nowrap;
 }
 
 .history-meta {
   color: var(--muted);
-  font-size: 12px;
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.history-name {
+  grid-column: 1 / -1;
+  color: #44504b;
+  font-size: 11px;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .history-actions {
+  grid-column: 2;
+  grid-row: 1 / span 2;
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: center;
 }
 
 .history-actions button {
-  min-height: 32px;
+  min-height: 28px;
+  padding: 4px 8px;
   color: var(--text);
   background: var(--surface);
   border-color: var(--strong-line);
+  font-size: 12px;
 }
 
 .empty {
