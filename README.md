@@ -49,7 +49,7 @@ Endpointy:
 
 ## VBA upload do Railway API
 
-VBA modul je v `vba/UploadRoztrideniZbozi.bas`.
+VBA modul je v `vba/UploadRoztrideniZbozi.bas`. Je pripraveny bez `Option Explicit` a bez `Attribute VB_Name`, aby sel snadneji vlozit do existujiciho makro sesitu.
 
 V horní části modulu můžeš nastavit:
 

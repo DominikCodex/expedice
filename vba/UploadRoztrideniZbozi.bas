@@ -1,6 +1,3 @@
-Attribute VB_Name = "UploadRoztrideniZbozi"
-Option Explicit
-
 Private Const UPLOAD_URL As String = "https://expedice-production.up.railway.app/api/datasets/upload"
 Private Const UPLOAD_TOKEN As String = ""
 Private Const SHEET_NAME As String = "EXCEL"
