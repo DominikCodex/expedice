@@ -618,13 +618,6 @@ els.sortingBody.addEventListener("click", (event) => {
   }
 });
 
-els.sortingBody.addEventListener("dblclick", (event) => {
-  const row = event.target.closest("tr[data-id]");
-  if (!row) return;
-  const entry = changeItem(row.dataset.id, -1, { mode: "dvojklik v seznamu" });
-  if (entry) setMessage(`Odepsáno 1 ks: ${entry.variantCode}.`, "success");
-});
-
 els.candidateList.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-action='candidate-deduct']");
   if (!button) return;

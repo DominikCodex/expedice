@@ -15,7 +15,7 @@ Data se ukládají lokálně v prohlížeči. Pro přenos nebo zálohu použij t
 - Automatický odpis 1 ks u jednoznačné EAN shody.
 - Výběr kandidátů u vícenásobné EAN shody.
 - Ruční hledání podle objednávky, kódu, varianty, značky, názvu nebo obrázku.
-- Odpis `-1`, navrácení `+1` a dvojklik na řádek pro rychlý odpis.
+- Odpis `-1` a navrácení `+1` přes explicitní tlačítka.
 - Historie posledních odpisů včetně vrácení.
 - Přepínač zobrazení nulových položek a obrázkových názvů.
 
