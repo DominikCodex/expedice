@@ -217,6 +217,77 @@ input:focus {
   color: var(--muted);
 }
 
+.scan-result {
+  display: grid;
+  grid-template-columns: minmax(260px, 42vw) 1fr;
+  grid-template-rows: auto auto;
+  column-gap: 22px;
+  align-items: center;
+  min-height: 190px;
+  padding: 16px 22px;
+  background: #fff;
+  border: 3px solid #111;
+  border-radius: 8px;
+  box-shadow: 0 12px 26px rgba(0, 0, 0, 0.16);
+}
+
+.scan-result-label {
+  grid-column: 1;
+  color: #444;
+  font-size: 16px;
+  font-weight: 900;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.scan-sequence {
+  grid-column: 1;
+  color: #000;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(118px, 16vw, 250px);
+  font-weight: 900;
+  line-height: 0.86;
+  text-align: center;
+}
+
+.scan-result-detail {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  display: grid;
+  gap: 12px;
+  align-content: center;
+  min-width: 0;
+  color: #17201d;
+  font-size: 24px;
+  font-weight: 800;
+}
+
+.scan-result-detail strong {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 32px;
+  overflow-wrap: anywhere;
+}
+
+.scan-result-detail span {
+  display: block;
+}
+
+.scan-result.pulse {
+  animation: scanPulse 0.5s ease-out;
+}
+
+@keyframes scanPulse {
+  0% {
+    transform: scale(0.985);
+    background: #e8f3ee;
+  }
+
+  100% {
+    transform: scale(1);
+    background: #fff;
+  }
+}
+
 .message.success {
   color: var(--accent-dark);
   background: var(--accent-soft);
@@ -538,6 +609,22 @@ tbody tr.done {
 
   body {
     overflow: auto;
+  }
+
+  .scan-result {
+    grid-template-columns: 1fr;
+    min-height: 160px;
+  }
+
+  .scan-result-detail {
+    grid-column: 1;
+    grid-row: auto;
+    text-align: center;
+    font-size: 18px;
+  }
+
+  .scan-result-detail strong {
+    font-size: 21px;
   }
 
   .metrics,

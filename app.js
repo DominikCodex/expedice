@@ -27,6 +27,11 @@ const els = {
   candidatesPanel: document.getElementById("candidates-panel"),
   candidateList: document.getElementById("candidate-list"),
   clearCandidates: document.getElementById("clear-candidates"),
+  scanResult: document.getElementById("scan-result"),
+  scanSequence: document.getElementById("scan-sequence"),
+  scanCode: document.getElementById("scan-code"),
+  scanOrder: document.getElementById("scan-order"),
+  scanRemaining: document.getElementById("scan-remaining"),
   sortingBody: document.getElementById("sorting-body"),
   historyList: document.getElementById("history-list"),
   rowCount: document.getElementById("row-count"),
@@ -146,6 +151,18 @@ function loadState() {
 function setMessage(text, type = "neutral") {
   els.scanMessage.className = `message ${type}`;
   els.scanMessage.textContent = text;
+}
+
+function showScanResult(entry) {
+  if (!entry) return;
+  els.scanResult.classList.remove("hidden");
+  els.scanResult.classList.remove("pulse");
+  void els.scanResult.offsetWidth;
+  els.scanResult.classList.add("pulse");
+  els.scanSequence.textContent = entry.sequence || "-";
+  els.scanCode.textContent = entry.variantCode || entry.productCode || "-";
+  els.scanOrder.textContent = `Objednávka ${entry.orderNumber || "-"}`;
+  els.scanRemaining.textContent = `Zbývá ${entry.remainingAfter} ks`;
 }
 
 function formatTime(value) {
@@ -493,6 +510,7 @@ function processScan(rawValue) {
       mode: "EAN jednoznačná varianta",
     });
     if (entry) {
+      showScanResult(entry);
       setMessage(
         `Odepsáno 1 ks: ${entry.variantCode}, obj. ${entry.orderNumber}, poř. ${entry.sequence}.`,
         "success"
@@ -622,7 +640,10 @@ els.candidateList.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-action='candidate-deduct']");
   if (!button) return;
   const entry = changeItem(button.dataset.id, -1, { mode: "výběr z kandidátů" });
-  if (entry) setMessage(`Odepsáno 1 ks: ${entry.variantCode}.`, "success");
+  if (entry) {
+    showScanResult(entry);
+    setMessage(`Odepsáno 1 ks: ${entry.variantCode}, poř. ${entry.sequence}.`, "success");
+  }
 });
 
 els.historyList.addEventListener("click", (event) => {
