@@ -165,6 +165,7 @@ function itemHaystack(item) {
       item.sequence,
       item.productCode,
       item.variantCode,
+      eansForItem(item).map((entry) => entry.ean).join(" "),
       item.variant,
       item.info,
       item.paircode,
@@ -174,6 +175,59 @@ function itemHaystack(item) {
       item.image,
     ].join(" ")
   );
+}
+
+function eansForItem(item) {
+  const matches = [];
+  Object.entries(state.eanMap).forEach(([ean, entries]) => {
+    entries.forEach((entry) => {
+      const exact = sameCode(item.variantCode, entry.articleCode);
+      const pair =
+        sameCode(item.paircode, entry.prefix) ||
+        sameCode(item.productCode, entry.prefix);
+      if (!exact && !pair) return;
+
+      matches.push({
+        ean,
+        exact,
+        size: entry.size || "",
+        color: entry.color || "",
+      });
+    });
+  });
+
+  const unique = new Map();
+  matches
+    .sort((a, b) => Number(b.exact) - Number(a.exact) || a.ean.localeCompare(b.ean))
+    .forEach((match) => {
+      const existing = unique.get(match.ean);
+      if (!existing || match.exact) unique.set(match.ean, match);
+    });
+
+  return Array.from(unique.values());
+}
+
+function renderEans(item) {
+  const matches = eansForItem(item);
+  if (!matches.length) return `<span class="muted">bez EAN</span>`;
+
+  const exact = matches.filter((match) => match.exact);
+  const visible = (exact.length ? exact : matches).slice(0, 4);
+  const more = matches.length - visible.length;
+
+  return `
+    <div class="ean-list">
+      ${visible
+        .map((match) => {
+          const title = [match.color, match.size].filter(Boolean).join(" / ");
+          return `<span class="ean-chip ${match.exact ? "exact" : ""}" title="${escapeHtml(title || "EAN")}">${escapeHtml(
+            match.ean
+          )}</span>`;
+        })
+        .join("")}
+      ${more > 0 ? `<span class="ean-more">+${more}</span>` : ""}
+    </div>
+  `;
 }
 
 function visibleItems() {
@@ -209,7 +263,7 @@ function renderTable() {
   els.sortingBody.innerHTML = "";
 
   if (!rows.length) {
-    els.sortingBody.innerHTML = `<tr><td colspan="9" class="empty">Nic nenalezeno.</td></tr>`;
+    els.sortingBody.innerHTML = `<tr><td colspan="10" class="empty">Nic nenalezeno.</td></tr>`;
     return;
   }
 
@@ -229,6 +283,7 @@ function renderTable() {
         <div class="code">${escapeHtml(item.variantCode || item.productCode)}</div>
         <small>${escapeHtml(item.paircode)}</small>
       </td>
+      <td>${renderEans(item)}</td>
       <td>${escapeHtml(item.variant)}</td>
       <td><span class="qty ${item.remaining <= 0 ? "zero" : ""}">${item.remaining}</span></td>
       <td>${escapeHtml(item.brand)}</td>
