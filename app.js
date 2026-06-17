@@ -15,6 +15,13 @@ const state = {
 
 let activeCandidates = [];
 
+const completionState = {
+  datasets: [],
+  dataset: null,
+  rows: [],
+  loaded: false,
+};
+
 const els = {
   eanInput: document.getElementById("ean-input"),
   manualSearch: document.getElementById("manual-search"),
@@ -39,6 +46,16 @@ const els = {
   metricItems: document.getElementById("metric-items"),
   metricOrders: document.getElementById("metric-orders"),
   metricDone: document.getElementById("metric-done"),
+  tabSorting: document.getElementById("tab-sorting"),
+  tabCompletion: document.getElementById("tab-completion"),
+  sortingView: document.getElementById("sorting-view"),
+  completionView: document.getElementById("completion-view"),
+  completionDataset: document.getElementById("completion-dataset"),
+  completionRefresh: document.getElementById("completion-refresh"),
+  completionMessage: document.getElementById("completion-message"),
+  completionSummary: document.getElementById("completion-summary"),
+  completionBody: document.getElementById("completion-body"),
+  completionRowCount: document.getElementById("completion-row-count"),
 };
 
 function uid(prefix) {
@@ -159,6 +176,190 @@ function loadState() {
 function setMessage(text, type = "neutral") {
   els.scanMessage.className = `message ${type}`;
   els.scanMessage.textContent = text;
+}
+
+function setCompletionMessage(text, type = "neutral") {
+  els.completionMessage.className = `message ${type}`;
+  els.completionMessage.textContent = text;
+}
+
+async function fetchJson(path) {
+  const response = await fetch(path, { cache: "no-store" });
+  if (!response.ok) {
+    let message = `API vratilo chybu ${response.status}`;
+    try {
+      const data = await response.json();
+      message = data.error || message;
+    } catch {
+      // Keep fallback message.
+    }
+    throw new Error(message);
+  }
+  return response.json();
+}
+
+function datasetLabel(dataset) {
+  if (!dataset) return "Bez davky";
+  const shop = dataset.shopName || dataset.shopCode || "neznamy e-shop";
+  const kind = dataset.datasetKind === "completion" ? "kompletace" : dataset.datasetKind;
+  return `${dataset.datasetDate} ${dataset.datasetTime} | ${shop} | ${kind} | ${dataset.rowsCount} radku`;
+}
+
+function switchView(view) {
+  const completion = view === "completion";
+  els.sortingView.classList.toggle("hidden", completion);
+  els.completionView.classList.toggle("hidden", !completion);
+  els.tabSorting.classList.toggle("active", !completion);
+  els.tabCompletion.classList.toggle("active", completion);
+
+  if (completion && !completionState.loaded) {
+    loadCompletionDatasets();
+  }
+
+  if (!completion) {
+    requestAnimationFrame(() => els.eanInput.focus());
+  }
+}
+
+function renderCompletionOptions() {
+  els.completionDataset.innerHTML = "";
+
+  if (!completionState.datasets.length) {
+    els.completionDataset.innerHTML = `<option value="">Zadna davka</option>`;
+    return;
+  }
+
+  completionState.datasets.forEach((dataset) => {
+    const option = document.createElement("option");
+    option.value = dataset.id;
+    option.textContent = datasetLabel(dataset);
+    els.completionDataset.appendChild(option);
+  });
+
+  if (completionState.dataset) {
+    els.completionDataset.value = String(completionState.dataset.id);
+  }
+}
+
+async function loadCompletionDatasets() {
+  setCompletionMessage("Nacitam expediční davky...", "neutral");
+  try {
+    const data = await fetchJson("/api/completion/datasets");
+    completionState.datasets = data.datasets || [];
+    completionState.loaded = true;
+    renderCompletionOptions();
+
+    const first = completionState.datasets[0];
+    if (!first) {
+      completionState.dataset = null;
+      completionState.rows = [];
+      renderCompletion();
+      setCompletionMessage("Zatim neni nahrana zadna davka KOMPLETACE.", "warning");
+      return;
+    }
+
+    await loadCompletionDataset(first.id);
+  } catch (error) {
+    completionState.loaded = true;
+    completionState.dataset = null;
+    completionState.rows = [];
+    renderCompletion();
+    setCompletionMessage(
+      `Kompletaci se nepodarilo nacist: ${error.message}. Pokud mas otevrene jen index.html ze souboru, otevri Railway appku.`,
+      "error"
+    );
+  }
+}
+
+async function loadCompletionDataset(datasetId) {
+  if (!datasetId) return;
+  setCompletionMessage("Nacitam vybranou kompletaci...", "neutral");
+  try {
+    const data = await fetchJson(`/api/datasets/${datasetId}`);
+    completionState.dataset = data.dataset || null;
+    completionState.rows = data.rows || [];
+    renderCompletionOptions();
+    renderCompletion();
+    setCompletionMessage(`Nacteno: ${datasetLabel(completionState.dataset)}.`, "success");
+  } catch (error) {
+    setCompletionMessage(`Davku se nepodarilo nacist: ${error.message}`, "error");
+  }
+}
+
+function completionStatus(row) {
+  const raw = [row.completionStatus, row.packetaStatus, row.labelPrinted, row.note]
+    .filter(Boolean)
+    .join(" ");
+  const text = normalize(raw);
+  if (text.includes("storno")) return { label: "STORNO", tone: "danger" };
+  if (text.includes("error") || text.includes("chyba")) return { label: "CHYBA", tone: "danger" };
+  if (text.includes("label printed") || text.includes("stit")) return { label: "STITek", tone: "ok" };
+  if (normalize(row.paidStatus).includes("nezaplaceno")) return { label: "NEZAPLACENO", tone: "warning" };
+  if (row.completionStatus) return { label: row.completionStatus, tone: "neutral" };
+  return { label: "ceká", tone: "neutral" };
+}
+
+function renderCompletionSummary(rows) {
+  const orders = new Set(rows.map((row) => row.orderNumber).filter(Boolean)).size;
+  const pieces = rows.reduce((total, row) => total + Math.max(0, Math.trunc(toNumber(row.quantity, 0))), 0);
+  const labels = rows.filter((row) => normalize(row.labelPrinted).includes("label printed")).length;
+  const errors = rows.filter((row) => {
+    const status = completionStatus(row);
+    return status.tone === "danger";
+  }).length;
+  const shopCounts = rows.reduce((acc, row) => {
+    const key = row.shopCode || "unknown";
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const shops = Object.entries(shopCounts)
+    .map(([shop, count]) => `${shop}: ${count}`)
+    .join(" | ");
+
+  els.completionSummary.innerHTML = `
+    <span><strong>${orders}</strong> objednavek</span>
+    <span><strong>${rows.length}</strong> radku</span>
+    <span><strong>${pieces}</strong> kusu</span>
+    <span><strong>${labels}</strong> stitku</span>
+    <span><strong>${errors}</strong> chyb/storen</span>
+    <span>${escapeHtml(shops || "bez e-shopu")}</span>
+  `;
+}
+
+function renderCompletion() {
+  const rows = completionState.rows;
+  els.completionRowCount.textContent = `${rows.length} radku`;
+  renderCompletionSummary(rows);
+  els.completionBody.innerHTML = "";
+
+  if (!rows.length) {
+    els.completionBody.innerHTML = `<tr><td colspan="11" class="empty">Zadna kompletace k zobrazeni.</td></tr>`;
+    return;
+  }
+
+  rows.forEach((row) => {
+    const status = completionStatus(row);
+    const customer = [row.firstName, row.lastName].filter(Boolean).join(" ");
+    const address = [row.city, row.zipCode].filter(Boolean).join(" ");
+    const tr = document.createElement("tr");
+    tr.innerHTML = `
+      <td><span class="shop-chip">${escapeHtml(row.shopCode || completionState.dataset?.shopCode || "-")}</span></td>
+      <td class="code">${escapeHtml(row.expeditionNumber || row.rowNumber || "")}</td>
+      <td class="code">${escapeHtml(row.orderNumber || "")}</td>
+      <td>
+        <strong>${escapeHtml(customer || "-")}</strong>
+        <small>${escapeHtml(address)}</small>
+      </td>
+      <td>${escapeHtml(row.shippingMethod || "")}</td>
+      <td>${escapeHtml(row.paymentMethod || row.paidStatus || "")}</td>
+      <td>${escapeHtml(row.codAmount || "")}</td>
+      <td><span class="qty">${escapeHtml(row.quantity || "")}</span></td>
+      <td><span class="status-chip ${status.tone}">${escapeHtml(status.label)}</span></td>
+      <td>${escapeHtml(row.labelPrinted || row.packetaShipmentId || "")}</td>
+      <td class="completion-note">${escapeHtml(row.note || "")}</td>
+    `;
+    els.completionBody.appendChild(tr);
+  });
 }
 
 function showScanResult(entry) {
@@ -662,8 +863,16 @@ els.historyList.addEventListener("click", (event) => {
   undoHistory(button.dataset.id);
 });
 
+els.tabSorting.addEventListener("click", () => switchView("sorting"));
+els.tabCompletion.addEventListener("click", () => switchView("completion"));
+els.completionRefresh.addEventListener("click", () => loadCompletionDatasets());
+els.completionDataset.addEventListener("change", () => {
+  loadCompletionDataset(els.completionDataset.value);
+});
+
 loadState();
 renderAll();
+renderCompletion();
 setMessage(
   `Načteno ${state.items.length} řádků, ${Object.keys(state.eanMap).length} EAN kódů, objednávek: ${
     new Set(state.items.map((item) => item.orderNumber).filter(Boolean)).size

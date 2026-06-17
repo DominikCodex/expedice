@@ -35,6 +35,12 @@
         </div>
       </header>
 
+      <nav class="view-tabs" aria-label="Moduly expedice">
+        <button id="tab-sorting" type="button" class="tab-button active">Roztřídění</button>
+        <button id="tab-completion" type="button" class="tab-button">Kompletace</button>
+      </nav>
+
+      <section id="sorting-view" class="app-view">
       <section class="control-strip" aria-label="Ovládání rozřazování">
         <label class="field scan-field">
           <span>EAN / skener</span>
@@ -121,6 +127,50 @@
           </div>
           <div id="history-list" class="history-list"></div>
         </aside>
+      </section>
+      </section>
+
+      <section id="completion-view" class="app-view hidden">
+        <section class="completion-toolbar" aria-label="Ovládání kompletace">
+          <label class="field">
+            <span>Expediční dávka</span>
+            <select id="completion-dataset"></select>
+          </label>
+          <button id="completion-refresh" type="button" class="secondary">Načíst kompletaci</button>
+          <div id="completion-summary" class="completion-summary">Zatím není načtena žádná expediční dávka.</div>
+        </section>
+
+        <section id="completion-message" class="message neutral" aria-live="polite"></section>
+
+        <section class="table-panel completion-panel">
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">Expedice</p>
+              <h2>Kompletace objednávek</h2>
+            </div>
+            <div id="completion-row-count" class="row-count">0 řádků</div>
+          </div>
+          <div class="table-wrap">
+            <table class="completion-table">
+              <thead>
+                <tr>
+                  <th>E-shop</th>
+                  <th>Poř.</th>
+                  <th>Obj.</th>
+                  <th>Zákazník</th>
+                  <th>Doprava</th>
+                  <th>Platba</th>
+                  <th>Dobírka</th>
+                  <th>Kusů</th>
+                  <th>Stav</th>
+                  <th>Štítek</th>
+                  <th>Poznámka</th>
+                </tr>
+              </thead>
+              <tbody id="completion-body"></tbody>
+            </table>
+          </div>
+        </section>
       </section>
     </main>
   </body>
