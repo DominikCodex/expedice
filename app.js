@@ -15,6 +15,7 @@ const state = {
 
 let activeCandidates = [];
 const pendingAdjustments = new Set();
+const zeroRowsKeptUntilRefresh = new Set();
 let scanInProgress = false;
 
 const expeditionState = {
@@ -240,6 +241,7 @@ function saveState() {
 }
 
 function applyLoaded(next) {
+  zeroRowsKeptUntilRefresh.clear();
   state.items = (next.items || []).map(normalizeItem);
   state.eanMap = next.eanMap || {};
   state.history = Array.isArray(next.history) ? next.history.slice(0, MAX_HISTORY) : [];
@@ -714,6 +716,7 @@ function sortingRowToItem(row) {
 
 function applySortingDataset(dataset, rows) {
   sortingState.dataset = dataset || null;
+  zeroRowsKeptUntilRefresh.clear();
   const nextItems = (rows || []).map(sortingRowToItem);
   applyLoaded({
     items: nextItems,
@@ -1736,7 +1739,7 @@ function renderEans(item) {
 function visibleItems() {
   const query = normalize(els.manualSearch.value.trim());
   return state.items.filter((item) => {
-    if (!state.settings.showZero && item.remaining <= 0) return false;
+    if (!state.settings.showZero && item.remaining <= 0 && !zeroRowsKeptUntilRefresh.has(item.id)) return false;
     if (!query) return true;
     return itemHaystack(item).includes(query);
   });
@@ -1916,6 +1919,7 @@ function applyServerSortingRow(item, row) {
 async function changeItem(itemId, delta, context = {}) {
   const item = state.items.find((entry) => entry.id === itemId);
   if (!item) return null;
+  const remainingBefore = item.remaining;
 
   if (delta < 0 && item.remaining <= 0) {
     setMessage("Tahle položka už má nulový zůstatek.", "warning");
@@ -1957,6 +1961,13 @@ async function changeItem(itemId, delta, context = {}) {
     item.remaining = Math.max(0, item.remaining - amount);
   } else {
     item.remaining += amount;
+  }
+
+  if (delta < 0 && remainingBefore > 0 && item.remaining <= 0) {
+    zeroRowsKeptUntilRefresh.add(item.id);
+  }
+  if (item.remaining > 0) {
+    zeroRowsKeptUntilRefresh.delete(item.id);
   }
 
   const entry = historyEntry(item, amount, delta < 0 ? "deduct" : "restore", context);
