@@ -2,6 +2,7 @@ import csv
 import io
 import os
 from datetime import datetime
+from xml.sax.saxutils import escape as xml_escape
 from zoneinfo import ZoneInfo
 
 import psycopg2
@@ -630,6 +631,148 @@ def completion_row_to_api(row):
         "labelPrinted": row["label_printed"],
         "cells": row["cells"],
         "raw": row["raw_row"],
+    }
+
+
+def packeta_text(value):
+    return xml_escape(clean_text(value).strip(), {'"': "&quot;", "'": "&apos;"})
+
+
+def packeta_contains(value, *needles):
+    text = clean_text(value).lower()
+    return any(needle.lower() in text for needle in needles)
+
+
+def packeta_is_sk(row):
+    shipping = row.get("shippingMethod", "")
+    shop = row.get("shopCode", "")
+    return (
+        shop.endswith("_sk")
+        or packeta_contains(shipping, ".sk", "packeta.sk", "kuri", "slovensko", "slovensk")
+    )
+
+
+def packeta_eshop(row):
+    shop = row.get("shopCode", "")
+    if shop.startswith("galantra") and packeta_is_sk(row):
+        return "Galantra.sk"
+    if shop.startswith("galantra"):
+        return "Galantra.cz"
+    if packeta_is_sk(row):
+        return "iVeronika.sk"
+    return "iVeronika.cz"
+
+
+def packeta_route(row):
+    shipping = row.get("shippingMethod", "")
+    if packeta_contains(shipping, "ceska posta", "česká pošta"):
+        return {"addressId": "13", "service": "ceska_posta"}
+    if packeta_contains(shipping, "prepravni sluzba", "přepravní služba", "kuryr", "kurýr"):
+        return {"addressId": "106", "service": "cz_courier"}
+    if packeta_contains(shipping, "kuri", "kuriér", "kurier"):
+        return {"addressId": "131", "service": "sk_courier"}
+    return {"addressId": clean_text(row.get("packetaId")), "service": "pickup_point"}
+
+
+def packeta_skip_reason(row):
+    status_text = " ".join(
+        clean_text(row.get(key))
+        for key in ("completionStatus", "packetaStatus", "labelPrinted", "note", "shippingMethod")
+    )
+    if not clean_text(row.get("orderNumber")):
+        return "chybi cislo objednavky"
+    if packeta_contains(status_text, "storno", "fault", "error", "chyba"):
+        return "storno nebo chyba"
+    if packeta_contains(row.get("shippingMethod"), "dpd") or packeta_contains(row.get("dpdFlag"), "dpd", "1"):
+        return "DPD neni Zasilkovna"
+    if clean_text(row.get("packetaShipmentId")):
+        return "zasillka uz ma ID"
+    route = packeta_route(row)
+    if not route["addressId"]:
+        return "chybi Zasilkovna ID / addressId"
+    return ""
+
+
+def packeta_dry_run_packet(row):
+    route = packeta_route(row)
+    currency = "EUR" if packeta_is_sk(row) else "CZK"
+    value = clean_text(row.get("amount")) or ("29" if currency == "EUR" else "0")
+    company = ""
+    note = clean_text(row.get("note"))
+    if "//" in note:
+        company = note.split("//", 1)[0].strip()
+    elif packeta_contains(note, "dominik", "firma", "company"):
+        company = note
+
+    attrs = {
+        "number": clean_text(row.get("orderNumber")),
+        "name": clean_text(row.get("firstName")),
+        "surname": clean_text(row.get("lastName")),
+        "phone": clean_text(row.get("phone")),
+        "email": clean_text(row.get("email")),
+        "street": clean_text(row.get("streetWithNumber") or row.get("street")),
+        "city": clean_text(row.get("city")),
+        "zip": clean_text(row.get("zipCode")),
+        "company": company,
+        "addressId": route["addressId"],
+        "currency": currency,
+        "value": value,
+        "eshop": packeta_eshop(row),
+        "cod": clean_text(row.get("codAmount")),
+        "weight": clean_text(row.get("weight")),
+    }
+
+    xml_parts = [
+        "<createPacket>",
+        "<apiPassword>DRY_RUN_PASSWORD_OMITTED</apiPassword>",
+        "<packetAttributes>",
+        "<packetCourierNumber><packetId>1234567890</packetId></packetCourierNumber>",
+    ]
+    for key in (
+        "number",
+        "name",
+        "surname",
+        "phone",
+        "email",
+        "street",
+        "city",
+        "zip",
+        "company",
+        "addressId",
+        "currency",
+        "value",
+        "eshop",
+        "cod",
+        "weight",
+    ):
+        if attrs[key] or key in ("company", "cod"):
+            xml_parts.append(f"<{key}>{packeta_text(attrs[key])}</{key}>")
+    xml_parts.extend(["</packetAttributes>", "</createPacket>"])
+
+    warnings = []
+    if not attrs["phone"]:
+        warnings.append("chybi telefon")
+    if not attrs["email"]:
+        warnings.append("chybi e-mail")
+    if not attrs["street"] and route["service"] != "pickup_point":
+        warnings.append("kuryr bez ulice")
+    if not attrs["weight"]:
+        warnings.append("chybi vaha")
+
+    return {
+        "rowNumber": row.get("rowNumber"),
+        "orderNumber": attrs["number"],
+        "customer": " ".join(part for part in (attrs["name"], attrs["surname"]) if part),
+        "shippingMethod": clean_text(row.get("shippingMethod")),
+        "service": route["service"],
+        "addressId": attrs["addressId"],
+        "eshop": attrs["eshop"],
+        "currency": attrs["currency"],
+        "value": attrs["value"],
+        "cod": attrs["cod"],
+        "weight": attrs["weight"],
+        "warnings": warnings,
+        "requestXml": "".join(xml_parts),
     }
 
 
@@ -1319,6 +1462,95 @@ def fetch_datasets(include_deleted=False, dataset_kind=None, shop_code=None, dat
                 params,
             )
             return [dataset_summary(row) for row in cur.fetchall()]
+
+
+@app.route("/api/packeta/dry-run")
+def packeta_dry_run():
+    auth_error = require_download_token_if_configured()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    dataset_id = request.args.get("datasetId") or request.args.get("id")
+    dataset_date = request.args.get("date")
+    shop_code = request.args.get("shop")
+    limit = int_from_text(request.args.get("limit"))
+
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if dataset_id:
+                cur.execute(
+                    "SELECT * FROM datasets WHERE id = %s AND dataset_kind = 'completion'",
+                    (dataset_id,),
+                )
+            else:
+                filters = ["status = 'active'", "dataset_kind = 'completion'"]
+                params = []
+                if dataset_date:
+                    filters.append("dataset_date = %s")
+                    params.append(dataset_date)
+                if shop_code:
+                    filters.append("shop_code = %s")
+                    params.append(normalize_shop_code(shop_code))
+                where = " AND ".join(filters)
+                cur.execute(
+                    f"""
+                    SELECT * FROM datasets
+                    WHERE {where}
+                    ORDER BY uploaded_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    params,
+                )
+
+            dataset = cur.fetchone()
+            if not dataset:
+                return jsonify({"error": "Completion dataset not found"}), 404
+
+            cur.execute(
+                "SELECT * FROM completion_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
+                (dataset["id"],),
+            )
+            rows = [completion_row_to_api(row) for row in cur.fetchall()]
+
+    packets = []
+    skipped = []
+    for row in rows:
+        reason = packeta_skip_reason(row)
+        if reason:
+            skipped.append(
+                {
+                    "rowNumber": row.get("rowNumber"),
+                    "orderNumber": row.get("orderNumber"),
+                    "customer": " ".join(
+                        part for part in [row.get("firstName"), row.get("lastName")] if part
+                    ),
+                    "shippingMethod": row.get("shippingMethod"),
+                    "reason": reason,
+                }
+            )
+            continue
+        packets.append(packeta_dry_run_packet(row))
+
+    visible_packets = packets[:limit] if limit > 0 else packets
+
+    return jsonify(
+        {
+            "ok": True,
+            "dryRun": True,
+            "endpoint": "http://www.zasilkovna.cz/api/rest",
+            "method": "POST",
+            "apiPasswordIncluded": False,
+            "note": "Dry run only. No request was sent and no database rows were changed.",
+            "dataset": dataset_summary(dataset),
+            "rowsCount": len(rows),
+            "packetsCount": len(packets),
+            "skippedCount": len(skipped),
+            "truncatedCount": max(0, len(packets) - len(visible_packets)),
+            "packets": visible_packets,
+            "skipped": skipped,
+        }
+    )
 
 
 @app.route("/api/completion/datasets")

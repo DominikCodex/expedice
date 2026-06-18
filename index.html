@@ -1,9 +1,9 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="cs">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Rozřazování zboží</title>
+    <title>RozĹ™azovĂˇnĂ­ zboĹľĂ­</title>
     <link rel="stylesheet" href="styles.css" />
     <script defer src="seed-data.js"></script>
     <script defer src="app.js"></script>
@@ -12,88 +12,88 @@
     <main class="shell">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Rozřazování zboží</p>
-          <h1>Roztřídění zboží (Původně EXCEL)</h1>
+          <p class="eyebrow">RozĹ™azovĂˇnĂ­ zboĹľĂ­</p>
+          <h1>RoztĹ™Ă­dÄ›nĂ­ zboĹľĂ­ (PĹŻvodnÄ› EXCEL)</h1>
         </div>
         <div class="metrics" aria-label="Souhrn">
           <div>
             <span id="metric-open">0</span>
-            <small>Zbývá ks</small>
+            <small>ZbĂ˝vĂˇ ks</small>
           </div>
           <div>
             <span id="metric-items">0</span>
-            <small>Položek</small>
+            <small>PoloĹľek</small>
           </div>
           <div>
             <span id="metric-orders">0</span>
-            <small>Objednávek</small>
+            <small>ObjednĂˇvek</small>
           </div>
           <div>
             <span id="metric-done">0</span>
-            <small>Odepsáno ks</small>
+            <small>OdepsĂˇno ks</small>
           </div>
         </div>
       </header>
 
       <section class="expedition-layout">
-        <aside class="day-sidebar" aria-label="Expediční dny">
+        <aside class="day-sidebar" aria-label="ExpediÄŤnĂ­ dny">
           <div class="day-sidebar-head">
             <div>
-              <p class="eyebrow">Expediční dny</p>
-              <h2>Přepnutí dne</h2>
+              <p class="eyebrow">ExpediÄŤnĂ­ dny</p>
+              <h2>PĹ™epnutĂ­ dne</h2>
             </div>
             <button id="expedition-refresh" type="button" class="secondary">Obnovit</button>
           </div>
           <label class="toggle sidebar-toggle">
             <input id="show-inactive-datasets" type="checkbox" />
-            <span>Nahrazené/smazané</span>
+            <span>NahrazenĂ©/smazanĂ©</span>
           </label>
-          <div id="expedition-day-summary" class="dataset-summary">Čekám na online data.</div>
+          <div id="expedition-day-summary" class="dataset-summary">ÄŚekĂˇm na online data.</div>
           <div id="expedition-day-list" class="day-list"></div>
         </aside>
 
         <section class="module-area">
       <nav class="view-tabs" aria-label="Moduly expedice">
-        <button id="tab-sorting" type="button" class="tab-button active">Roztřídění</button>
+        <button id="tab-sorting" type="button" class="tab-button active">RoztĹ™Ă­dÄ›nĂ­</button>
         <button id="tab-completion" type="button" class="tab-button">Kompletace</button>
       </nav>
 
       <section id="sorting-view" class="app-view">
-      <section class="dataset-toolbar" aria-label="Online dávka roztřídění">
+      <section class="dataset-toolbar" aria-label="Online dĂˇvka roztĹ™Ă­dÄ›nĂ­">
         <label class="field">
-          <span>Dávka roztřídění</span>
+          <span>DĂˇvka roztĹ™Ă­dÄ›nĂ­</span>
           <select id="sorting-dataset"></select>
         </label>
-        <button id="sorting-refresh" type="button" class="secondary">Načíst roztřídění</button>
-        <button id="sorting-delete" type="button" class="danger">Smazat dávku</button>
-        <div id="sorting-dataset-info" class="dataset-summary">Lokální seed / čekám na online dávku.</div>
+        <button id="sorting-refresh" type="button" class="secondary">NaÄŤĂ­st roztĹ™Ă­dÄ›nĂ­</button>
+        <button id="sorting-delete" type="button" class="danger">Smazat dĂˇvku</button>
+        <div id="sorting-dataset-info" class="dataset-summary">LokĂˇlnĂ­ seed / ÄŤekĂˇm na online dĂˇvku.</div>
       </section>
 
-      <section class="control-strip" aria-label="Ovládání rozřazování">
+      <section class="control-strip" aria-label="OvlĂˇdĂˇnĂ­ rozĹ™azovĂˇnĂ­">
         <label class="field scan-field">
           <span>EAN / skener</span>
           <input id="ean-input" inputmode="numeric" autocomplete="off" autofocus />
         </label>
         <label class="field search-field">
-          <span>Ruční hledání</span>
-          <input id="manual-search" autocomplete="off" placeholder="Objednávka, kód, EAN, varianta, značka..." />
+          <span>RuÄŤnĂ­ hledĂˇnĂ­</span>
+          <input id="manual-search" autocomplete="off" placeholder="ObjednĂˇvka, kĂłd, EAN, varianta, znaÄŤka..." />
         </label>
         <label class="toggle">
           <input id="show-zero" type="checkbox" />
-          <span>Nulové</span>
+          <span>NulovĂ©</span>
         </label>
         <label class="toggle">
           <input id="show-images" type="checkbox" checked />
-          <span>Obrázky</span>
+          <span>ObrĂˇzky</span>
         </label>
         <button id="export-data" type="button" class="secondary">Export</button>
         <label class="secondary file-trigger" for="import-data">Import</label>
         <input id="import-data" type="file" accept="application/json" />
-        <button id="reset-seed" type="button" class="danger">Načíst Excel seed</button>
+        <button id="reset-seed" type="button" class="danger">NaÄŤĂ­st Excel seed</button>
       </section>
 
       <section id="scan-result" class="scan-result hidden" aria-live="polite">
-        <div class="scan-result-label">Pořadové číslo</div>
+        <div class="scan-result-label">PoĹ™adovĂ© ÄŤĂ­slo</div>
         <div id="scan-sequence" class="scan-sequence">-</div>
         <div class="scan-result-detail">
           <strong id="scan-code">-</strong>
@@ -107,10 +107,10 @@
       <section id="candidates-panel" class="candidate-panel hidden">
         <div class="section-head">
           <div>
-            <p class="eyebrow">Vyžaduje výběr</p>
-            <h2>Kandidáti pro poslední sken</h2>
+            <p class="eyebrow">VyĹľaduje vĂ˝bÄ›r</p>
+            <h2>KandidĂˇti pro poslednĂ­ sken</h2>
           </div>
-          <button id="clear-candidates" type="button" class="secondary">Zavřít</button>
+          <button id="clear-candidates" type="button" class="secondary">ZavĹ™Ă­t</button>
         </div>
         <div id="candidate-list" class="candidate-list"></div>
       </section>
@@ -119,26 +119,26 @@
         <section class="table-panel">
           <div class="section-head">
             <div>
-              <p class="eyebrow">Pracovní seznam</p>
-              <h2>Zboží k rozřazení</h2>
+              <p class="eyebrow">PracovnĂ­ seznam</p>
+              <h2>ZboĹľĂ­ k rozĹ™azenĂ­</h2>
             </div>
-            <div id="row-count" class="row-count">0 řádků</div>
+            <div id="row-count" class="row-count">0 Ĺ™ĂˇdkĹŻ</div>
           </div>
           <div class="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Obj.</th>
-                  <th>Poř.</th>
-                  <th>Kód</th>
+                  <th>PoĹ™.</th>
+                  <th>KĂłd</th>
                   <th>EAN</th>
                   <th>Varianta</th>
-                  <th>Zbývá</th>
+                  <th>ZbĂ˝vĂˇ</th>
                   <th>Odepsat</th>
-                  <th>Značka</th>
-                  <th>Název</th>
+                  <th>ZnaÄŤka</th>
+                  <th>NĂˇzev</th>
                   <th>Obr.</th>
-                  <th>Vrátit</th>
+                  <th>VrĂˇtit</th>
                 </tr>
               </thead>
               <tbody id="sorting-body"></tbody>
@@ -150,7 +150,7 @@
           <div class="section-head compact">
             <div>
               <p class="eyebrow">Historie</p>
-              <h2>Poslední odpisy</h2>
+              <h2>PoslednĂ­ odpisy</h2>
             </div>
           </div>
           <div id="history-list" class="history-list"></div>
@@ -159,41 +159,44 @@
       </section>
 
       <section id="completion-view" class="app-view hidden">
-        <section class="completion-toolbar" aria-label="Ovládání kompletace">
+        <section class="completion-toolbar" aria-label="OvlĂˇdĂˇnĂ­ kompletace">
           <label class="field">
-            <span>Expediční dávka</span>
+            <span>ExpediÄŤnĂ­ dĂˇvka</span>
             <select id="completion-dataset"></select>
           </label>
-          <button id="completion-refresh" type="button" class="secondary">Načíst kompletaci</button>
-          <button id="completion-delete" type="button" class="danger">Smazat dávku</button>
-          <div id="completion-summary" class="completion-summary">Zatím není načtena žádná expediční dávka.</div>
+          <button id="completion-refresh" type="button" class="secondary">NaÄŤĂ­st kompletaci</button>
+          <button id="completion-delete" type="button" class="danger">Smazat dĂˇvku</button>
+          <button id="packeta-dry-run" type="button" class="secondary">Dry run Zasilkovna</button>
+          <div id="completion-summary" class="completion-summary">ZatĂ­m nenĂ­ naÄŤtena ĹľĂˇdnĂˇ expediÄŤnĂ­ dĂˇvka.</div>
         </section>
 
         <section id="completion-message" class="message neutral" aria-live="polite"></section>
+
+        <section id="packeta-dry-run-result" class="dry-run-result hidden" aria-live="polite"></section>
 
         <section class="table-panel completion-panel">
           <div class="section-head">
             <div>
               <p class="eyebrow">Expedice</p>
-              <h2>Kompletace objednávek</h2>
+              <h2>Kompletace objednĂˇvek</h2>
             </div>
-            <div id="completion-row-count" class="row-count">0 řádků</div>
+            <div id="completion-row-count" class="row-count">0 Ĺ™ĂˇdkĹŻ</div>
           </div>
           <div class="table-wrap">
             <table class="completion-table">
               <thead>
                 <tr>
                   <th>E-shop</th>
-                  <th>Poř.</th>
+                  <th>PoĹ™.</th>
                   <th>Obj.</th>
-                  <th>Zákazník</th>
+                  <th>ZĂˇkaznĂ­k</th>
                   <th>Doprava</th>
                   <th>Platba</th>
-                  <th>Dobírka</th>
-                  <th>Kusů</th>
+                  <th>DobĂ­rka</th>
+                  <th>KusĹŻ</th>
                   <th>Stav</th>
-                  <th>Štítek</th>
-                  <th>Poznámka</th>
+                  <th>Ĺ tĂ­tek</th>
+                  <th>PoznĂˇmka</th>
                 </tr>
               </thead>
               <tbody id="completion-body"></tbody>

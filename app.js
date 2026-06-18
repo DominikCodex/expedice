@@ -1,4 +1,4 @@
-const STORAGE_KEY = "rozrazovani-zbozi-v2";
+﻿const STORAGE_KEY = "rozrazovani-zbozi-v2";
 const MAX_HISTORY = 500;
 
 const seed = window.SORTING_SEED || { items: [], eanMap: {}, summary: {} };
@@ -74,6 +74,8 @@ const els = {
   completionDataset: document.getElementById("completion-dataset"),
   completionRefresh: document.getElementById("completion-refresh"),
   completionDelete: document.getElementById("completion-delete"),
+  packetaDryRun: document.getElementById("packeta-dry-run"),
+  packetaDryRunResult: document.getElementById("packeta-dry-run-result"),
   completionMessage: document.getElementById("completion-message"),
   completionSummary: document.getElementById("completion-summary"),
   completionBody: document.getElementById("completion-body"),
@@ -232,18 +234,18 @@ function datasetLabel(dataset) {
 }
 
 function dayLabel(day) {
-  if (!day) return "Bez expedičního dne";
-  const latest = day.latestUpload ? ` | poslední ${formatTime(day.latestUpload)}` : "";
-  return `${day.label || day.date} | ${day.activeBatches || 0} aktivní dávky | ${day.rowsCount || 0} řádků${latest}`;
+  if (!day) return "Bez expediÄŤnĂ­ho dne";
+  const latest = day.latestUpload ? ` | poslednĂ­ ${formatTime(day.latestUpload)}` : "";
+  return `${day.label || day.date} | ${day.activeBatches || 0} aktivnĂ­ dĂˇvky | ${day.rowsCount || 0} Ĺ™ĂˇdkĹŻ${latest}`;
 }
 
 function datasetInfoHtml(dataset) {
-  if (!dataset) return `<span>Žádná aktivní dávka</span>`;
+  if (!dataset) return `<span>Ĺ˝ĂˇdnĂˇ aktivnĂ­ dĂˇvka</span>`;
   return `
     <span><strong>${escapeHtml(dataset.batchName || dataset.datasetDate)}</strong></span>
     <span>${escapeHtml(dataset.datasetTime || "")}</span>
-    <span>${escapeHtml(dataset.shopName || dataset.shopCode || "e-shop neurčen")}</span>
-    <span>${escapeHtml(dataset.rowsCount || 0)} řádků</span>
+    <span>${escapeHtml(dataset.shopName || dataset.shopCode || "e-shop neurÄŤen")}</span>
+    <span>${escapeHtml(dataset.rowsCount || 0)} Ĺ™ĂˇdkĹŻ</span>
     <span>${escapeHtml(dataset.status || "active")}</span>
   `;
 }
@@ -280,7 +282,7 @@ function renderExpeditionDayOptions() {
   els.expeditionDayList.innerHTML = "";
 
   if (!expeditionState.days.length) {
-    els.expeditionDaySummary.innerHTML = `<span>Online zatím neobsahuje žádný expediční den.</span>`;
+    els.expeditionDaySummary.innerHTML = `<span>Online zatĂ­m neobsahuje ĹľĂˇdnĂ˝ expediÄŤnĂ­ den.</span>`;
     return;
   }
 
@@ -291,8 +293,8 @@ function renderExpeditionDayOptions() {
     button.dataset.date = day.date;
     button.innerHTML = `
       <strong>${escapeHtml(day.label || day.date)}</strong>
-      <span>${escapeHtml(day.activeBatches || 0)} aktivní dávky</span>
-      <small>${escapeHtml(day.rowsCount || 0)} řádků${day.latestUpload ? ` | ${escapeHtml(formatTime(day.latestUpload))}` : ""}</small>
+      <span>${escapeHtml(day.activeBatches || 0)} aktivnĂ­ dĂˇvky</span>
+      <small>${escapeHtml(day.rowsCount || 0)} Ĺ™ĂˇdkĹŻ${day.latestUpload ? ` | ${escapeHtml(formatTime(day.latestUpload))}` : ""}</small>
     `;
     els.expeditionDayList.appendChild(button);
   });
@@ -302,7 +304,7 @@ function renderSortingOptions() {
   els.sortingDataset.innerHTML = "";
 
   if (!sortingState.datasets.length) {
-    els.sortingDataset.innerHTML = `<option value="">Žádná dávka roztřídění</option>`;
+    els.sortingDataset.innerHTML = `<option value="">Ĺ˝ĂˇdnĂˇ dĂˇvka roztĹ™Ă­dÄ›nĂ­</option>`;
     els.sortingDatasetInfo.innerHTML = datasetInfoHtml(null);
     els.sortingDelete.disabled = true;
     return;
@@ -385,7 +387,7 @@ async function loadExpeditionDays(preferredDate = "") {
 }
 async function loadExpeditionDays(preferredDate = "") {
   expeditionState.showInactive = els.expeditionShowInactive.checked;
-  els.expeditionDaySummary.innerHTML = `<span>Načítám expediční dny...</span>`;
+  els.expeditionDaySummary.innerHTML = `<span>NaÄŤĂ­tĂˇm expediÄŤnĂ­ dny...</span>`;
 
   try {
     const data = await fetchJson(`/api/expedition-days${includeInactiveQuery()}`);
@@ -414,7 +416,7 @@ async function loadExpeditionDays(preferredDate = "") {
     await loadExpeditionDay(selectedDate);
   } catch (error) {
     expeditionState.loaded = true;
-    els.expeditionDaySummary.innerHTML = `<span>Online dny se nepodařilo načíst: ${escapeHtml(error.message)}</span>`;
+    els.expeditionDaySummary.innerHTML = `<span>Online dny se nepodaĹ™ilo naÄŤĂ­st: ${escapeHtml(error.message)}</span>`;
   }
 }
 
@@ -431,8 +433,8 @@ async function loadExpeditionDay(dayDate) {
   els.expeditionDaySummary.innerHTML = expeditionState.day
     ? `<span><strong>${escapeHtml(expeditionState.day.label)}</strong></span><span>${escapeHtml(
         expeditionState.day.activeBatches || 0
-      )} aktivní dávky</span><span>${escapeHtml(expeditionState.day.rowsCount || 0)} řádků</span>`
-    : `<span>Den není načtený.</span>`;
+      )} aktivnĂ­ dĂˇvky</span><span>${escapeHtml(expeditionState.day.rowsCount || 0)} Ĺ™ĂˇdkĹŻ</span>`
+    : `<span>Den nenĂ­ naÄŤtenĂ˝.</span>`;
 
   renderSortingOptions();
   renderCompletionOptions();
@@ -442,7 +444,7 @@ async function loadExpeditionDay(dayDate) {
   } else {
     sortingState.dataset = null;
     renderSortingOptions();
-    setMessage("Pro vybraný expediční den není nahrané roztřídění.", "warning");
+    setMessage("Pro vybranĂ˝ expediÄŤnĂ­ den nenĂ­ nahranĂ© roztĹ™Ă­dÄ›nĂ­.", "warning");
   }
 
   if (data.activeCompletion?.dataset) {
@@ -452,7 +454,7 @@ async function loadExpeditionDay(dayDate) {
     completionState.rows = [];
     renderCompletionOptions();
     renderCompletion();
-    setCompletionMessage("Pro vybraný expediční den není nahraná kompletace.", "warning");
+    setCompletionMessage("Pro vybranĂ˝ expediÄŤnĂ­ den nenĂ­ nahranĂˇ kompletace.", "warning");
   }
 }
 
@@ -505,13 +507,13 @@ async function loadSortingDataset(datasetId) {
 async function deleteDataset(dataset, afterDelete) {
   if (!dataset) return false;
   const label = datasetLabel(dataset);
-  if (!confirm(`Smazat dávku?\n\n${label}\n\nData zůstanou v historii jako smazaná.`)) return false;
+  if (!confirm(`Smazat dĂˇvku?\n\n${label}\n\nData zĹŻstanou v historii jako smazanĂˇ.`)) return false;
 
   await fetchJson(`/api/datasets/${dataset.id}`, {
     method: "DELETE",
     body: JSON.stringify({
       deletedBy: "web",
-      reason: "Smazáno ve webovém rozhraní",
+      reason: "SmazĂˇno ve webovĂ©m rozhranĂ­",
     }),
   });
 
@@ -525,6 +527,7 @@ function renderCompletionOptions() {
   if (!completionState.datasets.length) {
     els.completionDataset.innerHTML = `<option value="">Zadna davka</option>`;
     els.completionDelete.disabled = true;
+    els.packetaDryRun.disabled = true;
     return;
   }
 
@@ -539,6 +542,7 @@ function renderCompletionOptions() {
     els.completionDataset.value = String(completionState.dataset.id);
   }
   els.completionDelete.disabled = !completionState.dataset || completionState.dataset.status !== "active";
+  els.packetaDryRun.disabled = !completionState.dataset;
 }
 
 async function loadCompletionDatasets() {
@@ -552,9 +556,125 @@ async function loadCompletionDatasets() {
 function applyCompletionDataset(dataset, rows) {
   completionState.dataset = dataset || null;
   completionState.rows = rows || [];
+  hidePacketaDryRunResult();
   renderCompletionOptions();
   renderCompletion();
   setCompletionMessage(`Nacteno: ${datasetLabel(completionState.dataset)}.`, "success");
+}
+
+function hidePacketaDryRunResult() {
+  els.packetaDryRunResult.classList.add("hidden");
+  els.packetaDryRunResult.innerHTML = "";
+}
+
+function renderPacketaDryRun(data) {
+  const packets = data.packets || [];
+  const skipped = data.skipped || [];
+  const packetsCount = data.packetsCount ?? packets.length;
+  const skippedCount = data.skippedCount ?? skipped.length;
+  const truncatedCount = data.truncatedCount || 0;
+
+  const packetCards = packets
+    .map((packet, index) => {
+      const warnings = packet.warnings?.length
+        ? `<div class="warning-list">${packet.warnings
+            .map((warning) => `<span>${escapeHtml(warning)}</span>`)
+            .join("")}</div>`
+        : "";
+
+      return `
+        <details class="dry-run-item" ${index === 0 ? "open" : ""}>
+          <summary>
+            <strong>${escapeHtml(packet.orderNumber || "-")}</strong>
+            <span>${escapeHtml(packet.customer || "-")}</span>
+            <small>${escapeHtml(packet.service || "")} | ${escapeHtml(packet.eshop || "")} | ${escapeHtml(
+        packet.currency || ""
+      )}</small>
+          </summary>
+          <div class="dry-run-meta">
+            <span>Adresa ID: ${escapeHtml(packet.addressId || "-")}</span>
+            <span>Dobirka: ${escapeHtml(packet.cod || "-")}</span>
+            <span>Vaha: ${escapeHtml(packet.weight || "-")}</span>
+          </div>
+          ${warnings}
+          <pre>${escapeHtml(packet.requestXml || "")}</pre>
+        </details>
+      `;
+    })
+    .join("");
+
+  const skippedHtml = skipped.length
+    ? `
+      <details class="dry-run-item dry-run-skipped">
+        <summary>
+          <strong>Preskocene radky</strong>
+          <span>${escapeHtml(skippedCount)} ks</span>
+        </summary>
+        <div class="skipped-list">
+          ${skipped
+            .slice(0, 80)
+            .map(
+              (row) => `
+                <div>
+                  <strong>${escapeHtml(row.orderNumber || "-")}</strong>
+                  <span>${escapeHtml(row.customer || "")}</span>
+                  <small>${escapeHtml(row.reason || "")}</small>
+                </div>
+              `
+            )
+            .join("")}
+        </div>
+      </details>
+    `
+    : "";
+
+  els.packetaDryRunResult.classList.remove("hidden");
+  els.packetaDryRunResult.innerHTML = `
+    <div class="section-head compact">
+      <div>
+        <p class="eyebrow">Zasilkovna / Packeta</p>
+        <h2>Dry run vytvoreni zasilek</h2>
+      </div>
+      <div class="dry-run-counts">
+        <span>${escapeHtml(packetsCount)} zasilek</span>
+        <span>${escapeHtml(skippedCount)} preskoceno</span>
+        ${truncatedCount ? `<span>${escapeHtml(truncatedCount)} dalsich skryto</span>` : ""}
+      </div>
+    </div>
+    <div class="dry-run-note">
+      Nic se neposlalo do Zasilkovny a databaze se nezmenila. API heslo je v nahledu zamerne vynechane.
+    </div>
+    <div class="dry-run-list">
+      ${packetCards || `<div class="empty">Nenasel jsem zadnou zasilku k vytvoreni.</div>`}
+      ${skippedHtml}
+    </div>
+  `;
+}
+
+async function runPacketaDryRun() {
+  if (!completionState.dataset?.id) {
+    setCompletionMessage("Nejdriv nacti kompletaci pro expedicni den.", "warning");
+    return;
+  }
+
+  els.packetaDryRun.disabled = true;
+  hidePacketaDryRunResult();
+  setCompletionMessage("Skladam dry run Zasilkovny...", "neutral");
+
+  try {
+    const data = await fetchJson(
+      `/api/packeta/dry-run?datasetId=${encodeURIComponent(completionState.dataset.id)}&limit=50`
+    );
+    renderPacketaDryRun(data);
+    setCompletionMessage(
+      `Dry run hotovy: ${data.packetsCount || 0} zasilek, preskoceno ${data.skippedCount || 0}.`,
+      "success"
+    );
+  } catch (error) {
+    setCompletionMessage(`Dry run Zasilkovny se nepodaril: ${error.message}`, "error");
+  } finally {
+    els.packetaDryRun.disabled = !completionState.dataset;
+  }
 }
 
 async function loadCompletionDataset(datasetId) {
@@ -578,7 +698,7 @@ function completionStatus(row) {
   if (text.includes("label printed") || text.includes("stit")) return { label: "STITek", tone: "ok" };
   if (normalize(row.paidStatus).includes("nezaplaceno")) return { label: "NEZAPLACENO", tone: "warning" };
   if (row.completionStatus) return { label: row.completionStatus, tone: "neutral" };
-  return { label: "ceká", tone: "neutral" };
+  return { label: "cekĂˇ", tone: "neutral" };
 }
 
 function renderCompletionSummary(rows) {
@@ -653,8 +773,8 @@ function showScanResult(entry) {
   els.scanResult.classList.add("pulse");
   els.scanSequence.textContent = entry.sequence || "-";
   els.scanCode.textContent = entry.variantCode || entry.productCode || "-";
-  els.scanOrder.textContent = `Objednávka ${entry.orderNumber || "-"}`;
-  els.scanRemaining.textContent = `Zbývá ${entry.remainingAfter} ks`;
+  els.scanOrder.textContent = `ObjednĂˇvka ${entry.orderNumber || "-"}`;
+  els.scanRemaining.textContent = `ZbĂ˝vĂˇ ${entry.remainingAfter} ks`;
 }
 
 function formatTime(value) {
@@ -768,7 +888,7 @@ function renderMetrics() {
 
 function renderTable() {
   const rows = visibleItems();
-  els.rowCount.textContent = `${rows.length} řádků`;
+  els.rowCount.textContent = `${rows.length} Ĺ™ĂˇdkĹŻ`;
   els.sortingBody.innerHTML = "";
 
   if (!rows.length) {
@@ -818,7 +938,7 @@ function renderHistory() {
   els.historyList.innerHTML = "";
 
   if (!entries.length) {
-    els.historyList.innerHTML = `<div class="empty">Historie je zatím prázdná.</div>`;
+    els.historyList.innerHTML = `<div class="empty">Historie je zatĂ­m prĂˇzdnĂˇ.</div>`;
     return;
   }
 
@@ -827,19 +947,19 @@ function renderHistory() {
     div.className = "history-item";
     const sign = entry.type === "deduct" ? "-" : "+";
     const canUndo = entry.type === "deduct" && !entry.undone;
-    const undone = entry.undone ? " (vráceno)" : "";
-    const source = entry.ean ? `EAN ${entry.ean}` : entry.mode || "ručně";
+    const undone = entry.undone ? " (vrĂˇceno)" : "";
+    const source = entry.ean ? `EAN ${entry.ean}` : entry.mode || "ruÄŤnÄ›";
     div.innerHTML = `
       <div class="history-main">
         <strong>${escapeHtml(sign)}${entry.amount} ks${escapeHtml(undone)}</strong>
         <span class="history-code">${escapeHtml(entry.variantCode || entry.productCode)}</span>
-        <span class="history-sequence">poř. ${escapeHtml(entry.sequence || "-")}</span>
+        <span class="history-sequence">poĹ™. ${escapeHtml(entry.sequence || "-")}</span>
       </div>
-      <div class="history-meta">${escapeHtml(formatTime(entry.at))} | obj. ${escapeHtml(entry.orderNumber)} | zůstává ${escapeHtml(entry.remainingAfter)} | ${escapeHtml(source)}</div>
+      <div class="history-meta">${escapeHtml(formatTime(entry.at))} | obj. ${escapeHtml(entry.orderNumber)} | zĹŻstĂˇvĂˇ ${escapeHtml(entry.remainingAfter)} | ${escapeHtml(source)}</div>
       <div class="history-name">${escapeHtml(entry.variant || entry.productName || "")}</div>
       ${
         canUndo
-          ? `<div class="history-actions"><button type="button" data-action="undo-history" data-id="${escapeHtml(entry.id)}">Vrátit</button></div>`
+          ? `<div class="history-actions"><button type="button" data-action="undo-history" data-id="${escapeHtml(entry.id)}">VrĂˇtit</button></div>`
           : ""
       }
     `;
@@ -863,7 +983,7 @@ function renderCandidates() {
     div.innerHTML = `
       <strong>${escapeHtml(item.variantCode || item.productCode)}</strong>
       <div>${escapeHtml(item.productName || item.info)}</div>
-      <small>Obj. ${escapeHtml(item.orderNumber)} | poř. ${escapeHtml(item.sequence)} | ${escapeHtml(item.variant)}</small>
+      <small>Obj. ${escapeHtml(item.orderNumber)} | poĹ™. ${escapeHtml(item.sequence)} | ${escapeHtml(item.variant)}</small>
       <div class="candidate-footer">
         <span class="qty">${item.remaining}</span>
         <button type="button" data-action="candidate-deduct" data-id="${escapeHtml(item.id)}">Odepsat 1</button>
@@ -908,7 +1028,7 @@ function changeItem(itemId, delta, context = {}) {
   if (!item) return null;
 
   if (delta < 0 && item.remaining <= 0) {
-    setMessage("Tahle položka už má nulový zůstatek.", "warning");
+    setMessage("Tahle poloĹľka uĹľ mĂˇ nulovĂ˝ zĹŻstatek.", "warning");
     return null;
   }
 
@@ -936,11 +1056,11 @@ function undoHistory(historyId) {
 
   item.remaining += entry.amount;
   entry.undone = true;
-  state.history.unshift(historyEntry(item, entry.amount, "restore", { mode: "vrácení odpisu" }));
+  state.history.unshift(historyEntry(item, entry.amount, "restore", { mode: "vrĂˇcenĂ­ odpisu" }));
   state.history = state.history.slice(0, MAX_HISTORY);
   saveState();
   renderAll();
-  setMessage(`Vráceno ${entry.amount} ks pro ${entry.variantCode}.`, "success");
+  setMessage(`VrĂˇceno ${entry.amount} ks pro ${entry.variantCode}.`, "success");
 }
 
 function findScanCandidates(ean) {
@@ -957,7 +1077,7 @@ function findScanCandidates(ean) {
       if (!exact && !pair) return;
 
       const existing = candidates.get(item.id);
-      const matchType = exact ? "přesná varianta" : "paircode";
+      const matchType = exact ? "pĹ™esnĂˇ varianta" : "paircode";
       if (!existing || exact) {
         candidates.set(item.id, {
           item,
@@ -971,7 +1091,7 @@ function findScanCandidates(ean) {
   return {
     entries,
     candidates: Array.from(candidates.values()).sort((a, b) => {
-      if (a.matchType !== b.matchType) return a.matchType === "přesná varianta" ? -1 : 1;
+      if (a.matchType !== b.matchType) return a.matchType === "pĹ™esnĂˇ varianta" ? -1 : 1;
       return Number(a.item.sequence || 0) - Number(b.item.sequence || 0);
     }),
   };
@@ -986,27 +1106,27 @@ function processScan(rawValue) {
   const result = findScanCandidates(ean);
 
   if (!result.entries.length) {
-    setMessage(`EAN ${ean} není v načtené EAN tabulce.`, "error");
+    setMessage(`EAN ${ean} nenĂ­ v naÄŤtenĂ© EAN tabulce.`, "error");
     renderCandidates();
     return;
   }
 
   if (!result.candidates.length) {
-    setMessage(`EAN ${ean} znám, ale u odpovídajícího zboží už není co odepsat.`, "warning");
+    setMessage(`EAN ${ean} znĂˇm, ale u odpovĂ­dajĂ­cĂ­ho zboĹľĂ­ uĹľ nenĂ­ co odepsat.`, "warning");
     renderCandidates();
     return;
   }
 
-  const exactCandidates = result.candidates.filter((candidate) => candidate.matchType === "přesná varianta");
+  const exactCandidates = result.candidates.filter((candidate) => candidate.matchType === "pĹ™esnĂˇ varianta");
   if (result.entries.length === 1 && exactCandidates.length === 1) {
     const entry = changeItem(exactCandidates[0].item.id, -1, {
       ean,
-      mode: "EAN jednoznačná varianta",
+      mode: "EAN jednoznaÄŤnĂˇ varianta",
     });
     if (entry) {
       showScanResult(entry);
       setMessage(
-        `Odepsáno 1 ks: ${entry.variantCode}, obj. ${entry.orderNumber}, poř. ${entry.sequence}.`,
+        `OdepsĂˇno 1 ks: ${entry.variantCode}, obj. ${entry.orderNumber}, poĹ™. ${entry.sequence}.`,
         "success"
       );
     }
@@ -1015,7 +1135,7 @@ function processScan(rawValue) {
 
   activeCandidates = result.candidates;
   renderAll();
-  setMessage(`EAN ${ean} má více možných shod. Vyber správnou položku.`, "warning");
+  setMessage(`EAN ${ean} mĂˇ vĂ­ce moĹľnĂ˝ch shod. Vyber sprĂˇvnou poloĹľku.`, "warning");
 }
 
 function exportData() {
@@ -1042,9 +1162,9 @@ function importData(file) {
       activeCandidates = [];
       saveState();
       renderAll();
-      setMessage("Import dat proběhl v pořádku.", "success");
+      setMessage("Import dat probÄ›hl v poĹ™Ăˇdku.", "success");
     } catch {
-      setMessage("Import se nepodařil. Soubor nemá očekávaný JSON formát.", "error");
+      setMessage("Import se nepodaĹ™il. Soubor nemĂˇ oÄŤekĂˇvanĂ˝ JSON formĂˇt.", "error");
     }
   };
   reader.readAsText(file);
@@ -1052,16 +1172,16 @@ function importData(file) {
 
 function resetFromSeed() {
   if (!seed.items?.length) {
-    setMessage("Seed z Excelu není k dispozici.", "error");
+    setMessage("Seed z Excelu nenĂ­ k dispozici.", "error");
     return;
   }
-  if (!confirm("Načíst znovu seed z Excelu? Aktuální lokální odpisy se přepíšou.")) return;
+  if (!confirm("NaÄŤĂ­st znovu seed z Excelu? AktuĂˇlnĂ­ lokĂˇlnĂ­ odpisy se pĹ™epĂ­Ĺˇou.")) return;
   applyLoaded(cloneSeed());
   activeCandidates = [];
   saveState();
   renderAll();
   setMessage(
-    `Načteno ${state.items.length} řádků a ${Object.keys(state.eanMap).length} EAN kódů ze seedu.`,
+    `NaÄŤteno ${state.items.length} Ĺ™ĂˇdkĹŻ a ${Object.keys(state.eanMap).length} EAN kĂłdĹŻ ze seedu.`,
     "success"
   );
 }
@@ -1087,7 +1207,7 @@ els.manualSearch.addEventListener("input", () => {
   activeCandidates = [];
   renderAll();
   if (normalize(els.manualSearch.value).includes("501")) {
-    setMessage("Pozor na kód 501 - v původním procesu měl riziko záměny.", "warning");
+    setMessage("Pozor na kĂłd 501 - v pĹŻvodnĂ­m procesu mÄ›l riziko zĂˇmÄ›ny.", "warning");
   }
 });
 
@@ -1121,22 +1241,22 @@ els.sortingBody.addEventListener("click", (event) => {
   if (!button) return;
   const id = button.dataset.id;
   if (button.dataset.action === "deduct") {
-    const entry = changeItem(id, -1, { mode: "ruční odpis" });
-    if (entry) setMessage(`Odepsáno 1 ks: ${entry.variantCode}.`, "success");
+    const entry = changeItem(id, -1, { mode: "ruÄŤnĂ­ odpis" });
+    if (entry) setMessage(`OdepsĂˇno 1 ks: ${entry.variantCode}.`, "success");
   }
   if (button.dataset.action === "restore") {
-    const entry = changeItem(id, 1, { mode: "ruční navrácení" });
-    if (entry) setMessage(`Vráceno 1 ks: ${entry.variantCode}.`, "success");
+    const entry = changeItem(id, 1, { mode: "ruÄŤnĂ­ navrĂˇcenĂ­" });
+    if (entry) setMessage(`VrĂˇceno 1 ks: ${entry.variantCode}.`, "success");
   }
 });
 
 els.candidateList.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-action='candidate-deduct']");
   if (!button) return;
-  const entry = changeItem(button.dataset.id, -1, { mode: "výběr z kandidátů" });
+  const entry = changeItem(button.dataset.id, -1, { mode: "vĂ˝bÄ›r z kandidĂˇtĹŻ" });
   if (entry) {
     showScanResult(entry);
-    setMessage(`Odepsáno 1 ks: ${entry.variantCode}, poř. ${entry.sequence}.`, "success");
+    setMessage(`OdepsĂˇno 1 ks: ${entry.variantCode}, poĹ™. ${entry.sequence}.`, "success");
   }
 });
 
@@ -1167,9 +1287,9 @@ els.sortingDelete.addEventListener("click", async () => {
     const deleted = await deleteDataset(sortingState.dataset, () =>
       loadExpeditionDays(expeditionState.day?.date || "")
     );
-    if (deleted) setMessage("Dávka roztřídění byla smazaná.", "success");
+    if (deleted) setMessage("DĂˇvka roztĹ™Ă­dÄ›nĂ­ byla smazanĂˇ.", "success");
   } catch (error) {
-    setMessage(`Dávku roztřídění se nepodařilo smazat: ${error.message}`, "error");
+    setMessage(`DĂˇvku roztĹ™Ă­dÄ›nĂ­ se nepodaĹ™ilo smazat: ${error.message}`, "error");
   }
 });
 els.completionRefresh.addEventListener("click", () => loadCompletionDatasets());
@@ -1181,18 +1301,20 @@ els.completionDelete.addEventListener("click", async () => {
     const deleted = await deleteDataset(completionState.dataset, () =>
       loadExpeditionDays(expeditionState.day?.date || "")
     );
-    if (deleted) setCompletionMessage("Dávka kompletace byla smazaná.", "success");
+    if (deleted) setCompletionMessage("DĂˇvka kompletace byla smazanĂˇ.", "success");
   } catch (error) {
-    setCompletionMessage(`Dávku kompletace se nepodařilo smazat: ${error.message}`, "error");
+    setCompletionMessage(`DĂˇvku kompletace se nepodaĹ™ilo smazat: ${error.message}`, "error");
   }
 });
+
+els.packetaDryRun.addEventListener("click", runPacketaDryRun);
 
 loadState();
 renderAll();
 renderSortingOptions();
 renderCompletion();
 setMessage(
-  `Načteno ${state.items.length} řádků, ${Object.keys(state.eanMap).length} EAN kódů, objednávek: ${
+  `NaÄŤteno ${state.items.length} Ĺ™ĂˇdkĹŻ, ${Object.keys(state.eanMap).length} EAN kĂłdĹŻ, objednĂˇvek: ${
     new Set(state.items.map((item) => item.orderNumber).filter(Boolean)).size
   }.`,
   "neutral"
