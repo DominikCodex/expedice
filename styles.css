@@ -492,7 +492,8 @@ select:focus {
 .table-panel,
 .history-panel,
 .completion-toolbar,
-.dry-run-result {
+.dry-run-result,
+.settings-panel {
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -833,6 +834,45 @@ select:focus {
   color: #1b4f9c;
   background: #e8f0ff;
   border-color: #b9cdf5;
+}
+
+.settings-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 12px;
+  padding: 12px;
+}
+
+.settings-card {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.settings-card-wide {
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.settings-card legend {
+  padding: 0 6px;
+  color: var(--accent-dark);
+  font-size: 15px;
+  font-weight: 900;
+}
+
+.settings-hint {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.settings-toggle {
+  justify-content: flex-start;
 }
 
 .completion-table td strong,

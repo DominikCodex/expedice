@@ -315,6 +315,15 @@ def ensure_schema():
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS app_settings (
+                    key TEXT PRIMARY KEY,
+                    value JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_expedition_days_date
                 ON expedition_days (day_date DESC)
                 """
@@ -725,6 +734,102 @@ def dataset_summary(row):
         "deletedBy": row.get("deleted_by"),
         "deleteReason": row.get("delete_reason"),
     }
+
+
+def default_settings():
+    return {
+        "mapy": {
+            "apiKey": os.environ.get("MAPY_API_KEY", ""),
+        },
+        "packeta": {
+            "apiUrl": os.environ.get("PACKETA_API_URL", "https://www.zasilkovna.cz/api/rest"),
+            "apiPassword": os.environ.get("PACKETA_API_PASSWORD", ""),
+        },
+        "dpd": {
+            "apiBaseUrl": os.environ.get("DPD_API_URL", "https://geoapi.dpd.cz/v1").rstrip("/"),
+            "apiKey": os.environ.get("DPD_API_TOKEN") or os.environ.get("DPD_API_KEY", ""),
+            "sendEnabled": os.environ.get("DPD_API_ENABLED") == "1",
+            "mode": os.environ.get("DPD_API_MODE", "test"),
+            "customerDsw": "",
+            "customerId": "",
+            "shipmentType": "Standard",
+            "notification": True,
+            "senderName": "",
+            "senderStreet": "",
+            "senderHouseNumber": "",
+            "senderCity": "",
+            "senderZipCode": "",
+            "senderCountry": "CZ",
+            "senderContactName": "",
+            "senderPhone": "",
+            "senderEmail": "",
+        },
+    }
+
+
+def deep_merge_settings(base, override):
+    merged = dict(base)
+    if not isinstance(override, dict):
+        return merged
+    for key, value in override.items():
+        if isinstance(value, dict) and isinstance(merged.get(key), dict):
+            merged[key] = deep_merge_settings(merged[key], value)
+        else:
+            merged[key] = value
+    return merged
+
+
+def read_settings(include_secrets=False):
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT value FROM app_settings WHERE key = 'expedition'")
+            row = cur.fetchone()
+
+    settings = deep_merge_settings(default_settings(), row["value"] if row else {})
+    if include_secrets:
+        return settings
+
+    public_settings = json.loads(json.dumps(settings))
+    for section, field in (("mapy", "apiKey"), ("packeta", "apiPassword"), ("dpd", "apiKey")):
+        value = public_settings.get(section, {}).get(field, "")
+        public_settings[section][f"has{field[0].upper()}{field[1:]}"] = bool(value)
+        public_settings[section][field] = ""
+    return public_settings
+
+
+def merge_secret_field(next_section, current_section, field):
+    if field not in next_section or next_section.get(field) == "":
+        next_section[field] = current_section.get(field, "")
+    elif next_section.get(field) == "__CLEAR__":
+        next_section[field] = ""
+
+
+def save_settings_payload(payload):
+    current = read_settings(include_secrets=True)
+    incoming = payload if isinstance(payload, dict) else {}
+    next_settings = deep_merge_settings(current, incoming)
+    merge_secret_field(next_settings["mapy"], current["mapy"], "apiKey")
+    merge_secret_field(next_settings["packeta"], current["packeta"], "apiPassword")
+    merge_secret_field(next_settings["dpd"], current["dpd"], "apiKey")
+    next_settings["dpd"]["apiBaseUrl"] = clean_text(next_settings["dpd"].get("apiBaseUrl")).rstrip("/")
+
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                INSERT INTO app_settings (key, value, updated_at)
+                VALUES ('expedition', %s, NOW())
+                ON CONFLICT (key) DO UPDATE SET
+                    value = EXCLUDED.value,
+                    updated_at = NOW()
+                RETURNING value
+                """,
+                (Json(next_settings),),
+            )
+            saved = cur.fetchone()["value"]
+
+    return deep_merge_settings(default_settings(), saved)
 
 
 def row_to_api(row):
@@ -1640,7 +1745,7 @@ def fetch_datasets(include_deleted=False, dataset_kind=None, shop_code=None, dat
 
 
 def packeta_api_url():
-    return os.environ.get("PACKETA_API_URL") or "https://www.zasilkovna.cz/api/rest"
+    return read_settings(include_secrets=True)["packeta"].get("apiUrl") or "https://www.zasilkovna.cz/api/rest"
 
 
 def packeta_validation_xml(request_xml, password):
@@ -1707,11 +1812,11 @@ def packeta_post_validation_xml(validation_xml):
 
 
 def dpd_api_url():
-    return os.environ.get("DPD_API_URL", "")
+    return read_settings(include_secrets=True)["dpd"].get("apiBaseUrl", "").rstrip("/")
 
 
 def dpd_api_token():
-    return os.environ.get("DPD_API_TOKEN") or os.environ.get("DPD_API_KEY") or ""
+    return read_settings(include_secrets=True)["dpd"].get("apiKey", "")
 
 
 def dpd_country(row):
@@ -1824,38 +1929,35 @@ def dpd_request_headers():
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
     token = dpd_api_token()
     if token:
-        scheme = os.environ.get("DPD_API_AUTH_SCHEME") or "Bearer"
-        headers["Authorization"] = f"{scheme} {token}".strip()
-    extra_header = os.environ.get("DPD_API_HEADER_NAME", "")
-    extra_value = os.environ.get("DPD_API_HEADER_VALUE", "")
-    if extra_header and extra_value:
-        headers[extra_header] = extra_value
+        headers["x-api-key"] = token
     return headers
 
 
 def dpd_post_payload(payload):
-    if os.environ.get("DPD_API_ENABLED") != "1":
+    settings = read_settings(include_secrets=True)["dpd"]
+    if not settings.get("sendEnabled"):
         return {
             "httpStatus": 0,
             "ok": False,
             "responseText": "",
-            "error": "DPD_API_ENABLED neni nastaveno na 1",
+            "error": "DPD odesílání není povolené v Nastavení",
         }
-    if not dpd_api_url():
+    base_url = clean_text(settings.get("apiBaseUrl")).rstrip("/")
+    if not base_url:
         return {
             "httpStatus": 0,
             "ok": False,
             "responseText": "",
-            "error": "DPD_API_URL neni nastavene",
+            "error": "DPD API URL není nastavené",
         }
 
-    timeout = int_from_text(os.environ.get("DPD_API_TIMEOUT")) or 25
+    timeout = 25
     request_data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
     dpd_request = urllib.request.Request(
-        dpd_api_url(),
+        f"{base_url}/shipments",
         data=request_data,
         headers=dpd_request_headers(),
-        method=os.environ.get("DPD_API_METHOD") or "POST",
+        method="POST",
     )
 
     try:
@@ -1885,7 +1987,7 @@ def dpd_post_payload(payload):
 
 
 def mapy_api_key():
-    return os.environ.get("MAPY_API_KEY") or os.environ.get("MAPY_API_TOKEN") or ""
+    return read_settings(include_secrets=True)["mapy"].get("apiKey") or os.environ.get("MAPY_API_TOKEN") or ""
 
 
 def mapy_geocode_url():
@@ -2122,7 +2224,7 @@ def packeta_validate():
     if auth_error:
         return auth_error
 
-    password = os.environ.get("PACKETA_API_PASSWORD", "")
+    password = read_settings(include_secrets=True)["packeta"].get("apiPassword", "")
     if not password:
         return jsonify({"error": "PACKETA_API_PASSWORD is not configured"}), 400
 
@@ -2280,7 +2382,7 @@ def dpd_dry_run():
             "dryRun": True,
             "carrier": "dpd",
             "endpointConfigured": bool(dpd_api_url()),
-            "sendEnabled": os.environ.get("DPD_API_ENABLED") == "1",
+            "sendEnabled": read_settings(include_secrets=True)["dpd"].get("sendEnabled", False),
             "dataset": dataset_summary(dataset),
             "rowsCount": len(rows),
             "shipmentsCount": len(shipments),
@@ -2340,8 +2442,9 @@ def dpd_send():
         shipments.append(dpd_payload(row))
 
     selected = shipments[:limit]
+    dpd_settings = read_settings(include_secrets=True)["dpd"]
     api_payload = {
-        "mode": data.get("mode") or os.environ.get("DPD_API_MODE") or "test",
+        "mode": data.get("mode") or dpd_settings.get("mode") or "test",
         "source": "expedice-railway",
         "dataset": dataset_summary(dataset),
         "shipments": [item["payload"] for item in selected],
@@ -2353,7 +2456,7 @@ def dpd_send():
             "ok": api_result["ok"],
             "carrier": "dpd",
             "endpointConfigured": bool(dpd_api_url()),
-            "sendEnabled": os.environ.get("DPD_API_ENABLED") == "1",
+            "sendEnabled": read_settings(include_secrets=True)["dpd"].get("sendEnabled", False),
             "dataset": dataset_summary(dataset),
             "shipmentsCount": len(shipments),
             "sentCount": len(selected) if api_result["ok"] else 0,
@@ -2364,6 +2467,31 @@ def dpd_send():
             "skipped": skipped,
         }
     )
+
+
+@app.route("/api/settings")
+def get_settings():
+    auth_error = require_download_token_if_configured()
+    if auth_error:
+        return auth_error
+
+    return jsonify({"settings": read_settings(include_secrets=False)})
+
+
+@app.route("/api/settings", methods=["POST"])
+def update_settings():
+    auth_error = require_upload_token()
+    if auth_error:
+        return auth_error
+
+    payload = request.get_json(silent=True) or {}
+    saved = save_settings_payload(payload.get("settings") or payload)
+    public_settings = json.loads(json.dumps(saved))
+    for section, field in (("mapy", "apiKey"), ("packeta", "apiPassword"), ("dpd", "apiKey")):
+        value = public_settings.get(section, {}).get(field, "")
+        public_settings[section][f"has{field[0].upper()}{field[1:]}"] = bool(value)
+        public_settings[section][field] = ""
+    return jsonify({"ok": True, "settings": public_settings})
 
 
 @app.route("/api/completion/datasets")

@@ -6,7 +6,7 @@
     <title>Roztřídění zboží</title>
     <link rel="stylesheet" href="styles.css" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=currency-packeta-sk-20260618"></script>
+    <script defer src="app.js?v=settings-page-20260618"></script>
   </head>
   <body>
     <main class="shell">
@@ -56,6 +56,7 @@
           <nav class="view-tabs" aria-label="Moduly expedice">
             <button id="tab-sorting" type="button" class="tab-button active">Roztřídění</button>
             <button id="tab-completion" type="button" class="tab-button">Kompletace</button>
+            <button id="tab-settings" type="button" class="tab-button">Nastavení</button>
           </nav>
 
           <section id="sorting-view" class="app-view">
@@ -223,6 +224,131 @@
                   </thead>
                   <tbody id="completion-body"></tbody>
                 </table>
+              </div>
+            </section>
+          </section>
+
+          <section id="settings-view" class="app-view hidden">
+            <section class="settings-panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Konfigurace</p>
+                  <h2>Nastavení expedice</h2>
+                </div>
+                <button id="settings-save" type="button">Uložit nastavení</button>
+              </div>
+
+              <section id="settings-message" class="message neutral" aria-live="polite"></section>
+
+              <div class="settings-grid">
+                <fieldset class="settings-card">
+                  <legend>Mapy.com</legend>
+                  <label class="field">
+                    <span>API key</span>
+                    <input id="settings-mapy-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
+                  </label>
+                  <div id="settings-mapy-status" class="settings-hint"></div>
+                </fieldset>
+
+                <fieldset class="settings-card">
+                  <legend>Zásilkovna / Packeta</legend>
+                  <label class="field">
+                    <span>API URL</span>
+                    <input id="settings-packeta-url" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>API heslo</span>
+                    <input id="settings-packeta-password" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
+                  </label>
+                  <div id="settings-packeta-status" class="settings-hint"></div>
+                </fieldset>
+
+                <fieldset class="settings-card">
+                  <legend>DPD GeoAPI V1</legend>
+                  <label class="field">
+                    <span>Base URL</span>
+                    <input id="settings-dpd-url" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>API key</span>
+                    <input id="settings-dpd-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
+                  </label>
+                  <label class="field">
+                    <span>Zákazník DSW</span>
+                    <input id="settings-dpd-customer-dsw" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>Zákazník ID</span>
+                    <input id="settings-dpd-customer-id" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>Typ zásilky</span>
+                    <select id="settings-dpd-shipment-type">
+                      <option value="Standard">Standard</option>
+                      <option value="Collection">Collection</option>
+                      <option value="ThirdPartyCollection">ThirdPartyCollection</option>
+                      <option value="Import">Import</option>
+                      <option value="ThirdPartyStandard">ThirdPartyStandard</option>
+                      <option value="Return">Return</option>
+                    </select>
+                  </label>
+                  <label class="field">
+                    <span>Režim</span>
+                    <select id="settings-dpd-mode">
+                      <option value="test">test</option>
+                      <option value="production">ostrý</option>
+                    </select>
+                  </label>
+                  <label class="toggle settings-toggle">
+                    <input id="settings-dpd-enabled" type="checkbox" />
+                    <span>Povolit odesílání do DPD</span>
+                  </label>
+                  <label class="toggle settings-toggle">
+                    <input id="settings-dpd-notification" type="checkbox" />
+                    <span>DPD notifikace zákazníkovi</span>
+                  </label>
+                  <div id="settings-dpd-status" class="settings-hint"></div>
+                </fieldset>
+
+                <fieldset class="settings-card settings-card-wide">
+                  <legend>Odesílatel pro DPD</legend>
+                  <label class="field">
+                    <span>Název odesílatele</span>
+                    <input id="settings-sender-name" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>Ulice</span>
+                    <input id="settings-sender-street" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>Číslo domu</span>
+                    <input id="settings-sender-house" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>Město</span>
+                    <input id="settings-sender-city" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>PSČ</span>
+                    <input id="settings-sender-zip" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>Země</span>
+                    <input id="settings-sender-country" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>Kontakt</span>
+                    <input id="settings-sender-contact" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>Telefon</span>
+                    <input id="settings-sender-phone" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>E-mail</span>
+                    <input id="settings-sender-email" autocomplete="off" />
+                  </label>
+                </fieldset>
               </div>
             </section>
           </section>

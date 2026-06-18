@@ -35,6 +35,11 @@ const completionState = {
   loaded: false,
 };
 
+const settingsState = {
+  loaded: false,
+  settings: null,
+};
+
 const els = {
   eanInput: document.getElementById("ean-input"),
   manualSearch: document.getElementById("manual-search"),
@@ -65,6 +70,7 @@ const els = {
   expeditionDaySummary: document.getElementById("expedition-day-summary"),
   tabSorting: document.getElementById("tab-sorting"),
   tabCompletion: document.getElementById("tab-completion"),
+  tabSettings: document.getElementById("tab-settings"),
   sortingView: document.getElementById("sorting-view"),
   sortingDataset: document.getElementById("sorting-dataset"),
   sortingRefresh: document.getElementById("sorting-refresh"),
@@ -83,6 +89,32 @@ const els = {
   completionSummary: document.getElementById("completion-summary"),
   completionBody: document.getElementById("completion-body"),
   completionRowCount: document.getElementById("completion-row-count"),
+  settingsView: document.getElementById("settings-view"),
+  settingsSave: document.getElementById("settings-save"),
+  settingsMessage: document.getElementById("settings-message"),
+  settingsMapyKey: document.getElementById("settings-mapy-key"),
+  settingsMapyStatus: document.getElementById("settings-mapy-status"),
+  settingsPacketaUrl: document.getElementById("settings-packeta-url"),
+  settingsPacketaPassword: document.getElementById("settings-packeta-password"),
+  settingsPacketaStatus: document.getElementById("settings-packeta-status"),
+  settingsDpdUrl: document.getElementById("settings-dpd-url"),
+  settingsDpdKey: document.getElementById("settings-dpd-key"),
+  settingsDpdCustomerDsw: document.getElementById("settings-dpd-customer-dsw"),
+  settingsDpdCustomerId: document.getElementById("settings-dpd-customer-id"),
+  settingsDpdShipmentType: document.getElementById("settings-dpd-shipment-type"),
+  settingsDpdMode: document.getElementById("settings-dpd-mode"),
+  settingsDpdEnabled: document.getElementById("settings-dpd-enabled"),
+  settingsDpdNotification: document.getElementById("settings-dpd-notification"),
+  settingsDpdStatus: document.getElementById("settings-dpd-status"),
+  settingsSenderName: document.getElementById("settings-sender-name"),
+  settingsSenderStreet: document.getElementById("settings-sender-street"),
+  settingsSenderHouse: document.getElementById("settings-sender-house"),
+  settingsSenderCity: document.getElementById("settings-sender-city"),
+  settingsSenderZip: document.getElementById("settings-sender-zip"),
+  settingsSenderCountry: document.getElementById("settings-sender-country"),
+  settingsSenderContact: document.getElementById("settings-sender-contact"),
+  settingsSenderPhone: document.getElementById("settings-sender-phone"),
+  settingsSenderEmail: document.getElementById("settings-sender-email"),
 };
 
 function uid(prefix) {
@@ -210,6 +242,11 @@ function setCompletionMessage(text, type = "neutral") {
   els.completionMessage.textContent = text;
 }
 
+function setSettingsMessage(text, type = "neutral") {
+  els.settingsMessage.className = `message ${type}`;
+  els.settingsMessage.textContent = text;
+}
+
 async function fetchJson(path, options = {}) {
   const headers = options.body
     ? { "Content-Type": "application/json", ...(options.headers || {}) }
@@ -267,16 +304,23 @@ function includeInactiveQuery() {
 
 function switchView(view) {
   const completion = view === "completion";
-  els.sortingView.classList.toggle("hidden", completion);
+  const settings = view === "settings";
+  els.sortingView.classList.toggle("hidden", completion || settings);
   els.completionView.classList.toggle("hidden", !completion);
-  els.tabSorting.classList.toggle("active", !completion);
+  els.settingsView.classList.toggle("hidden", !settings);
+  els.tabSorting.classList.toggle("active", !completion && !settings);
   els.tabCompletion.classList.toggle("active", completion);
+  els.tabSettings.classList.toggle("active", settings);
 
   if (completion && !completionState.loaded) {
     loadCompletionDatasets();
   }
 
-  if (!completion) {
+  if (settings && !settingsState.loaded) {
+    loadSettings();
+  }
+
+  if (!completion && !settings) {
     requestAnimationFrame(() => els.eanInput.focus());
   }
 }
@@ -957,6 +1001,102 @@ async function runDpdSend() {
     setCompletionMessage(`DPD API se nepodařilo spustit: ${error.message}`, "error");
   } finally {
     els.dpdSend.disabled = !completionState.dataset;
+  }
+}
+
+function renderSettings(settings) {
+  const mapy = settings.mapy || {};
+  const packeta = settings.packeta || {};
+  const dpd = settings.dpd || {};
+
+  els.settingsMapyKey.value = "";
+  els.settingsMapyStatus.textContent = mapy.hasApiKey ? "API key je uložený." : "API key zatím není uložený.";
+
+  els.settingsPacketaUrl.value = packeta.apiUrl || "";
+  els.settingsPacketaPassword.value = "";
+  els.settingsPacketaStatus.textContent = packeta.hasApiPassword ? "API heslo je uložené." : "API heslo zatím není uložené.";
+
+  els.settingsDpdUrl.value = dpd.apiBaseUrl || "https://geoapi.dpd.cz/v1";
+  els.settingsDpdKey.value = "";
+  els.settingsDpdCustomerDsw.value = dpd.customerDsw || "";
+  els.settingsDpdCustomerId.value = dpd.customerId || "";
+  els.settingsDpdShipmentType.value = dpd.shipmentType || "Standard";
+  els.settingsDpdMode.value = dpd.mode || "test";
+  els.settingsDpdEnabled.checked = Boolean(dpd.sendEnabled);
+  els.settingsDpdNotification.checked = dpd.notification !== false;
+  els.settingsDpdStatus.textContent = dpd.hasApiKey ? "DPD API key je uložený." : "DPD API key zatím není uložený.";
+
+  els.settingsSenderName.value = dpd.senderName || "";
+  els.settingsSenderStreet.value = dpd.senderStreet || "";
+  els.settingsSenderHouse.value = dpd.senderHouseNumber || "";
+  els.settingsSenderCity.value = dpd.senderCity || "";
+  els.settingsSenderZip.value = dpd.senderZipCode || "";
+  els.settingsSenderCountry.value = dpd.senderCountry || "CZ";
+  els.settingsSenderContact.value = dpd.senderContactName || "";
+  els.settingsSenderPhone.value = dpd.senderPhone || "";
+  els.settingsSenderEmail.value = dpd.senderEmail || "";
+}
+
+async function loadSettings() {
+  setSettingsMessage("Načítám nastavení...", "neutral");
+  try {
+    const data = await fetchJson("/api/settings");
+    settingsState.settings = data.settings || {};
+    settingsState.loaded = true;
+    renderSettings(settingsState.settings);
+    setSettingsMessage("Nastavení je načtené.", "success");
+  } catch (error) {
+    setSettingsMessage(`Nastavení se nepodařilo načíst: ${error.message}`, "error");
+  }
+}
+
+function collectSettings() {
+  return {
+    mapy: {
+      apiKey: els.settingsMapyKey.value.trim(),
+    },
+    packeta: {
+      apiUrl: els.settingsPacketaUrl.value.trim(),
+      apiPassword: els.settingsPacketaPassword.value,
+    },
+    dpd: {
+      apiBaseUrl: els.settingsDpdUrl.value.trim(),
+      apiKey: els.settingsDpdKey.value,
+      sendEnabled: els.settingsDpdEnabled.checked,
+      mode: els.settingsDpdMode.value,
+      customerDsw: els.settingsDpdCustomerDsw.value.trim(),
+      customerId: els.settingsDpdCustomerId.value.trim(),
+      shipmentType: els.settingsDpdShipmentType.value,
+      notification: els.settingsDpdNotification.checked,
+      senderName: els.settingsSenderName.value.trim(),
+      senderStreet: els.settingsSenderStreet.value.trim(),
+      senderHouseNumber: els.settingsSenderHouse.value.trim(),
+      senderCity: els.settingsSenderCity.value.trim(),
+      senderZipCode: els.settingsSenderZip.value.trim(),
+      senderCountry: els.settingsSenderCountry.value.trim() || "CZ",
+      senderContactName: els.settingsSenderContact.value.trim(),
+      senderPhone: els.settingsSenderPhone.value.trim(),
+      senderEmail: els.settingsSenderEmail.value.trim(),
+    },
+  };
+}
+
+async function saveSettings() {
+  els.settingsSave.disabled = true;
+  setSettingsMessage("Ukládám nastavení...", "neutral");
+  try {
+    const data = await fetchJson("/api/settings", {
+      method: "POST",
+      body: JSON.stringify({ settings: collectSettings() }),
+    });
+    settingsState.settings = data.settings || {};
+    settingsState.loaded = true;
+    renderSettings(settingsState.settings);
+    setSettingsMessage("Nastavení je uložené.", "success");
+  } catch (error) {
+    setSettingsMessage(`Nastavení se nepodařilo uložit: ${error.message}`, "error");
+  } finally {
+    els.settingsSave.disabled = false;
   }
 }
 
@@ -1710,6 +1850,8 @@ els.expeditionDayList.addEventListener("click", (event) => {
 
 els.tabSorting.addEventListener("click", () => switchView("sorting"));
 els.tabCompletion.addEventListener("click", () => switchView("completion"));
+els.tabSettings.addEventListener("click", () => switchView("settings"));
+els.settingsSave.addEventListener("click", saveSettings);
 els.sortingRefresh.addEventListener("click", () => {
   loadSortingDataset(els.sortingDataset.value);
 });
