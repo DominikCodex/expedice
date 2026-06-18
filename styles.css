@@ -670,7 +670,96 @@ select:focus {
 }
 
 .completion-table {
-  min-width: 1360px;
+  min-width: 3300px;
+}
+
+.completion-table th,
+.completion-table td {
+  white-space: nowrap;
+}
+
+.completion-table td:nth-child(8) {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table-input {
+  min-width: 120px;
+  min-height: 32px;
+  padding: 5px 7px;
+  font-size: 12px;
+}
+
+.table-input.phone-input {
+  min-width: 135px;
+}
+
+.table-input.email-input {
+  min-width: 210px;
+}
+
+.table-input.address-input {
+  min-width: 240px;
+}
+
+.table-input.zip-input {
+  min-width: 86px;
+}
+
+.completion-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.completion-actions button {
+  min-height: 32px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
+.address-validation {
+  display: grid;
+  gap: 4px;
+  margin-top: 6px;
+  max-width: 320px;
+}
+
+.address-validation small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.address-badge {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 7px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.address-badge.ok {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  border: 1px solid #bddbce;
+}
+
+.address-badge.warning {
+  color: var(--warning);
+  background: var(--warning-soft);
+  border: 1px solid #edcf98;
+}
+
+.address-badge.danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid #e6b9b9;
 }
 
 .completion-table td strong,

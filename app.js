@@ -798,6 +798,89 @@ async function runPacketaValidation() {
   }
 }
 
+function completionRowElement(rowId) {
+  return Array.from(els.completionBody.querySelectorAll("tr")).find(
+    (row) => row.dataset.completionRowId === String(rowId)
+  );
+}
+
+function collectCompletionRowEdits(rowId) {
+  const tr = completionRowElement(rowId);
+  const values = {};
+  if (!tr) return values;
+  tr.querySelectorAll("[data-field]").forEach((input) => {
+    values[input.dataset.field] = input.value.trim();
+  });
+  return values;
+}
+
+function replaceCompletionRow(row) {
+  const index = completionState.rows.findIndex((item) => String(item.id) === String(row.id));
+  if (index >= 0) completionState.rows[index] = row;
+}
+
+async function saveCompletionRow(rowId) {
+  const values = collectCompletionRowEdits(rowId);
+  setCompletionMessage("Ukladam upraveny kontakt a adresu...", "neutral");
+
+  try {
+    const data = await fetchJson(`/api/completion/rows/${encodeURIComponent(rowId)}`, {
+      method: "PATCH",
+      body: JSON.stringify(values),
+    });
+    if (data.row) {
+      replaceCompletionRow(data.row);
+      renderCompletion();
+    }
+    setCompletionMessage("Kontakt a adresa jsou ulozene.", "success");
+  } catch (error) {
+    setCompletionMessage(`Ulozeni adresy se nepodarilo: ${error.message}`, "error");
+  }
+}
+
+function renderAddressValidation(rowId, data) {
+  const tr = completionRowElement(rowId);
+  const target = tr?.querySelector("[data-address-validation]");
+  if (!target) return;
+
+  const items = data.items || [];
+  const first = items[0];
+  if (!items.length) {
+    target.innerHTML = `<span class="address-badge warning">Nenalezeno</span>`;
+    return;
+  }
+
+  target.innerHTML = `
+    <span class="address-badge ${data.valid ? "ok" : "warning"}">${data.valid ? "Overeno" : "Navrh"}</span>
+    <small>${escapeHtml(first.name || "")}${first.location ? `, ${escapeHtml(first.location)}` : ""}${
+    first.zip ? ` | PSC ${escapeHtml(first.zip)}` : ""
+  }</small>
+  `;
+}
+
+async function validateCompletionAddress(rowId) {
+  const row = completionState.rows.find((item) => String(item.id) === String(rowId)) || {};
+  const values = collectCompletionRowEdits(rowId);
+  setCompletionMessage("Overuji adresu pres Mapy.com...", "neutral");
+
+  try {
+    const data = await fetchJson("/api/address/validate", {
+      method: "POST",
+      body: JSON.stringify({
+        ...values,
+        shopCode: row.shopCode || completionState.dataset?.shopCode || "",
+      }),
+    });
+    renderAddressValidation(rowId, data);
+    setCompletionMessage(data.valid ? "Adresa je overena pres Mapy.com." : "Mapy.com nasly jen navrh adresy.", data.valid ? "success" : "warning");
+  } catch (error) {
+    const tr = completionRowElement(rowId);
+    const target = tr?.querySelector("[data-address-validation]");
+    if (target) target.innerHTML = `<span class="address-badge danger">Chyba</span><small>${escapeHtml(error.message)}</small>`;
+    setCompletionMessage(`Overeni adresy se nepodarilo: ${error.message}`, "error");
+  }
+}
+
 async function loadCompletionDataset(datasetId) {
   if (!datasetId) return;
   setCompletionMessage("Nacitam vybranou kompletaci...", "neutral");
@@ -849,6 +932,12 @@ function renderCompletionSummary(rows) {
   `;
 }
 
+function completionInput(row, field, value, className = "") {
+  return `<input class="table-input ${escapeHtml(className)}" data-row-id="${escapeHtml(row.id)}" data-field="${escapeHtml(
+    field
+  )}" value="${escapeHtml(value || "")}" />`;
+}
+
 function renderCompletion() {
   const rows = completionState.rows;
   els.completionRowCount.textContent = `${rows.length} radku`;
@@ -866,14 +955,30 @@ function renderCompletion() {
     const customer = [row.firstName, row.lastName].filter(Boolean).join(" ");
     const address = [row.city, row.zipCode].filter(Boolean).join(" ");
     const tr = document.createElement("tr");
+    tr.dataset.completionRowId = row.id;
     tr.innerHTML = `
       <td><span class="shop-chip">${escapeHtml(row.shopCode || completionState.dataset?.shopCode || "-")}</span></td>
       <td class="code">${escapeHtml(row.expeditionNumber || row.rowNumber || "")}</td>
       <td class="code">${escapeHtml(row.orderNumber || "")}</td>
+      <td class="code">${escapeHtml(row.expeditionOrderCode || "")}</td>
+      <td class="code">${escapeHtml(row.packetaId || "")}</td>
+      <td>${escapeHtml(row.completionStatus || "")}</td>
+      <td class="code">${escapeHtml(row.orderId || "")}</td>
+      <td>${completionInput(row, "street", row.street || "")}</td>
+      <td>${completionInput(row, "houseNumber", row.houseNumber || "")}</td>
+      <td>${escapeHtml(row.dpdFlag || "")}</td>
+      <td>${escapeHtml(row.packetaStatus || "")}</td>
+      <td class="code">${escapeHtml(row.packetaShipmentId || "")}</td>
+      <td class="code">${escapeHtml(row.orderDate || "")}</td>
       <td>
         <strong>${escapeHtml(customer || "-")}</strong>
         <small>${escapeHtml(address)}</small>
       </td>
+      <td>${completionInput(row, "phone", row.phone || "", "phone-input")}</td>
+      <td>${completionInput(row, "email", row.email || "", "email-input")}</td>
+      <td>${completionInput(row, "streetWithNumber", row.streetWithNumber || [row.street, row.houseNumber].filter(Boolean).join(" "), "address-input")}</td>
+      <td>${completionInput(row, "city", row.city || "")}</td>
+      <td>${completionInput(row, "zipCode", row.zipCode || "", "zip-input")}</td>
       <td>${escapeHtml(row.shippingMethod || "")}</td>
       <td>${escapeHtml(row.paymentMethod || row.paidStatus || "")}</td>
       <td>${escapeHtml(row.codAmount || "")}</td>
@@ -881,6 +986,13 @@ function renderCompletion() {
       <td><span class="status-chip ${status.tone}">${escapeHtml(status.label)}</span></td>
       <td>${escapeHtml(row.labelPrinted || row.packetaShipmentId || "")}</td>
       <td class="completion-note">${escapeHtml(row.note || "")}</td>
+      <td>
+        <div class="completion-actions">
+          <button type="button" data-action="save-completion-row" data-row-id="${escapeHtml(row.id)}">Ulozit</button>
+          <button type="button" class="secondary" data-action="validate-address" data-row-id="${escapeHtml(row.id)}">Overit</button>
+        </div>
+        <div class="address-validation" data-address-validation="${escapeHtml(row.id)}"></div>
+      </td>
     `;
     els.completionBody.appendChild(tr);
   });
@@ -1428,6 +1540,26 @@ els.completionDelete.addEventListener("click", async () => {
   }
 });
 
+els.completionBody.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  if (button.dataset.action === "save-completion-row") {
+    saveCompletionRow(button.dataset.rowId);
+  }
+  if (button.dataset.action === "validate-address") {
+    validateCompletionAddress(button.dataset.rowId);
+  }
+});
+els.completionBody.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  if (button.dataset.action === "save-completion-row") {
+    saveCompletionRow(button.dataset.rowId);
+  }
+  if (button.dataset.action === "validate-address") {
+    validateCompletionAddress(button.dataset.rowId);
+  }
+});
 els.packetaDryRun.addEventListener("click", runPacketaDryRun);
 els.packetaValidate.addEventListener("click", runPacketaValidation);
 

@@ -1,7 +1,9 @@
 import csv
 import io
+import json
 import os
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from xml.sax.saxutils import escape as xml_escape
@@ -1533,6 +1535,63 @@ def packeta_post_validation_xml(validation_xml):
         }
 
 
+def mapy_api_key():
+    return os.environ.get("MAPY_API_KEY") or os.environ.get("MAPY_API_TOKEN") or ""
+
+
+def mapy_geocode_url():
+    return os.environ.get("MAPY_GEOCODE_URL") or "https://api.mapy.com/v1/geocode"
+
+
+def mapy_address_query(data):
+    street_with_number = clean_text(data.get("streetWithNumber")).strip()
+    street = clean_text(data.get("street")).strip()
+    house_number = clean_text(data.get("houseNumber")).strip()
+    city = clean_text(data.get("city")).strip()
+    zip_code = clean_text(data.get("zipCode")).strip()
+
+    street_part = street_with_number or " ".join(part for part in [street, house_number] if part)
+    return ", ".join(part for part in [street_part, zip_code, city] if part).strip()
+
+
+def mapy_country(data):
+    explicit = clean_text(data.get("country")).strip().lower()
+    if explicit:
+        return explicit
+    shop_code = clean_text(data.get("shopCode")).lower()
+    return "sk" if shop_code.endswith("_sk") or "slovak" in shop_code else "cz"
+
+
+def mapy_normalize_items(payload):
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        items = payload.get("items") or payload.get("results") or payload.get("data") or []
+    else:
+        items = []
+
+    normalized = []
+    for item in items[:5]:
+        if not isinstance(item, dict):
+            continue
+        position = item.get("position") or {}
+        normalized.append(
+            {
+                "name": item.get("name"),
+                "label": item.get("label"),
+                "type": item.get("type"),
+                "location": item.get("location"),
+                "zip": item.get("zip"),
+                "position": {
+                    "lat": position.get("lat"),
+                    "lon": position.get("lon"),
+                },
+                "regionalStructure": item.get("regionalStructure") or [],
+            }
+        )
+    return normalized
+
+
 @app.route("/api/packeta/dry-run")
 def packeta_dry_run():
     auth_error = require_download_token_if_configured()
@@ -1726,6 +1785,112 @@ def list_completion_datasets():
     ensure_schema()
     include_deleted = request.args.get("includeDeleted") == "1"
     return jsonify({"datasets": fetch_datasets(include_deleted, "completion", request.args.get("shop"), request.args.get("date"))})
+
+
+@app.route("/api/address/validate", methods=["POST"])
+def validate_address():
+    auth_error = require_download_token_if_configured()
+    if auth_error:
+        return auth_error
+
+    api_key = mapy_api_key()
+    if not api_key:
+        return jsonify({"error": "MAPY_API_KEY is not configured"}), 400
+
+    data = request.get_json(silent=True) or {}
+    query = clean_text(data.get("query")).strip() or mapy_address_query(data)
+    if not query:
+        return jsonify({"error": "Address query is empty"}), 400
+
+    params = {
+        "query": query,
+        "lang": clean_text(data.get("lang")) or "cs",
+        "limit": clean_text(data.get("limit")) or "5",
+        "type": clean_text(data.get("type")) or "regional.address",
+        "locality": mapy_country(data),
+        os.environ.get("MAPY_API_KEY_PARAM") or "apikey": api_key,
+    }
+    url = f"{mapy_geocode_url()}?{urllib.parse.urlencode(params)}"
+    timeout = int_from_text(os.environ.get("MAPY_API_TIMEOUT")) or 15
+    geocode_request = urllib.request.Request(
+        url,
+        headers={"Accept": "application/json", "X-Mapy-Api-Key": api_key},
+        method="GET",
+    )
+
+    try:
+        with urllib.request.urlopen(geocode_request, timeout=timeout) as response:
+            response_text = response.read().decode("utf-8", "replace")
+            payload = json.loads(response_text)
+            items = mapy_normalize_items(payload)
+            valid = any(item.get("type") == "regional.address" for item in items)
+            return jsonify(
+                {
+                    "ok": True,
+                    "valid": valid,
+                    "query": query,
+                    "country": mapy_country(data),
+                    "items": items,
+                    "rawCount": len(items),
+                }
+            )
+    except urllib.error.HTTPError as exc:
+        response_text = exc.read().decode("utf-8", "replace")
+        return jsonify({"error": response_text or clean_text(exc.reason) or "Mapy.com API error"}), exc.code
+    except urllib.error.URLError as exc:
+        return jsonify({"error": clean_text(getattr(exc, "reason", exc)) or "Mapy.com request failed"}), 502
+    except json.JSONDecodeError:
+        return jsonify({"error": "Mapy.com returned invalid JSON"}), 502
+
+
+@app.route("/api/completion/rows/<int:row_id>", methods=["PATCH"])
+def update_completion_row(row_id):
+    auth_error = require_upload_token()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    data = request.get_json(silent=True) or {}
+    allowed = {
+        "firstName": "first_name",
+        "lastName": "last_name",
+        "phone": "phone",
+        "email": "email",
+        "streetWithNumber": "street_with_number",
+        "street": "street",
+        "houseNumber": "house_number",
+        "city": "city",
+        "zipCode": "zip_code",
+    }
+    updates = []
+    params = []
+    for api_name, column_name in allowed.items():
+        if api_name not in data:
+            continue
+        updates.append(f"{column_name} = %s")
+        params.append(clean_text(data.get(api_name)))
+
+    if not updates:
+        return jsonify({"error": "No editable fields provided"}), 400
+
+    params.append(row_id)
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                UPDATE completion_rows
+                SET {', '.join(updates)}
+                WHERE id = %s
+                RETURNING *
+                """,
+                params,
+            )
+            row = cur.fetchone()
+
+    if not row:
+        return jsonify({"error": "Completion row not found"}), 404
+
+    return jsonify({"ok": True, "row": completion_row_to_api(row)})
 
 
 @app.route("/api/completion/latest")
