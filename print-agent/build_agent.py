@@ -29,7 +29,18 @@ def prepare_sumatra() -> Path:
     temp_zip = SOURCE_DIR / f"SumatraPDF-{SUMATRA_VERSION}-64.zip"
     temp_dir = SOURCE_DIR / f"SumatraPDF-{SUMATRA_VERSION}-64"
     print("Downloading SumatraPDF portable...")
-    urllib.request.urlretrieve(SUMATRA_ZIP_URL, temp_zip)
+    request = urllib.request.Request(
+        SUMATRA_ZIP_URL,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/126.0 Safari/537.36"
+            )
+        },
+    )
+    with urllib.request.urlopen(request, timeout=60) as response:
+        temp_zip.write_bytes(response.read())
 
     if temp_dir.exists():
         shutil.rmtree(temp_dir)
