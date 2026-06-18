@@ -320,18 +320,18 @@ def seed_core_config(cur):
             """,
             (code, name, source_type),
         )
-            cur.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_dataset_rows_dataset_id
-                ON dataset_rows (dataset_id)
-                """
-            )
-            cur.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_completion_rows_dataset_id
-                ON completion_rows (dataset_id)
-                """
-            )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_dataset_rows_dataset_id
+        ON dataset_rows (dataset_id)
+        """
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_completion_rows_dataset_id
+        ON completion_rows (dataset_id)
+        """
+    )
 
 
 def require_upload_token():
