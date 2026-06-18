@@ -23,12 +23,24 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 
 V1 počítá s nainstalovaným Pythonem (`py -3`). Produkční balíček bude později přes `ExpedicePrintAgentSetup.exe`.
 
+Instalace už řeší SumatraPDF:
+
+- Pokud existuje `print-agent\bin\SumatraPDF.exe`, zkopíruje ji do instalace.
+- Pokud tam není, stáhne oficiální portable ZIP `SumatraPDF 3.6.1 64-bit` ze SumatraPDF webu.
+- Pokud stažení selže, agent se i tak nainstaluje a použije Windows tiskový fallback.
+
 ## Doporučený tisk PDF
 
 Agent nejdříve hledá `SumatraPDF.exe`, protože umí stabilní tichý tisk:
 
 ```powershell
 SumatraPDF.exe -print-to "Brother QL-1100" -silent label.pdf
+```
+
+Instalátor ji ukládá sem:
+
+```text
+%LOCALAPPDATA%\ExpedicePrintAgent\bin\SumatraPDF.exe
 ```
 
 Pokud Sumatra není dostupná, agent použije Windows `ShellExecute print/printto`, podobně jako původní VBA.
@@ -90,6 +102,6 @@ Content-Type: application/json
 ## Produkční další krok
 
 - Zabalit přes `build.ps1` do `.exe`.
-- Přibalit SumatraPDF portable.
+- Přibalit SumatraPDF portable přímo do produkčního instalátoru, aby nebyl potřeba download při instalaci.
 - Vytvořit Inno Setup instalátor.
 - Přidat auto-update z Railway.
