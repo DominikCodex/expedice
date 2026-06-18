@@ -270,6 +270,13 @@ def ensure_schema():
                 """
             )
             cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS shop_code TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS address_validation_status TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS address_validation_message TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS address_validation_query TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS address_validation_checked_at TIMESTAMPTZ")
+            cur.execute(
+                "ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS address_validation_result JSONB NOT NULL DEFAULT '{}'::jsonb"
+            )
             cur.execute(
                 """
                 INSERT INTO expedition_days (day_date, label)
@@ -633,6 +640,13 @@ def completion_row_to_api(row):
         "dpdOrderAndPieces": row["dpd_order_and_pieces"],
         "canceledOrderBackup": row["canceled_order_backup"],
         "labelPrinted": row["label_printed"],
+        "addressValidationStatus": row.get("address_validation_status") or "",
+        "addressValidationMessage": row.get("address_validation_message") or "",
+        "addressValidationQuery": row.get("address_validation_query") or "",
+        "addressValidationCheckedAt": row["address_validation_checked_at"].isoformat()
+        if row.get("address_validation_checked_at")
+        else None,
+        "addressValidationResult": row.get("address_validation_result") or {},
         "cells": row["cells"],
         "raw": row["raw_row"],
     }
@@ -1824,10 +1838,45 @@ def validate_address():
             payload = json.loads(response_text)
             items = mapy_normalize_items(payload)
             valid = any(item.get("type") == "regional.address" for item in items)
+            status = "verified" if valid else "suggestion" if items else "not_found"
+            first = items[0] if items else {}
+            message = ", ".join(
+                part for part in [clean_text(first.get("name")), clean_text(first.get("location"))] if part
+            )
+            if not message:
+                message = "Adresa nebyla nalezena"
+            result_payload = {
+                "valid": valid,
+                "status": status,
+                "message": message,
+                "query": query,
+                "country": mapy_country(data),
+                "items": items,
+                "rawCount": len(items),
+            }
+            row_id = int_from_text(data.get("rowId"))
+            if row_id:
+                ensure_schema()
+                with db_conn() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE completion_rows
+                            SET address_validation_status = %s,
+                                address_validation_message = %s,
+                                address_validation_query = %s,
+                                address_validation_checked_at = NOW(),
+                                address_validation_result = %s
+                            WHERE id = %s
+                            """,
+                            (status, message, query, Json(result_payload), row_id),
+                        )
             return jsonify(
                 {
                     "ok": True,
                     "valid": valid,
+                    "status": status,
+                    "message": message,
                     "query": query,
                     "country": mapy_country(data),
                     "items": items,
@@ -1869,6 +1918,18 @@ def update_completion_row(row_id):
             continue
         updates.append(f"{column_name} = %s")
         params.append(clean_text(data.get(api_name)))
+
+    address_fields = {"streetWithNumber", "street", "houseNumber", "city", "zipCode"}
+    if any(field in data for field in address_fields):
+        updates.extend(
+            [
+                "address_validation_status = NULL",
+                "address_validation_message = NULL",
+                "address_validation_query = NULL",
+                "address_validation_checked_at = NULL",
+                "address_validation_result = '{}'::jsonb",
+            ]
+        )
 
     if not updates:
         return jsonify({"error": "No editable fields provided"}), 400

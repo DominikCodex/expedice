@@ -670,7 +670,7 @@ select:focus {
 }
 
 .completion-table {
-  min-width: 3300px;
+  min-width: 3500px;
 }
 
 .completion-table th,
@@ -748,6 +748,12 @@ select:focus {
   color: var(--accent-dark);
   background: var(--accent-soft);
   border: 1px solid #bddbce;
+}
+
+.address-badge.neutral {
+  color: var(--muted);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
 }
 
 .address-badge.warning {

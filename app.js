@@ -227,17 +227,17 @@ async function fetchJson(path, options = {}) {
 }
 
 function datasetLabel(dataset) {
-  if (!dataset) return "Bez davky";
-  const shop = dataset.shopName || dataset.shopCode || "neznamy e-shop";
+  if (!dataset) return "Bez dávky";
+  const shop = dataset.shopName || dataset.shopCode || "neznámý e-shop";
   const kind = dataset.datasetKind === "completion" ? "kompletace" : dataset.datasetKind;
   const status = dataset.status && dataset.status !== "active" ? ` | ${dataset.status}` : "";
-  return `${dataset.batchName || dataset.datasetDate} ${dataset.datasetTime} | ${shop} | ${kind} | ${dataset.rowsCount} radku${status}`;
+  return `${dataset.batchName || dataset.datasetDate} ${dataset.datasetTime} | ${shop} | ${kind} | ${dataset.rowsCount} řádků${status}`;
 }
 
 function dayLabel(day) {
-  if (!day) return "Bez expediÄŤnĂ­ho dne";
+  if (!day) return "Bez expedičního dne";
   const latest = day.latestUpload ? ` | poslednĂ­ ${formatTime(day.latestUpload)}` : "";
-  return `${day.label || day.date} | ${day.activeBatches || 0} aktivnĂ­ dĂˇvky | ${day.rowsCount || 0} Ĺ™ĂˇdkĹŻ${latest}`;
+  return `${day.label || day.date} | ${day.activeBatches || 0} aktivní dávky | ${day.rowsCount || 0} řádků${latest}`;
 }
 
 function datasetInfoHtml(dataset) {
@@ -245,8 +245,8 @@ function datasetInfoHtml(dataset) {
   return `
     <span><strong>${escapeHtml(dataset.batchName || dataset.datasetDate)}</strong></span>
     <span>${escapeHtml(dataset.datasetTime || "")}</span>
-    <span>${escapeHtml(dataset.shopName || dataset.shopCode || "e-shop neurÄŤen")}</span>
-    <span>${escapeHtml(dataset.rowsCount || 0)} Ĺ™ĂˇdkĹŻ</span>
+    <span>${escapeHtml(dataset.shopName || dataset.shopCode || "e-shop neurčen")}</span>
+    <span>${escapeHtml(dataset.rowsCount || 0)} řádků</span>
     <span>${escapeHtml(dataset.status || "active")}</span>
   `;
 }
@@ -294,8 +294,8 @@ function renderExpeditionDayOptions() {
     button.dataset.date = day.date;
     button.innerHTML = `
       <strong>${escapeHtml(day.label || day.date)}</strong>
-      <span>${escapeHtml(day.activeBatches || 0)} aktivnĂ­ dĂˇvky</span>
-      <small>${escapeHtml(day.rowsCount || 0)} Ĺ™ĂˇdkĹŻ${day.latestUpload ? ` | ${escapeHtml(formatTime(day.latestUpload))}` : ""}</small>
+      <span>${escapeHtml(day.activeBatches || 0)} aktivní dávky</span>
+      <small>${escapeHtml(day.rowsCount || 0)} řádků${day.latestUpload ? ` | ${escapeHtml(formatTime(day.latestUpload))}` : ""}</small>
     `;
     els.expeditionDayList.appendChild(button);
   });
@@ -327,7 +327,7 @@ function renderSortingOptions() {
 
 async function loadExpeditionDays(preferredDate = "") {
   expeditionState.showInactive = els.expeditionShowInactive.checked;
-  els.expeditionDaySummary.innerHTML = `<span>Nacitam expedicni dny...</span>`;
+  els.expeditionDaySummary.innerHTML = `<span>Načítám expediční dny...</span>`;
 
   try {
     const preferred = preferredDate || expeditionState.day?.date || "";
@@ -346,7 +346,7 @@ async function loadExpeditionDays(preferredDate = "") {
       renderSortingOptions();
       renderCompletionOptions();
       renderCompletion();
-      els.expeditionDaySummary.innerHTML = `<span>Online zatim neobsahuje zadny expedicni den.</span>`;
+      els.expeditionDaySummary.innerHTML = `<span>Online zatím neobsahuje žádný expediční den.</span>`;
       return;
     }
 
@@ -359,7 +359,7 @@ async function loadExpeditionDays(preferredDate = "") {
     renderExpeditionDayOptions();
     els.expeditionDaySummary.innerHTML = `<span><strong>${escapeHtml(expeditionState.day.label)}</strong></span><span>${escapeHtml(
       expeditionState.day.activeBatches || 0
-    )} aktivni davky</span><span>${escapeHtml(expeditionState.day.rowsCount || 0)} radku</span>`;
+    )} aktivní dávky</span><span>${escapeHtml(expeditionState.day.rowsCount || 0)} řádků</span>`;
 
     renderSortingOptions();
     renderCompletionOptions();
@@ -369,7 +369,7 @@ async function loadExpeditionDays(preferredDate = "") {
     } else {
       sortingState.dataset = null;
       renderSortingOptions();
-      setMessage("Pro vybrany expedicni den neni nahrane roztrideni.", "warning");
+      setMessage("Pro vybraný expediční den není nahrané roztřídění.", "warning");
     }
 
     if (data.activeCompletion?.dataset) {
@@ -379,16 +379,16 @@ async function loadExpeditionDays(preferredDate = "") {
       completionState.rows = [];
       renderCompletionOptions();
       renderCompletion();
-      setCompletionMessage("Pro vybrany expedicni den neni nahrana kompletace.", "warning");
+      setCompletionMessage("Pro vybraný expediční den není nahraná kompletace.", "warning");
     }
   } catch (error) {
     expeditionState.loaded = true;
-    els.expeditionDaySummary.innerHTML = `<span>Online dny se nepodarilo nacist: ${escapeHtml(error.message)}</span>`;
+    els.expeditionDaySummary.innerHTML = `<span>Online dny se nepodařilo načíst: ${escapeHtml(error.message)}</span>`;
   }
 }
 async function loadExpeditionDays(preferredDate = "") {
   expeditionState.showInactive = els.expeditionShowInactive.checked;
-  els.expeditionDaySummary.innerHTML = `<span>NaÄŤĂ­tĂˇm expediÄŤnĂ­ dny...</span>`;
+  els.expeditionDaySummary.innerHTML = `<span>Načítám expediční dny...</span>`;
 
   try {
     const data = await fetchJson(`/api/expedition-days${includeInactiveQuery()}`);
@@ -417,7 +417,7 @@ async function loadExpeditionDays(preferredDate = "") {
     await loadExpeditionDay(selectedDate);
   } catch (error) {
     expeditionState.loaded = true;
-    els.expeditionDaySummary.innerHTML = `<span>Online dny se nepodaĹ™ilo naÄŤĂ­st: ${escapeHtml(error.message)}</span>`;
+    els.expeditionDaySummary.innerHTML = `<span>Online dny se nepodařilo načíst: ${escapeHtml(error.message)}</span>`;
   }
 }
 
@@ -434,7 +434,7 @@ async function loadExpeditionDay(dayDate) {
   els.expeditionDaySummary.innerHTML = expeditionState.day
     ? `<span><strong>${escapeHtml(expeditionState.day.label)}</strong></span><span>${escapeHtml(
         expeditionState.day.activeBatches || 0
-      )} aktivnĂ­ dĂˇvky</span><span>${escapeHtml(expeditionState.day.rowsCount || 0)} Ĺ™ĂˇdkĹŻ</span>`
+      )} aktivní dávky</span><span>${escapeHtml(expeditionState.day.rowsCount || 0)} řádků</span>`
     : `<span>Den nenĂ­ naÄŤtenĂ˝.</span>`;
 
   renderSortingOptions();
@@ -445,7 +445,7 @@ async function loadExpeditionDay(dayDate) {
   } else {
     sortingState.dataset = null;
     renderSortingOptions();
-    setMessage("Pro vybranĂ˝ expediÄŤnĂ­ den nenĂ­ nahranĂ© roztĹ™Ă­dÄ›nĂ­.", "warning");
+    setMessage("Pro vybraný expediční den není nahrané roztřídění.", "warning");
   }
 
   if (data.activeCompletion?.dataset) {
@@ -455,7 +455,7 @@ async function loadExpeditionDay(dayDate) {
     completionState.rows = [];
     renderCompletionOptions();
     renderCompletion();
-    setCompletionMessage("Pro vybranĂ˝ expediÄŤnĂ­ den nenĂ­ nahranĂˇ kompletace.", "warning");
+    setCompletionMessage("Pro vybraný expediční den není nahraná kompletace.", "warning");
   }
 }
 
@@ -491,17 +491,17 @@ function applySortingDataset(dataset, rows) {
   saveState();
   renderSortingOptions();
   renderAll();
-  setMessage(`Nacteno roztrideni: ${datasetLabel(sortingState.dataset)}.`, "success");
+  setMessage(`Načteno roztřídění: ${datasetLabel(sortingState.dataset)}.`, "success");
 }
 
 async function loadSortingDataset(datasetId) {
   if (!datasetId) return;
-  setMessage("Nacitam vybrane roztrideni...", "neutral");
+  setMessage("Načítám vybrané roztřídění...", "neutral");
   try {
     const data = await fetchJson(`/api/datasets/${datasetId}`);
     applySortingDataset(data.dataset || null, data.rows || []);
   } catch (error) {
-    setMessage(`Roztrideni se nepodarilo nacist: ${error.message}`, "error");
+    setMessage(`Roztřídění se nepodařilo načíst: ${error.message}`, "error");
   }
 }
 
@@ -526,7 +526,7 @@ function renderCompletionOptions() {
   els.completionDataset.innerHTML = "";
 
   if (!completionState.datasets.length) {
-    els.completionDataset.innerHTML = `<option value="">Zadna davka</option>`;
+    els.completionDataset.innerHTML = `<option value="">Žádná dávka</option>`;
     els.completionDelete.disabled = true;
     els.packetaDryRun.disabled = true;
     els.packetaValidate.disabled = true;
@@ -562,7 +562,7 @@ function applyCompletionDataset(dataset, rows) {
   hidePacketaDryRunResult();
   renderCompletionOptions();
   renderCompletion();
-  setCompletionMessage(`Nacteno: ${datasetLabel(completionState.dataset)}.`, "success");
+  setCompletionMessage(`Načteno: ${datasetLabel(completionState.dataset)}.`, "success");
 }
 
 function hidePacketaDryRunResult() {
@@ -636,19 +636,19 @@ function renderPacketaDryRun(data) {
     <div class="section-head compact">
       <div>
         <p class="eyebrow">Zasilkovna / Packeta</p>
-        <h2>Dry run vytvoreni zasilek</h2>
+        <h2>Dry run vytvoreni zásilek</h2>
       </div>
       <div class="dry-run-counts">
-        <span>${escapeHtml(packetsCount)} zasilek</span>
-        <span>${escapeHtml(skippedCount)} preskoceno</span>
+        <span>${escapeHtml(packetsCount)} zásilek</span>
+        <span>${escapeHtml(skippedCount)} přeskočeno</span>
         ${truncatedCount ? `<span>${escapeHtml(truncatedCount)} dalsich skryto</span>` : ""}
       </div>
     </div>
     <div class="dry-run-note">
-      Nic se neposlalo do Zasilkovny a databaze se nezmenila. API heslo je v nahledu zamerne vynechane.
+      Nic se neposlalo do Zásilkovny a databaze se nezmenila. API heslo je v náhledu záměrně vynechané.
     </div>
     <div class="dry-run-list">
-      ${packetCards || `<div class="empty">Nenasel jsem zadnou zasilku k vytvoreni.</div>`}
+      ${packetCards || `<div class="empty">Nenašel jsem žádnou zásilku k vytvoření.</div>`}
       ${skippedHtml}
     </div>
   `;
@@ -656,13 +656,13 @@ function renderPacketaDryRun(data) {
 
 async function runPacketaDryRun() {
   if (!completionState.dataset?.id) {
-    setCompletionMessage("Nejdriv nacti kompletaci pro expedicni den.", "warning");
+    setCompletionMessage("Nejdřív načti kompletaci pro expediční den.", "warning");
     return;
   }
 
   els.packetaDryRun.disabled = true;
   hidePacketaDryRunResult();
-  setCompletionMessage("Skladam dry run Zasilkovny...", "neutral");
+  setCompletionMessage("Skládám dry run Zásilkovny...", "neutral");
 
   try {
     const data = await fetchJson(
@@ -670,11 +670,11 @@ async function runPacketaDryRun() {
     );
     renderPacketaDryRun(data);
     setCompletionMessage(
-      `Dry run hotovy: ${data.packetsCount || 0} zasilek, preskoceno ${data.skippedCount || 0}.`,
+      `Dry run hotový: ${data.packetsCount || 0} zásilek, přeskočeno ${data.skippedCount || 0}.`,
       "success"
     );
   } catch (error) {
-    setCompletionMessage(`Dry run Zasilkovny se nepodaril: ${error.message}`, "error");
+    setCompletionMessage(`Dry run Zásilkovny se nepodařil: ${error.message}`, "error");
   } finally {
     els.packetaDryRun.disabled = !completionState.dataset;
   }
@@ -746,14 +746,14 @@ function renderPacketaValidation(data) {
       <div class="dry-run-counts">
         <span>${escapeHtml(okCount)} OK</span>
         <span>${escapeHtml(errorCount)} chyb</span>
-        <span>${escapeHtml(data.notValidatedCount || 0)} neovereno</span>
+        <span>${escapeHtml(data.notValidatedCount || 0)} neověřeno</span>
       </div>
     </div>
     <div class="dry-run-note">
       Tohle volalo validacni funkci Packety. Stitky se nevytvorily, ale data byla odeslana do API kvuli kontrole chyb.
     </div>
     <div class="dry-run-list">
-      ${resultCards || `<div class="empty">Neni co validovat.</div>`}
+      ${resultCards || `<div class="empty">Není co validovat.</div>`}
       ${skippedHtml}
     </div>
   `;
@@ -761,7 +761,7 @@ function renderPacketaValidation(data) {
 
 async function runPacketaValidation() {
   if (!completionState.dataset?.id) {
-    setCompletionMessage("Nejdriv nacti kompletaci pro expedicni den.", "warning");
+    setCompletionMessage("Nejdřív načti kompletaci pro expediční den.", "warning");
     return;
   }
 
@@ -775,7 +775,7 @@ async function runPacketaValidation() {
 
   els.packetaValidate.disabled = true;
   hidePacketaDryRunResult();
-  setCompletionMessage("Posilam testovaci validaci do Packety...", "neutral");
+  setCompletionMessage("Posílám testovací validaci do Packety...", "neutral");
 
   try {
     const data = await fetchJson("/api/packeta/validate", {
@@ -788,11 +788,11 @@ async function runPacketaValidation() {
     renderPacketaValidation(data);
     const errors = (data.results || []).filter((item) => !item.valid).length;
     setCompletionMessage(
-      `Test API hotovy: ${data.validatedCount || 0} overeno, ${errors} chyb, ${data.notValidatedCount || 0} neovereno.`,
+      `Test API hotový: ${data.validatedCount || 0} ověřeno, ${errors} chyb, ${data.notValidatedCount || 0} neověřeno.`,
       errors ? "warning" : "success"
     );
   } catch (error) {
-    setCompletionMessage(`Test API Zasilkovny se nepodaril: ${error.message}`, "error");
+    setCompletionMessage(`Test API Zásilkovny se nepodařil: ${error.message}`, "error");
   } finally {
     els.packetaValidate.disabled = !completionState.dataset;
   }
@@ -821,7 +821,7 @@ function replaceCompletionRow(row) {
 
 async function saveCompletionRow(rowId) {
   const values = collectCompletionRowEdits(rowId);
-  setCompletionMessage("Ukladam upraveny kontakt a adresu...", "neutral");
+  setCompletionMessage("Ukládám upravený kontakt a adresu...", "neutral");
 
   try {
     const data = await fetchJson(`/api/completion/rows/${encodeURIComponent(rowId)}`, {
@@ -832,9 +832,9 @@ async function saveCompletionRow(rowId) {
       replaceCompletionRow(data.row);
       renderCompletion();
     }
-    setCompletionMessage("Kontakt a adresa jsou ulozene.", "success");
+    setCompletionMessage("Kontakt a adresa jsou uložené.", "success");
   } catch (error) {
-    setCompletionMessage(`Ulozeni adresy se nepodarilo: ${error.message}`, "error");
+    setCompletionMessage(`Uložení adresy se nepodařilo: ${error.message}`, "error");
   }
 }
 
@@ -861,34 +861,40 @@ function renderAddressValidation(rowId, data) {
 async function validateCompletionAddress(rowId) {
   const row = completionState.rows.find((item) => String(item.id) === String(rowId)) || {};
   const values = collectCompletionRowEdits(rowId);
-  setCompletionMessage("Overuji adresu pres Mapy.com...", "neutral");
+  setCompletionMessage("Ověřuji adresu přes Mapy.com...", "neutral");
 
   try {
     const data = await fetchJson("/api/address/validate", {
       method: "POST",
       body: JSON.stringify({
+        rowId,
         ...values,
         shopCode: row.shopCode || completionState.dataset?.shopCode || "",
       }),
     });
+    row.addressValidationStatus = data.status || (data.valid ? "verified" : "suggestion");
+    row.addressValidationMessage = data.message || "";
+    row.addressValidationQuery = data.query || "";
+    row.addressValidationCheckedAt = new Date().toISOString();
+    row.addressValidationResult = data;
     renderAddressValidation(rowId, data);
-    setCompletionMessage(data.valid ? "Adresa je overena pres Mapy.com." : "Mapy.com nasly jen navrh adresy.", data.valid ? "success" : "warning");
+    setCompletionMessage(data.valid ? "Adresa je ověřena přes Mapy.com." : "Mapy.com našly jen návrh adresy.", data.valid ? "success" : "warning");
   } catch (error) {
     const tr = completionRowElement(rowId);
     const target = tr?.querySelector("[data-address-validation]");
     if (target) target.innerHTML = `<span class="address-badge danger">Chyba</span><small>${escapeHtml(error.message)}</small>`;
-    setCompletionMessage(`Overeni adresy se nepodarilo: ${error.message}`, "error");
+    setCompletionMessage(`Ověření adresy se nepodařilo: ${error.message}`, "error");
   }
 }
 
 async function loadCompletionDataset(datasetId) {
   if (!datasetId) return;
-  setCompletionMessage("Nacitam vybranou kompletaci...", "neutral");
+  setCompletionMessage("Načítám vybranou kompletaci...", "neutral");
   try {
     const data = await fetchJson(`/api/datasets/${datasetId}`);
     applyCompletionDataset(data.dataset || null, data.rows || []);
   } catch (error) {
-    setCompletionMessage(`Davku se nepodarilo nacist: ${error.message}`, "error");
+    setCompletionMessage(`Dávku se nepodařilo načíst: ${error.message}`, "error");
   }
 }
 
@@ -924,7 +930,7 @@ function renderCompletionSummary(rows) {
 
   els.completionSummary.innerHTML = `
     <span><strong>${orders}</strong> objednavek</span>
-    <span><strong>${rows.length}</strong> radku</span>
+    <span><strong>${rows.length}</strong> řádků</span>
     <span><strong>${pieces}</strong> kusu</span>
     <span><strong>${labels}</strong> stitku</span>
     <span><strong>${errors}</strong> chyb/storen</span>
@@ -938,9 +944,28 @@ function completionInput(row, field, value, className = "") {
   )}" value="${escapeHtml(value || "")}" />`;
 }
 
+function addressValidationHtml(row) {
+  const status = row.addressValidationStatus || "";
+  const message = row.addressValidationMessage || "";
+  const checked = row.addressValidationCheckedAt ? formatTime(row.addressValidationCheckedAt) : "";
+  const labels = {
+    verified: ["Ověřeno", "ok"],
+    suggestion: ["Návrh", "warning"],
+    not_found: ["Nenalezeno", "danger"],
+    error: ["Chyba", "danger"],
+  };
+  const [label, tone] = labels[status] || ["Neověřeno", "neutral"];
+  return `
+    <div class="address-validation" data-address-validation="${escapeHtml(row.id)}">
+      <span class="address-badge ${escapeHtml(tone)}">${escapeHtml(label)}</span>
+      ${message ? `<small>${escapeHtml(message)}${checked ? ` | ${escapeHtml(checked)}` : ""}</small>` : ""}
+    </div>
+  `;
+}
+
 function renderCompletion() {
   const rows = completionState.rows;
-  els.completionRowCount.textContent = `${rows.length} radku`;
+  els.completionRowCount.textContent = `${rows.length} řádků`;
   renderCompletionSummary(rows);
   els.completionBody.innerHTML = "";
   els.completionDelete.disabled = !completionState.dataset || completionState.dataset.status !== "active";
@@ -979,6 +1004,7 @@ function renderCompletion() {
       <td>${completionInput(row, "streetWithNumber", row.streetWithNumber || [row.street, row.houseNumber].filter(Boolean).join(" "), "address-input")}</td>
       <td>${completionInput(row, "city", row.city || "")}</td>
       <td>${completionInput(row, "zipCode", row.zipCode || "", "zip-input")}</td>
+      <td>${addressValidationHtml(row)}</td>
       <td>${escapeHtml(row.shippingMethod || "")}</td>
       <td>${escapeHtml(row.paymentMethod || row.paidStatus || "")}</td>
       <td>${escapeHtml(row.codAmount || "")}</td>
@@ -988,10 +1014,9 @@ function renderCompletion() {
       <td class="completion-note">${escapeHtml(row.note || "")}</td>
       <td>
         <div class="completion-actions">
-          <button type="button" data-action="save-completion-row" data-row-id="${escapeHtml(row.id)}">Ulozit</button>
-          <button type="button" class="secondary" data-action="validate-address" data-row-id="${escapeHtml(row.id)}">Overit</button>
+          <button type="button" data-action="save-completion-row" data-row-id="${escapeHtml(row.id)}">Uložit</button>
+          <button type="button" class="secondary" data-action="validate-address" data-row-id="${escapeHtml(row.id)}">Ověřit</button>
         </div>
-        <div class="address-validation" data-address-validation="${escapeHtml(row.id)}"></div>
       </td>
     `;
     els.completionBody.appendChild(tr);
@@ -1121,7 +1146,7 @@ function renderMetrics() {
 
 function renderTable() {
   const rows = visibleItems();
-  els.rowCount.textContent = `${rows.length} Ĺ™ĂˇdkĹŻ`;
+  els.rowCount.textContent = `${rows.length} řádků`;
   els.sortingBody.innerHTML = "";
 
   if (!rows.length) {
@@ -1171,7 +1196,7 @@ function renderHistory() {
   els.historyList.innerHTML = "";
 
   if (!entries.length) {
-    els.historyList.innerHTML = `<div class="empty">Historie je zatĂ­m prĂˇzdnĂˇ.</div>`;
+    els.historyList.innerHTML = `<div class="empty">Historie je zatím prázdná.</div>`;
     return;
   }
 
@@ -1261,7 +1286,7 @@ function changeItem(itemId, delta, context = {}) {
   if (!item) return null;
 
   if (delta < 0 && item.remaining <= 0) {
-    setMessage("Tahle poloĹľka uĹľ mĂˇ nulovĂ˝ zĹŻstatek.", "warning");
+    setMessage("Tahle položka už má nulový zůstatek.", "warning");
     return null;
   }
 
@@ -1289,7 +1314,7 @@ function undoHistory(historyId) {
 
   item.remaining += entry.amount;
   entry.undone = true;
-  state.history.unshift(historyEntry(item, entry.amount, "restore", { mode: "vrĂˇcenĂ­ odpisu" }));
+  state.history.unshift(historyEntry(item, entry.amount, "restore", { mode: "vrácení odpisu" }));
   state.history = state.history.slice(0, MAX_HISTORY);
   saveState();
   renderAll();
@@ -1310,7 +1335,7 @@ function findScanCandidates(ean) {
       if (!exact && !pair) return;
 
       const existing = candidates.get(item.id);
-      const matchType = exact ? "pĹ™esnĂˇ varianta" : "paircode";
+      const matchType = exact ? "přesná varianta" : "paircode";
       if (!existing || exact) {
         candidates.set(item.id, {
           item,
@@ -1324,7 +1349,7 @@ function findScanCandidates(ean) {
   return {
     entries,
     candidates: Array.from(candidates.values()).sort((a, b) => {
-      if (a.matchType !== b.matchType) return a.matchType === "pĹ™esnĂˇ varianta" ? -1 : 1;
+      if (a.matchType !== b.matchType) return a.matchType === "přesná varianta" ? -1 : 1;
       return Number(a.item.sequence || 0) - Number(b.item.sequence || 0);
     }),
   };
@@ -1350,7 +1375,7 @@ function processScan(rawValue) {
     return;
   }
 
-  const exactCandidates = result.candidates.filter((candidate) => candidate.matchType === "pĹ™esnĂˇ varianta");
+  const exactCandidates = result.candidates.filter((candidate) => candidate.matchType === "přesná varianta");
   if (result.entries.length === 1 && exactCandidates.length === 1) {
     const entry = changeItem(exactCandidates[0].item.id, -1, {
       ean,
@@ -1414,7 +1439,7 @@ function resetFromSeed() {
   saveState();
   renderAll();
   setMessage(
-    `NaÄŤteno ${state.items.length} Ĺ™ĂˇdkĹŻ a ${Object.keys(state.eanMap).length} EAN kĂłdĹŻ ze seedu.`,
+    `Načteno ${state.items.length} řádků a ${Object.keys(state.eanMap).length} EAN kódů ze seedu.`,
     "success"
   );
 }
@@ -1474,11 +1499,11 @@ els.sortingBody.addEventListener("click", (event) => {
   if (!button) return;
   const id = button.dataset.id;
   if (button.dataset.action === "deduct") {
-    const entry = changeItem(id, -1, { mode: "ruÄŤnĂ­ odpis" });
+    const entry = changeItem(id, -1, { mode: "ruční odpis" });
     if (entry) setMessage(`OdepsĂˇno 1 ks: ${entry.variantCode}.`, "success");
   }
   if (button.dataset.action === "restore") {
-    const entry = changeItem(id, 1, { mode: "ruÄŤnĂ­ navrĂˇcenĂ­" });
+    const entry = changeItem(id, 1, { mode: "ruční navrácení" });
     if (entry) setMessage(`VrĂˇceno 1 ks: ${entry.variantCode}.`, "success");
   }
 });
@@ -1486,7 +1511,7 @@ els.sortingBody.addEventListener("click", (event) => {
 els.candidateList.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-action='candidate-deduct']");
   if (!button) return;
-  const entry = changeItem(button.dataset.id, -1, { mode: "vĂ˝bÄ›r z kandidĂˇtĹŻ" });
+  const entry = changeItem(button.dataset.id, -1, { mode: "výběr z kandidátů" });
   if (entry) {
     showScanResult(entry);
     setMessage(`OdepsĂˇno 1 ks: ${entry.variantCode}, poĹ™. ${entry.sequence}.`, "success");
@@ -1568,7 +1593,7 @@ renderAll();
 renderSortingOptions();
 renderCompletion();
 setMessage(
-  `NaÄŤteno ${state.items.length} Ĺ™ĂˇdkĹŻ, ${Object.keys(state.eanMap).length} EAN kĂłdĹŻ, objednĂˇvek: ${
+  `Načteno ${state.items.length} řádků, ${Object.keys(state.eanMap).length} EAN kódů, objednávek: ${
     new Set(state.items.map((item) => item.orderNumber).filter(Boolean)).size
   }.`,
   "neutral"
