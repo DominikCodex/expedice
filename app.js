@@ -1527,6 +1527,27 @@ async function sendCompletionCarrier(rowId) {
   }
 }
 
+function printCompletionCarrierLabel(rowId) {
+  const row = completionState.rows.find((item) => String(item.id) === String(rowId));
+  const labelNumber = row?.packetaShipmentId || "";
+  if (!labelNumber) {
+    setCompletionMessage("Řádek zatím nemá číslo zásilky/štítku.", "warning");
+    return;
+  }
+
+  const url = `/api/completion/rows/${encodeURIComponent(rowId)}/label?markPrinted=1`;
+  const printWindow = window.open(url, "_blank", "noopener");
+  if (!printWindow) {
+    setCompletionMessage("Prohlížeč zablokoval otevření štítku. Povol vyskakovací okna pro expediční aplikaci.", "error");
+    return;
+  }
+
+  row.labelPrinted = "Label printed";
+  replaceCompletionRow(row);
+  renderCompletion();
+  setCompletionMessage(`Štítek ${labelNumber} je otevřený pro tisk. Vyber termotiskárnu Brother/DPD štítky.`, "success");
+}
+
 function renderAddressValidation(rowId, data) {
   const tr = completionRowElement(rowId);
   const target = tr?.querySelector("[data-address-validation]");
@@ -1665,8 +1686,14 @@ function deliveryCarrierHtml(row) {
 }
 
 function carrierSendActionHtml(row) {
-  if (authState.user?.role !== "admin") return "";
   const carrier = row.deliveryCarrier || "manual";
+  const labelNumber = row.packetaShipmentId || "";
+  if ((carrier === "dpd" || carrier === "packeta") && labelNumber) {
+    return `<button type="button" class="label-print ${escapeHtml(carrier)}" data-action="print-carrier-label" data-row-id="${escapeHtml(
+      row.id
+    )}">Tisk štítku</button>`;
+  }
+  if (authState.user?.role !== "admin") return "";
   if (carrier !== "dpd" && carrier !== "packeta") {
     return `<button type="button" class="secondary" disabled>Bez dopravce</button>`;
   }
@@ -2689,6 +2716,9 @@ els.completionBody.addEventListener("click", (event) => {
   }
   if (button.dataset.action === "send-carrier-row") {
     sendCompletionCarrier(button.dataset.rowId);
+  }
+  if (button.dataset.action === "print-carrier-label") {
+    printCompletionCarrierLabel(button.dataset.rowId);
   }
 });
 els.packetaDryRun.addEventListener("click", runPacketaDryRun);

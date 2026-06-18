@@ -963,6 +963,24 @@ select:focus {
   border-color: var(--accent-dark);
 }
 
+.label-print {
+  color: #2d2416;
+  background: #fff3d7;
+  border-color: #e6c47a;
+}
+
+.label-print.dpd {
+  color: #1b4f9c;
+  background: #e8f0ff;
+  border-color: #b9cdf5;
+}
+
+.label-print.packeta {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  border-color: #bddbce;
+}
+
 .address-validation {
   display: grid;
   gap: 4px;

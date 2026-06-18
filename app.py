@@ -1,4 +1,5 @@
 import csv
+import base64
 import hashlib
 import io
 import json
@@ -2725,6 +2726,78 @@ def dpd_post_payload(payload, settings=None):
         }
 
 
+def dpd_label_pdf(parcel_number, settings=None):
+    settings = settings or request_settings(include_secrets=True).get("dpd", {})
+    if not clean_text(settings.get("apiKey")):
+        return None, {
+            "httpStatus": 0,
+            "ok": False,
+            "error": f"DPD API key neni nastaveny pro klienta {settings.get('clientName') or 'Vychozi klient'}.",
+        }
+    base_url = clean_text(settings.get("apiBaseUrl")).rstrip("/")
+    if not base_url:
+        return None, {"httpStatus": 0, "ok": False, "error": "DPD API URL není nastavené"}
+
+    payload = {
+        "printType": "PDF",
+        "printProperties": {"pageSize": "A6", "labelsPerPage": 1},
+        "parcels": [{"parcelNumber": clean_text(parcel_number)}],
+    }
+    request_data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    headers = dpd_request_headers(settings)
+    headers["Accept"] = "application/pdf, application/json"
+    dpd_request = urllib.request.Request(
+        f"{base_url}/parcels/labels",
+        data=request_data,
+        headers=headers,
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(dpd_request, timeout=25) as response:
+            return response.read(), {"httpStatus": response.getcode(), "ok": 200 <= response.getcode() < 300, "error": ""}
+    except urllib.error.HTTPError as exc:
+        response_text = exc.read().decode("utf-8", "replace")
+        return None, {"httpStatus": exc.code, "ok": False, "error": response_text or clean_text(exc.reason) or "DPD HTTP error"}
+    except urllib.error.URLError as exc:
+        return None, {"httpStatus": 0, "ok": False, "error": clean_text(getattr(exc, "reason", exc))}
+
+
+def packeta_label_pdf(packet_id, settings=None):
+    settings = settings or carrier_client_settings("packeta")
+    password = settings.get("apiPassword", "")
+    if not password:
+        return None, {
+            "httpStatus": 0,
+            "ok": False,
+            "error": f"Packeta API heslo není nastavené pro klienta {settings.get('clientName') or 'výchozí klient'}.",
+        }
+
+    label_xml = (
+        "<packetsLabelsPdf>"
+        f"<apiPassword>{packeta_text(password)}</apiPassword>"
+        "<packetIds>"
+        f"<id>{packeta_text(packet_id)}</id>"
+        "</packetIds>"
+        "<format>A8 on A8</format>"
+        "<offset>0</offset>"
+        "</packetsLabelsPdf>"
+    )
+    result = packeta_post_validation_xml(label_xml, settings)
+    if not result.get("valid"):
+        return None, {
+            "httpStatus": result.get("httpStatus", 0),
+            "ok": False,
+            "error": result.get("error") or result.get("responseText") or "Packeta label error",
+        }
+    encoded_pdf = xml_tag_text(result.get("responseText", ""), "result")
+    if not encoded_pdf:
+        return None, {"httpStatus": result.get("httpStatus", 0), "ok": False, "error": "Packeta nevrátila PDF štítek."}
+    try:
+        return base64.b64decode(encoded_pdf), {"httpStatus": result.get("httpStatus", 200), "ok": True, "error": ""}
+    except Exception as exc:
+        return None, {"httpStatus": result.get("httpStatus", 0), "ok": False, "error": clean_text(exc)}
+
+
 def mapy_api_key():
     return read_settings(include_secrets=True)["mapy"].get("apiKey") or os.environ.get("MAPY_API_TOKEN") or ""
 
@@ -3387,6 +3460,58 @@ def send_completion_row_carrier(row_id):
         ), 200 if ok else 400
 
     return jsonify({"error": "Tento řádek nemá dopravce DPD ani Zásilkovnu/Packetu.", "carrier": delivery.get("carrier"), "row": row_api}), 400
+
+
+@app.route("/api/completion/rows/<int:row_id>/label")
+def completion_row_label(row_id):
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM completion_rows WHERE id = %s", (row_id,))
+            row = cur.fetchone()
+    if not row:
+        return jsonify({"error": "Řádek kompletace nebyl nalezen."}), 404
+
+    row_api = completion_row_to_api(row)
+    label_number = clean_text(row_api.get("packetaShipmentId"))
+    if not label_number:
+        return jsonify({"error": "Řádek zatím nemá číslo zásilky/štítku."}), 400
+
+    delivery = delivery_info_from_row(row_api)
+    carrier = "dpd" if delivery.get("isDpd") or len(label_number) == 14 else "packeta" if delivery.get("isPacketa") or len(label_number) == 10 else ""
+    if carrier == "dpd":
+        pdf_bytes, result = dpd_label_pdf(label_number, carrier_client_settings("dpd", row_api))
+    elif carrier == "packeta":
+        pdf_bytes, result = packeta_label_pdf(label_number, carrier_client_settings("packeta", row_api))
+    else:
+        return jsonify({"error": "Pro tento řádek neumím určit dopravce štítku."}), 400
+
+    if not pdf_bytes:
+        return jsonify({"error": result.get("error") or "Štítek se nepodařilo načíst.", "carrier": carrier, "result": result}), 400
+
+    if request.args.get("markPrinted") == "1":
+        with db_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "UPDATE completion_rows SET label_printed = 'Label printed' WHERE id = %s",
+                    (row_id,),
+                )
+
+    filename = f"{label_number}.pdf"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "no-store",
+            "X-Carrier": carrier,
+            "X-Label-Number": label_number,
+        },
+    )
 
 
 @app.route("/api/settings")
