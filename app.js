@@ -60,6 +60,7 @@ const els = {
   metricOrders: document.getElementById("metric-orders"),
   metricDone: document.getElementById("metric-done"),
   expeditionDay: document.getElementById("expedition-day"),
+  expeditionDayList: document.getElementById("expedition-day-list"),
   expeditionRefresh: document.getElementById("expedition-refresh"),
   expeditionShowInactive: document.getElementById("show-inactive-datasets"),
   expeditionDaySummary: document.getElementById("expedition-day-summary"),
@@ -270,6 +271,7 @@ function switchView(view) {
 
 function renderExpeditionDayOptions() {
   els.expeditionDay.innerHTML = "";
+  els.expeditionDayList.innerHTML = "";
 
   if (!expeditionState.days.length) {
     els.expeditionDay.innerHTML = `<option value="">Žádný expediční den</option>`;
@@ -282,6 +284,17 @@ function renderExpeditionDayOptions() {
     option.value = day.date;
     option.textContent = dayLabel(day);
     els.expeditionDay.appendChild(option);
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = `day-card ${expeditionState.day?.date === day.date ? "active" : ""}`;
+    button.dataset.date = day.date;
+    button.innerHTML = `
+      <strong>${escapeHtml(day.label || day.date)}</strong>
+      <span>${escapeHtml(day.activeBatches || 0)} aktivní dávky</span>
+      <small>${escapeHtml(day.rowsCount || 0)} řádků${day.latestUpload ? ` | ${escapeHtml(formatTime(day.latestUpload))}` : ""}</small>
+    `;
+    els.expeditionDayList.appendChild(button);
   });
 
   if (expeditionState.day) {
@@ -372,8 +385,10 @@ async function loadExpeditionDay(dayDate) {
   renderSortingOptions();
   renderCompletionOptions();
 
+  const jobs = [];
+
   if (sortingDataset) {
-    await loadSortingDataset(sortingDataset.id);
+    jobs.push(loadSortingDataset(sortingDataset.id));
   } else {
     sortingState.dataset = null;
     renderSortingOptions();
@@ -381,13 +396,17 @@ async function loadExpeditionDay(dayDate) {
   }
 
   if (completionDataset) {
-    await loadCompletionDataset(completionDataset.id);
+    jobs.push(loadCompletionDataset(completionDataset.id));
   } else {
     completionState.dataset = null;
     completionState.rows = [];
     renderCompletionOptions();
     renderCompletion();
     setCompletionMessage("Pro vybraný expediční den není nahraná kompletace.", "warning");
+  }
+
+  if (jobs.length) {
+    await Promise.allSettled(jobs);
   }
 }
 
@@ -1077,6 +1096,11 @@ els.expeditionRefresh.addEventListener("click", () => loadExpeditionDays(els.exp
 els.expeditionShowInactive.addEventListener("change", () => loadExpeditionDays(els.expeditionDay.value));
 els.expeditionDay.addEventListener("change", () => {
   loadExpeditionDay(els.expeditionDay.value);
+});
+els.expeditionDayList.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-date]");
+  if (!button) return;
+  loadExpeditionDay(button.dataset.date);
 });
 
 els.tabSorting.addEventListener("click", () => switchView("sorting"));

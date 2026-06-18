@@ -35,19 +35,28 @@
         </div>
       </header>
 
-      <section class="day-toolbar" aria-label="Expediční den">
-        <label class="field day-field">
-          <span>Expediční den</span>
-          <select id="expedition-day"></select>
-        </label>
-        <button id="expedition-refresh" type="button" class="secondary">Načíst dny</button>
-        <label class="toggle">
-          <input id="show-inactive-datasets" type="checkbox" />
-          <span>Nahrazené/smazané</span>
-        </label>
-        <div id="expedition-day-summary" class="dataset-summary">Čekám na online data.</div>
-      </section>
+      <section class="expedition-layout">
+        <aside class="day-sidebar" aria-label="Expediční dny">
+          <div class="day-sidebar-head">
+            <div>
+              <p class="eyebrow">Expediční dny</p>
+              <h2>Přepnutí dne</h2>
+            </div>
+            <button id="expedition-refresh" type="button" class="secondary">Obnovit</button>
+          </div>
+          <label class="field">
+            <span>Rychlý výběr</span>
+            <select id="expedition-day"></select>
+          </label>
+          <label class="toggle sidebar-toggle">
+            <input id="show-inactive-datasets" type="checkbox" />
+            <span>Nahrazené/smazané</span>
+          </label>
+          <div id="expedition-day-summary" class="dataset-summary">Čekám na online data.</div>
+          <div id="expedition-day-list" class="day-list"></div>
+        </aside>
 
+        <section class="module-area">
       <nav class="view-tabs" aria-label="Moduly expedice">
         <button id="tab-sorting" type="button" class="tab-button active">Roztřídění</button>
         <button id="tab-completion" type="button" class="tab-button">Kompletace</button>
@@ -194,6 +203,8 @@
               <tbody id="completion-body"></tbody>
             </table>
           </div>
+        </section>
+      </section>
         </section>
       </section>
     </main>

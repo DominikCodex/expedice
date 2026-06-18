@@ -13,6 +13,7 @@ APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PRAGUE_TZ = ZoneInfo("Europe/Prague")
 
 app = Flask(__name__, static_folder=None)
+SCHEMA_READY = False
 
 DEFAULT_SHOPS = [
     {
@@ -100,6 +101,10 @@ def db_conn():
 
 
 def ensure_schema():
+    global SCHEMA_READY
+    if SCHEMA_READY:
+        return
+
     with db_conn() as conn:
         with conn.cursor() as cur:
             cur.execute(
@@ -349,6 +354,7 @@ def ensure_schema():
                 ON completion_rows (shop_code)
                 """
             )
+    SCHEMA_READY = True
 
 
 def seed_core_config(cur):
