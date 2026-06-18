@@ -351,7 +351,7 @@ async function loadExpeditionDays(preferredDate = "") {
 
 async function loadExpeditionDay(dayDate) {
   if (!dayDate) return;
-  const data = await fetchJson(`/api/expedition-days/${encodeURIComponent(dayDate)}${includeInactiveQuery()}`);
+  const data = await fetchJson(`/api/expedition-days/${encodeURIComponent(dayDate)}/full${includeInactiveQuery()}`);
   expeditionState.day = data.day || null;
   sortingState.datasets = data.sorting || [];
   completionState.datasets = data.completion || [];
@@ -365,35 +365,25 @@ async function loadExpeditionDay(dayDate) {
       )} aktivní dávky</span><span>${escapeHtml(expeditionState.day.rowsCount || 0)} řádků</span>`
     : `<span>Den není načtený.</span>`;
 
-  const sortingDataset = sortingState.datasets.find((item) => item.status === "active") || sortingState.datasets[0];
-  const completionDataset =
-    completionState.datasets.find((item) => item.status === "active") || completionState.datasets[0];
-
   renderSortingOptions();
   renderCompletionOptions();
 
-  const jobs = [];
-
-  if (sortingDataset) {
-    jobs.push(loadSortingDataset(sortingDataset.id));
+  if (data.activeSorting?.dataset) {
+    applySortingDataset(data.activeSorting.dataset, data.activeSorting.rows || []);
   } else {
     sortingState.dataset = null;
     renderSortingOptions();
     setMessage("Pro vybraný expediční den není nahrané roztřídění.", "warning");
   }
 
-  if (completionDataset) {
-    jobs.push(loadCompletionDataset(completionDataset.id));
+  if (data.activeCompletion?.dataset) {
+    applyCompletionDataset(data.activeCompletion.dataset, data.activeCompletion.rows || []);
   } else {
     completionState.dataset = null;
     completionState.rows = [];
     renderCompletionOptions();
     renderCompletion();
     setCompletionMessage("Pro vybraný expediční den není nahraná kompletace.", "warning");
-  }
-
-  if (jobs.length) {
-    await Promise.allSettled(jobs);
   }
 }
 
@@ -416,26 +406,30 @@ function sortingRowToItem(row) {
   });
 }
 
+function applySortingDataset(dataset, rows) {
+  sortingState.dataset = dataset || null;
+  const nextItems = (rows || []).map(sortingRowToItem);
+  applyLoaded({
+    items: nextItems,
+    eanMap: Object.keys(state.eanMap || {}).length ? state.eanMap : seed.eanMap || {},
+    history: [],
+    settings: state.settings,
+  });
+  activeCandidates = [];
+  saveState();
+  renderSortingOptions();
+  renderAll();
+  setMessage(`Nacteno roztrideni: ${datasetLabel(sortingState.dataset)}.`, "success");
+}
+
 async function loadSortingDataset(datasetId) {
   if (!datasetId) return;
-  setMessage("Načítám vybrané roztřídění...", "neutral");
+  setMessage("Nacitam vybrane roztrideni...", "neutral");
   try {
     const data = await fetchJson(`/api/datasets/${datasetId}`);
-    sortingState.dataset = data.dataset || null;
-    const nextItems = (data.rows || []).map(sortingRowToItem);
-    applyLoaded({
-      items: nextItems,
-      eanMap: Object.keys(state.eanMap || {}).length ? state.eanMap : seed.eanMap || {},
-      history: [],
-      settings: state.settings,
-    });
-    activeCandidates = [];
-    saveState();
-    renderSortingOptions();
-    renderAll();
-    setMessage(`Načteno roztřídění: ${datasetLabel(sortingState.dataset)}.`, "success");
+    applySortingDataset(data.dataset || null, data.rows || []);
   } catch (error) {
-    setMessage(`Roztřídění se nepodařilo načíst: ${error.message}`, "error");
+    setMessage(`Roztrideni se nepodarilo nacist: ${error.message}`, "error");
   }
 }
 
@@ -486,16 +480,20 @@ async function loadCompletionDatasets() {
   await loadExpeditionDays();
 }
 
+function applyCompletionDataset(dataset, rows) {
+  completionState.dataset = dataset || null;
+  completionState.rows = rows || [];
+  renderCompletionOptions();
+  renderCompletion();
+  setCompletionMessage(`Nacteno: ${datasetLabel(completionState.dataset)}.`, "success");
+}
+
 async function loadCompletionDataset(datasetId) {
   if (!datasetId) return;
   setCompletionMessage("Nacitam vybranou kompletaci...", "neutral");
   try {
     const data = await fetchJson(`/api/datasets/${datasetId}`);
-    completionState.dataset = data.dataset || null;
-    completionState.rows = data.rows || [];
-    renderCompletionOptions();
-    renderCompletion();
-    setCompletionMessage(`Nacteno: ${datasetLabel(completionState.dataset)}.`, "success");
+    applyCompletionDataset(data.dataset || null, data.rows || []);
   } catch (error) {
     setCompletionMessage(`Davku se nepodarilo nacist: ${error.message}`, "error");
   }
