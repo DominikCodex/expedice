@@ -1,0 +1,64 @@
+name: Build print agent
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - "print-agent/**"
+      - ".github/workflows/print-agent.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Build standalone installers
+        run: python print-agent/build_agent.py
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: expedice-print-agent
+          path: |
+            print-agent/ExpedicePrintAgentSetup.exe
+            print-agent/ExpedicePrintAgentUninstall.exe
+            print-agent/dist/ExpedicePrintAgent.exe
+
+      - name: Move latest tag
+        if: github.ref == 'refs/heads/master'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f print-agent-latest $env:GITHUB_SHA
+          git push -f origin print-agent-latest
+
+      - name: Publish latest release assets
+        if: github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: print-agent-latest
+          name: Expedice Print Agent
+          body: |
+            Samostatny instalator a odinstalator lokalniho tiskoveho agenta.
+
+            Stahovani z webove aplikace pouziva prave tyto soubory.
+          make_latest: true
+          overwrite_files: true
+          files: |
+            print-agent/ExpedicePrintAgentSetup.exe
+            print-agent/ExpedicePrintAgentUninstall.exe

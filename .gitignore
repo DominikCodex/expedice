@@ -3,3 +3,9 @@ __pycache__/
 .env
 .venv/
 venv/
+print-agent/build/
+print-agent/dist/
+print-agent/bin/
+print-agent/*.spec
+print-agent/ExpedicePrintAgentSetup.exe
+print-agent/ExpedicePrintAgentUninstall.exe

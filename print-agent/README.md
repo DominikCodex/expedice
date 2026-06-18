@@ -6,65 +6,62 @@ Lokální Windows pomocník pro tichý tisk štítků a běžných expedičních
 
 Prohlížeč neumí bezpečně tisknout přímo na konkrétní tiskárnu bez dialogu. Print agent běží pouze lokálně na skladovém PC na `127.0.0.1:8787`, přijme PDF z webu a pošle ho na správnou tiskárnu.
 
+## Doporučená instalace bez PowerShellu
+
+Pro sklad je určený samostatný balíček:
+
+```text
+ExpedicePrintAgentSetup.exe
+```
+
+Stačí stáhnout z webu v `Nastavení -> Lokální tisk` a spustit dvojklikem. Instalátor:
+
+- nainstaluje agenta do `%LOCALAPPDATA%\ExpedicePrintAgent`,
+- přibalí `SumatraPDF.exe` pro stabilní tichý tisk,
+- vytvoří autostart po spuštění Windows,
+- rovnou agenta nastartuje,
+- nepotřebuje administrátorská práva,
+- nepotřebuje PowerShell,
+- nepotřebuje Python na skladovém PC.
+
+Produkční `.exe` balíčky se staví přes GitHub Actions a publikují se do GitHub Release:
+
+```text
+https://github.com/DominikCodex/expedice/releases/latest/download/ExpedicePrintAgentSetup.exe
+https://github.com/DominikCodex/expedice/releases/latest/download/ExpedicePrintAgentUninstall.exe
+```
+
+Nestavět je na skladovém PC. Lokální build používá PyInstaller a antiviry mohou na kombinaci build skriptu, balení EXE a přibaleného PDF nástroje reagovat falešným poplachem.
+
+## Odinstalace / čistá reinstalace bez PowerShellu
+
+Použij:
+
+```text
+ExpedicePrintAgentUninstall.exe
+```
+
+Odinstalátor ukončí běžícího agenta, smaže autostart a odstraní instalační složku. Pro čisté testování stačí:
+
+1. spustit `ExpedicePrintAgentUninstall.exe`,
+2. znovu spustit `ExpedicePrintAgentSetup.exe`.
+
+## Servisní PowerShell varianta
+
+PowerShell skripty zůstávají jen jako záložní servisní cesta pro ruční diagnostiku:
+
+```powershell
+.\install.ps1
+.\uninstall.ps1
+```
+
+Sklad by měl používat primárně `.exe` balíčky.
+
 ## Režimy tisku
 
 - `carrier_label` + `dpd` -> `Brother QL-1100`
 - `carrier_label` + `packeta` -> `Brother QL-700`
 - `default` -> výchozí tiskárna Windows, případně tiskárna `defaultDocument` v konfiguraci
-
-## Instalace V1
-
-Na skladovém PC spustit PowerShell:
-
-```powershell
-Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
-.\install.ps1
-```
-
-## Odinstalace / cista reinstalace
-
-Odinstalace ukonci beziciho agenta, smaze autostart a odstrani instalacni slozku:
-
-```powershell
-.\uninstall.ps1
-```
-
-Ponechat konfiguraci tiskaren pro dalsi instalaci:
-
-```powershell
-.\uninstall.ps1 -KeepConfig
-```
-
-Cisty reinstall pro testovani:
-
-```powershell
-.\uninstall.ps1
-.\install.ps1
-```
-
-V1 počítá s nainstalovaným Pythonem (`py -3`). Produkční balíček bude později přes `ExpedicePrintAgentSetup.exe`.
-
-Instalace už řeší SumatraPDF:
-
-- Pokud existuje `print-agent\bin\SumatraPDF.exe`, zkopíruje ji do instalace.
-- Pokud tam není, stáhne oficiální portable ZIP `SumatraPDF 3.6.1 64-bit` ze SumatraPDF webu.
-- Pokud stažení selže, agent se i tak nainstaluje a použije Windows tiskový fallback.
-
-## Doporučený tisk PDF
-
-Agent nejdříve hledá `SumatraPDF.exe`, protože umí stabilní tichý tisk:
-
-```powershell
-SumatraPDF.exe -print-to "Brother QL-1100" -silent label.pdf
-```
-
-Instalátor ji ukládá sem:
-
-```text
-%LOCALAPPDATA%\ExpedicePrintAgent\bin\SumatraPDF.exe
-```
-
-Pokud Sumatra není dostupná, agent použije Windows `ShellExecute print/printto`, podobně jako původní VBA.
 
 ## Konfigurace
 
@@ -120,9 +117,18 @@ Content-Type: application/json
 }
 ```
 
-## Produkční další krok
+## Build balíčku
 
-- Zabalit přes `build.ps1` do `.exe`.
-- Přibalit SumatraPDF portable přímo do produkčního instalátoru, aby nebyl potřeba download při instalaci.
-- Vytvořit Inno Setup instalátor.
-- Přidat auto-update z Railway.
+Primárně se build spouští v GitHub Actions (`Build print agent`). Ručně na vývojovém Windows PC jen když je potřeba:
+
+```powershell
+python .\print-agent\build_agent.py
+```
+
+Build vytvoří:
+
+- `dist\ExpedicePrintAgent.exe`,
+- `ExpedicePrintAgentSetup.exe`,
+- `ExpedicePrintAgentUninstall.exe`.
+
+Soubor `ExpedicePrintAgentSetup.exe` obsahuje agenta i SumatraPDF, takže instalace na skladovém PC už nic dalšího nestahuje.
