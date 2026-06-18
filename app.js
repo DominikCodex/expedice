@@ -151,15 +151,19 @@ const els = {
   settingsPacketaPassword: document.getElementById("settings-packeta-password"),
   settingsPacketaStatus: document.getElementById("settings-packeta-status"),
   settingsPacketaIveronikaPassword: document.getElementById("settings-packeta-iveronika-password"),
+  settingsPacketaIveronikaStatus: document.getElementById("settings-packeta-iveronika-status"),
   settingsPacketaGalantraPassword: document.getElementById("settings-packeta-galantra-password"),
+  settingsPacketaGalantraStatus: document.getElementById("settings-packeta-galantra-status"),
   settingsDpdUrl: document.getElementById("settings-dpd-url"),
   settingsDpdKey: document.getElementById("settings-dpd-key"),
   settingsDpdCustomerDsw: document.getElementById("settings-dpd-customer-dsw"),
   settingsDpdCustomerId: document.getElementById("settings-dpd-customer-id"),
   settingsDpdIveronikaKey: document.getElementById("settings-dpd-iveronika-key"),
+  settingsDpdIveronikaStatus: document.getElementById("settings-dpd-iveronika-status"),
   settingsDpdIveronikaCustomerDsw: document.getElementById("settings-dpd-iveronika-customer-dsw"),
   settingsDpdIveronikaCustomerId: document.getElementById("settings-dpd-iveronika-customer-id"),
   settingsDpdGalantraKey: document.getElementById("settings-dpd-galantra-key"),
+  settingsDpdGalantraStatus: document.getElementById("settings-dpd-galantra-status"),
   settingsDpdGalantraCustomerDsw: document.getElementById("settings-dpd-galantra-customer-dsw"),
   settingsDpdGalantraCustomerId: document.getElementById("settings-dpd-galantra-customer-id"),
   settingsDpdShipmentType: document.getElementById("settings-dpd-shipment-type"),
@@ -1276,6 +1280,17 @@ async function runDpdSend() {
   }
 }
 
+function renderSecretInput(input, status, saved, savedText, emptyText) {
+  if (!input) return;
+  input.value = "";
+  input.placeholder = saved ? "Uloženo, prázdné = ponechat uložené" : "Zatím není uložené";
+  if (status) {
+    status.textContent = saved ? savedText : emptyText;
+    status.classList.toggle("settings-hint-ok", Boolean(saved));
+    status.classList.toggle("settings-hint-missing", !saved);
+  }
+}
+
 function renderSettings(settings) {
   const mapy = settings.mapy || {};
   const packeta = settings.packeta || {};
@@ -1292,8 +1307,20 @@ function renderSettings(settings) {
 
   els.settingsPacketaUrl.value = packeta.apiUrl || "";
   els.settingsPacketaPassword.value = "";
-  els.settingsPacketaIveronikaPassword.value = "";
-  els.settingsPacketaGalantraPassword.value = "";
+  renderSecretInput(
+    els.settingsPacketaIveronikaPassword,
+    els.settingsPacketaIveronikaStatus,
+    packetaIveronika.hasApiPassword,
+    "API heslo je uložené.",
+    "API heslo zatím není uložené."
+  );
+  renderSecretInput(
+    els.settingsPacketaGalantraPassword,
+    els.settingsPacketaGalantraStatus,
+    packetaGalantra.hasApiPassword,
+    "API heslo je uložené.",
+    "API heslo zatím není uložené."
+  );
   els.settingsPacketaStatus.textContent = [
     packeta.hasApiPassword ? "Výchozí API heslo je uložené." : "Výchozí API heslo zatím není uložené.",
     packetaIveronika.hasApiPassword ? "iVeronika.cz má uložené API heslo." : "iVeronika.cz zatím nemá API heslo.",
@@ -1304,10 +1331,22 @@ function renderSettings(settings) {
   els.settingsDpdKey.value = "";
   els.settingsDpdCustomerDsw.value = dpd.customerDsw || "";
   els.settingsDpdCustomerId.value = dpd.customerId || "";
-  els.settingsDpdIveronikaKey.value = "";
+  renderSecretInput(
+    els.settingsDpdIveronikaKey,
+    els.settingsDpdIveronikaStatus,
+    dpdIveronika.hasApiKey,
+    "DPD API key je uložený.",
+    "DPD API key zatím není uložený."
+  );
   els.settingsDpdIveronikaCustomerDsw.value = dpdIveronika.customerDsw || "";
   els.settingsDpdIveronikaCustomerId.value = dpdIveronika.customerId || "";
-  els.settingsDpdGalantraKey.value = "";
+  renderSecretInput(
+    els.settingsDpdGalantraKey,
+    els.settingsDpdGalantraStatus,
+    dpdGalantra.hasApiKey,
+    "DPD API key je uložený.",
+    "DPD API key zatím není uložený."
+  );
   els.settingsDpdGalantraCustomerDsw.value = dpdGalantra.customerDsw || "";
   els.settingsDpdGalantraCustomerId.value = dpdGalantra.customerId || "";
   els.settingsDpdShipmentType.value = dpd.shipmentType || "Standard";

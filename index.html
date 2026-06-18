@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Roztřídění zboží</title>
-    <link rel="stylesheet" href="styles.css?v=carrier-clients-20260618" />
+    <link rel="stylesheet" href="styles.css?v=carrier-secret-status-20260618" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=carrier-clients-20260618"></script>
+    <script defer src="app.js?v=carrier-secret-status-20260618"></script>
   </head>
   <body>
     <section id="auth-view" class="auth-view">
@@ -361,6 +361,7 @@
                         <span>API heslo klienta</span>
                         <input id="settings-packeta-iveronika-password" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
                       </label>
+                      <div id="settings-packeta-iveronika-status" class="settings-hint"></div>
                     </div>
                     <div class="carrier-client-card">
                       <strong>Galantra.cz</strong>
@@ -368,6 +369,7 @@
                         <span>API heslo klienta</span>
                         <input id="settings-packeta-galantra-password" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
                       </label>
+                      <div id="settings-packeta-galantra-status" class="settings-hint"></div>
                     </div>
                   </div>
                 </fieldset>
@@ -397,6 +399,7 @@
                         <span>API key klienta</span>
                         <input id="settings-dpd-iveronika-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
                       </label>
+                      <div id="settings-dpd-iveronika-status" class="settings-hint"></div>
                       <label class="field">
                         <span>Zákazník DSW</span>
                         <input id="settings-dpd-iveronika-customer-dsw" autocomplete="off" />
@@ -412,6 +415,7 @@
                         <span>API key klienta</span>
                         <input id="settings-dpd-galantra-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
                       </label>
+                      <div id="settings-dpd-galantra-status" class="settings-hint"></div>
                       <label class="field">
                         <span>Zákazník DSW</span>
                         <input id="settings-dpd-galantra-customer-dsw" autocomplete="off" />

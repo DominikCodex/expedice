@@ -1101,6 +1101,14 @@ select:focus {
   font-weight: 800;
 }
 
+.settings-hint-ok {
+  color: var(--accent-dark);
+}
+
+.settings-hint-missing {
+  color: var(--danger);
+}
+
 .carrier-client-grid {
   display: grid;
   gap: 10px;
