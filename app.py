@@ -2954,6 +2954,9 @@ def packeta_validate():
     data = request.get_json(silent=True) or {}
     dataset_id = data.get("datasetId") or request.args.get("datasetId") or request.args.get("id")
     limit = int_from_text(data.get("limit") or request.args.get("limit")) or 30
+    client_filter = normalize_carrier_client_code(
+        data.get("clientCode") or data.get("client") or data.get("shopCode") or request.args.get("clientCode") or request.args.get("client") or request.args.get("shopCode")
+    )
 
     if not dataset_id:
         return jsonify({"error": "datasetId is required"}), 400
@@ -3069,6 +3072,9 @@ def dpd_dry_run():
     dataset_id = request.args.get("datasetId") or request.args.get("id")
     dataset_date = request.args.get("date")
     limit = int_from_text(request.args.get("limit"))
+    client_filter = normalize_carrier_client_code(
+        request.args.get("clientCode") or request.args.get("client") or request.args.get("shopCode")
+    )
 
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -3119,7 +3125,10 @@ def dpd_dry_run():
                 }
             )
             continue
-        shipments.append(dpd_payload(row))
+        shipment = dpd_payload(row)
+        if client_filter and shipment.get("clientCode") != client_filter:
+            continue
+        shipments.append(shipment)
 
     visible_shipments = shipments[:limit] if limit > 0 else shipments
     return jsonify(
@@ -3134,6 +3143,7 @@ def dpd_dry_run():
             "shipmentsCount": len(shipments),
             "skippedCount": len(skipped),
             "truncatedCount": max(0, len(shipments) - len(visible_shipments)),
+            "clientFilter": client_filter,
             "shipments": visible_shipments,
             "skipped": skipped,
         }
@@ -3185,7 +3195,10 @@ def dpd_send():
                 }
             )
             continue
-        shipments.append(dpd_payload(row))
+        shipment = dpd_payload(row)
+        if client_filter and shipment.get("clientCode") != client_filter:
+            continue
+        shipments.append(shipment)
 
     selected = shipments[:limit]
     grouped_shipments = {}
@@ -3232,6 +3245,7 @@ def dpd_send():
             "sentCount": len(selected) if all_ok else 0,
             "notSentCount": max(0, len(shipments) - len(selected)),
             "skippedCount": len(skipped),
+            "clientFilter": client_filter,
             "results": send_results,
             "result": send_results[0]["result"] if len(send_results) == 1 else {"ok": all_ok, "error": "" if all_ok else "Nektera klientská DPD odeslani skoncila chybou."},
             "shipments": selected,
