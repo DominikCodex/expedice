@@ -180,6 +180,8 @@ const els = {
   settingsSenderContact: document.getElementById("settings-sender-contact"),
   settingsSenderPhone: document.getElementById("settings-sender-phone"),
   settingsSenderEmail: document.getElementById("settings-sender-email"),
+  printAgentTest: document.getElementById("print-agent-test"),
+  printAgentStatus: document.getElementById("print-agent-status"),
   usersPanel: document.getElementById("users-admin-panel"),
   usersRefresh: document.getElementById("users-refresh"),
   usersList: document.getElementById("users-list"),
@@ -1527,7 +1529,7 @@ async function sendCompletionCarrier(rowId) {
   }
 }
 
-function printCompletionCarrierLabel(rowId) {
+async function printCompletionCarrierLabel(rowId) {
   const row = completionState.rows.find((item) => String(item.id) === String(rowId));
   const labelNumber = row?.packetaShipmentId || "";
   if (!labelNumber) {
@@ -1536,16 +1538,31 @@ function printCompletionCarrierLabel(rowId) {
   }
 
   const url = `/api/completion/rows/${encodeURIComponent(rowId)}/label?markPrinted=1`;
-  const printWindow = window.open(url, "_blank", "noopener");
-  if (!printWindow) {
-    setCompletionMessage("Prohlížeč zablokoval otevření štítku. Povol vyskakovací okna pro expediční aplikaci.", "error");
-    return;
-  }
+  const carrier = row.deliveryCarrier || (String(labelNumber).length === 14 ? "dpd" : "packeta");
+  setCompletionMessage(`Posílám štítek ${labelNumber} do lokálního tiskového agenta...`, "neutral");
 
-  row.labelPrinted = "Label printed";
-  replaceCompletionRow(row);
-  renderCompletion();
-  setCompletionMessage(`Štítek ${labelNumber} je otevřený pro tisk. Vyber termotiskárnu Brother/DPD štítky.`, "success");
+  try {
+    const result = await printPdfViaAgent({
+      pdfUrl: url,
+      type: "carrier_label",
+      carrier,
+      filename: `${labelNumber}.pdf`,
+    });
+    row.labelPrinted = "Label printed";
+    replaceCompletionRow(row);
+    renderCompletion();
+    setCompletionMessage(`Štítek ${labelNumber} odeslán na tiskárnu: ${result.printer}.`, "success");
+  } catch (error) {
+    const printWindow = window.open(url, "_blank", "noopener");
+    if (!printWindow) {
+      setCompletionMessage(`Tiskový agent neběží a prohlížeč zablokoval otevření PDF: ${error.message}`, "error");
+      return;
+    }
+    row.labelPrinted = "Label printed";
+    replaceCompletionRow(row);
+    renderCompletion();
+    setCompletionMessage(`Agent neběží (${error.message}). Štítek ${labelNumber} jsem otevřel jako PDF pro ruční tisk.`, "warning");
+  }
 }
 
 function renderAddressValidation(rowId, data) {
@@ -1701,6 +1718,82 @@ function carrierSendActionHtml(row) {
   return `<button type="button" class="carrier-send ${escapeHtml(carrier)}" data-action="send-carrier-row" data-row-id="${escapeHtml(
     row.id
   )}">${label}</button>`;
+}
+
+const PRINT_AGENT_URL = localStorage.getItem("expedicePrintAgentUrl") || "http://127.0.0.1:8787";
+
+function arrayBufferToBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = "";
+  const chunkSize = 0x8000;
+  for (let index = 0; index < bytes.length; index += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize));
+  }
+  return btoa(binary);
+}
+
+async function fetchWithTimeout(url, options = {}, timeoutMs = 1200) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
+async function printPdfViaAgent({ pdfUrl, type, carrier, filename }) {
+  const health = await fetchWithTimeout(`${PRINT_AGENT_URL}/health`, { cache: "no-store" }, 900);
+  if (!health.ok) throw new Error("Lokální tiskový agent neběží.");
+
+  const pdfResponse = await fetch(pdfUrl, { cache: "no-store", credentials: "same-origin" });
+  if (!pdfResponse.ok) {
+    const errorText = await pdfResponse.text().catch(() => "");
+    throw new Error(errorText || "PDF štítek se nepodařilo stáhnout.");
+  }
+
+  const contentBase64 = arrayBufferToBase64(await pdfResponse.arrayBuffer());
+  const printResponse = await fetchWithTimeout(
+    `${PRINT_AGENT_URL}/print`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        type,
+        carrier,
+        filename,
+        contentBase64,
+        copies: 1,
+      }),
+    },
+    30000
+  );
+  const data = await printResponse.json().catch(() => ({}));
+  if (!printResponse.ok || !data.ok) {
+    throw new Error(data.error || "Tiskový agent vrátil chybu.");
+  }
+  return data;
+}
+
+async function testPrintAgent() {
+  if (!els.printAgentStatus) return;
+  els.printAgentStatus.textContent = "Zkouším spojení s lokálním tiskovým agentem...";
+  els.printAgentStatus.classList.remove("settings-hint-ok", "settings-hint-missing");
+  try {
+    const response = await fetchWithTimeout(`${PRINT_AGENT_URL}/health`, { cache: "no-store" }, 1200);
+    if (!response.ok) throw new Error("Agent neodpověděl v pořádku.");
+    const data = await response.json();
+    const printers = data.config?.printers || {};
+    els.printAgentStatus.classList.add("settings-hint-ok");
+    els.printAgentStatus.textContent = `Agent běží (${data.version || "?"}). SumatraPDF: ${
+      data.sumatraAvailable ? "ano" : "ne"
+    }. DPD: ${printers.dpdLabel || "výchozí"}, Zásilkovna: ${printers.packetaLabel || "výchozí"}, dokumenty: ${
+      printers.defaultDocument || "výchozí Windows tiskárna"
+    }.`;
+  } catch (error) {
+    els.printAgentStatus.classList.add("settings-hint-missing");
+    els.printAgentStatus.textContent = `Agent neběží nebo není dostupný: ${error.message}`;
+  }
 }
 
 function parseWorkflowBoxCode(value) {
@@ -2725,5 +2818,6 @@ els.packetaDryRun.addEventListener("click", runPacketaDryRun);
 els.packetaValidate.addEventListener("click", runPacketaValidation);
 els.dpdDryRun.addEventListener("click", runDpdDryRun);
 els.dpdSend.addEventListener("click", runDpdSend);
+els.printAgentTest?.addEventListener("click", testPrintAgent);
 
 checkAuth();
