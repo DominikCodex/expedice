@@ -236,12 +236,12 @@ function datasetLabel(dataset) {
 
 function dayLabel(day) {
   if (!day) return "Bez expedičního dne";
-  const latest = day.latestUpload ? ` | poslednĂ­ ${formatTime(day.latestUpload)}` : "";
+  const latest = day.latestUpload ? ` | poslední ${formatTime(day.latestUpload)}` : "";
   return `${day.label || day.date} | ${day.activeBatches || 0} aktivní dávky | ${day.rowsCount || 0} řádků${latest}`;
 }
 
 function datasetInfoHtml(dataset) {
-  if (!dataset) return `<span>Ĺ˝ĂˇdnĂˇ aktivnĂ­ dĂˇvka</span>`;
+  if (!dataset) return `<span>Žádná aktivní dávka</span>`;
   return `
     <span><strong>${escapeHtml(dataset.batchName || dataset.datasetDate)}</strong></span>
     <span>${escapeHtml(dataset.datasetTime || "")}</span>
@@ -283,7 +283,7 @@ function renderExpeditionDayOptions() {
   els.expeditionDayList.innerHTML = "";
 
   if (!expeditionState.days.length) {
-    els.expeditionDaySummary.innerHTML = `<span>Online zatĂ­m neobsahuje ĹľĂˇdnĂ˝ expediÄŤnĂ­ den.</span>`;
+    els.expeditionDaySummary.innerHTML = `<span>Online zatím neobsahuje žádný expediční den.</span>`;
     return;
   }
 
@@ -305,7 +305,7 @@ function renderSortingOptions() {
   els.sortingDataset.innerHTML = "";
 
   if (!sortingState.datasets.length) {
-    els.sortingDataset.innerHTML = `<option value="">Ĺ˝ĂˇdnĂˇ dĂˇvka roztĹ™Ă­dÄ›nĂ­</option>`;
+    els.sortingDataset.innerHTML = `<option value="">Žádná dávka roztřídění</option>`;
     els.sortingDatasetInfo.innerHTML = datasetInfoHtml(null);
     els.sortingDelete.disabled = true;
     return;
@@ -435,7 +435,7 @@ async function loadExpeditionDay(dayDate) {
     ? `<span><strong>${escapeHtml(expeditionState.day.label)}</strong></span><span>${escapeHtml(
         expeditionState.day.activeBatches || 0
       )} aktivní dávky</span><span>${escapeHtml(expeditionState.day.rowsCount || 0)} řádků</span>`
-    : `<span>Den nenĂ­ naÄŤtenĂ˝.</span>`;
+    : `<span>Den není načtený.</span>`;
 
   renderSortingOptions();
   renderCompletionOptions();
@@ -508,13 +508,13 @@ async function loadSortingDataset(datasetId) {
 async function deleteDataset(dataset, afterDelete) {
   if (!dataset) return false;
   const label = datasetLabel(dataset);
-  if (!confirm(`Smazat dĂˇvku?\n\n${label}\n\nData zĹŻstanou v historii jako smazanĂˇ.`)) return false;
+  if (!confirm(`Smazat dávku?\n\n${label}\n\nData zůstanou v historii jako smazaná.`)) return false;
 
   await fetchJson(`/api/datasets/${dataset.id}`, {
     method: "DELETE",
     body: JSON.stringify({
       deletedBy: "web",
-      reason: "SmazĂˇno ve webovĂ©m rozhranĂ­",
+      reason: "Smazáno ve webovém rozhraní",
     }),
   });
 
@@ -908,7 +908,7 @@ function completionStatus(row) {
   if (text.includes("label printed") || text.includes("stit")) return { label: "STITek", tone: "ok" };
   if (normalize(row.paidStatus).includes("nezaplaceno")) return { label: "NEZAPLACENO", tone: "warning" };
   if (row.completionStatus) return { label: row.completionStatus, tone: "neutral" };
-  return { label: "cekĂˇ", tone: "neutral" };
+  return { label: "čeká", tone: "neutral" };
 }
 
 function renderCompletionSummary(rows) {
@@ -1031,8 +1031,8 @@ function showScanResult(entry) {
   els.scanResult.classList.add("pulse");
   els.scanSequence.textContent = entry.sequence || "-";
   els.scanCode.textContent = entry.variantCode || entry.productCode || "-";
-  els.scanOrder.textContent = `ObjednĂˇvka ${entry.orderNumber || "-"}`;
-  els.scanRemaining.textContent = `ZbĂ˝vĂˇ ${entry.remainingAfter} ks`;
+  els.scanOrder.textContent = `Objednávka ${entry.orderNumber || "-"}`;
+  els.scanRemaining.textContent = `Zbývá ${entry.remainingAfter} ks`;
 }
 
 function formatTime(value) {
@@ -1205,19 +1205,19 @@ function renderHistory() {
     div.className = "history-item";
     const sign = entry.type === "deduct" ? "-" : "+";
     const canUndo = entry.type === "deduct" && !entry.undone;
-    const undone = entry.undone ? " (vrĂˇceno)" : "";
-    const source = entry.ean ? `EAN ${entry.ean}` : entry.mode || "ruÄŤnÄ›";
+    const undone = entry.undone ? " (vráceno)" : "";
+    const source = entry.ean ? `EAN ${entry.ean}` : entry.mode || "ručně";
     div.innerHTML = `
       <div class="history-main">
         <strong>${escapeHtml(sign)}${entry.amount} ks${escapeHtml(undone)}</strong>
         <span class="history-code">${escapeHtml(entry.variantCode || entry.productCode)}</span>
-        <span class="history-sequence">poĹ™. ${escapeHtml(entry.sequence || "-")}</span>
+        <span class="history-sequence">poř. ${escapeHtml(entry.sequence || "-")}</span>
       </div>
-      <div class="history-meta">${escapeHtml(formatTime(entry.at))} | obj. ${escapeHtml(entry.orderNumber)} | zĹŻstĂˇvĂˇ ${escapeHtml(entry.remainingAfter)} | ${escapeHtml(source)}</div>
+      <div class="history-meta">${escapeHtml(formatTime(entry.at))} | obj. ${escapeHtml(entry.orderNumber)} | zůstává ${escapeHtml(entry.remainingAfter)} | ${escapeHtml(source)}</div>
       <div class="history-name">${escapeHtml(entry.variant || entry.productName || "")}</div>
       ${
         canUndo
-          ? `<div class="history-actions"><button type="button" data-action="undo-history" data-id="${escapeHtml(entry.id)}">VrĂˇtit</button></div>`
+          ? `<div class="history-actions"><button type="button" data-action="undo-history" data-id="${escapeHtml(entry.id)}">Vrátit</button></div>`
           : ""
       }
     `;
@@ -1241,7 +1241,7 @@ function renderCandidates() {
     div.innerHTML = `
       <strong>${escapeHtml(item.variantCode || item.productCode)}</strong>
       <div>${escapeHtml(item.productName || item.info)}</div>
-      <small>Obj. ${escapeHtml(item.orderNumber)} | poĹ™. ${escapeHtml(item.sequence)} | ${escapeHtml(item.variant)}</small>
+      <small>Obj. ${escapeHtml(item.orderNumber)} | poř. ${escapeHtml(item.sequence)} | ${escapeHtml(item.variant)}</small>
       <div class="candidate-footer">
         <span class="qty">${item.remaining}</span>
         <button type="button" data-action="candidate-deduct" data-id="${escapeHtml(item.id)}">Odepsat 1</button>
@@ -1318,7 +1318,7 @@ function undoHistory(historyId) {
   state.history = state.history.slice(0, MAX_HISTORY);
   saveState();
   renderAll();
-  setMessage(`VrĂˇceno ${entry.amount} ks pro ${entry.variantCode}.`, "success");
+  setMessage(`Vráceno ${entry.amount} ks pro ${entry.variantCode}.`, "success");
 }
 
 function findScanCandidates(ean) {
@@ -1364,13 +1364,13 @@ function processScan(rawValue) {
   const result = findScanCandidates(ean);
 
   if (!result.entries.length) {
-    setMessage(`EAN ${ean} nenĂ­ v naÄŤtenĂ© EAN tabulce.`, "error");
+    setMessage(`EAN ${ean} není v načtené EAN tabulce.`, "error");
     renderCandidates();
     return;
   }
 
   if (!result.candidates.length) {
-    setMessage(`EAN ${ean} znĂˇm, ale u odpovĂ­dajĂ­cĂ­ho zboĹľĂ­ uĹľ nenĂ­ co odepsat.`, "warning");
+    setMessage(`EAN ${ean} znám, ale u odpovídajícího zboží už není co odepsat.`, "warning");
     renderCandidates();
     return;
   }
@@ -1379,12 +1379,12 @@ function processScan(rawValue) {
   if (result.entries.length === 1 && exactCandidates.length === 1) {
     const entry = changeItem(exactCandidates[0].item.id, -1, {
       ean,
-      mode: "EAN jednoznaÄŤnĂˇ varianta",
+      mode: "EAN jednoznačná varianta",
     });
     if (entry) {
       showScanResult(entry);
       setMessage(
-        `OdepsĂˇno 1 ks: ${entry.variantCode}, obj. ${entry.orderNumber}, poĹ™. ${entry.sequence}.`,
+        `Odepsáno 1 ks: ${entry.variantCode}, obj. ${entry.orderNumber}, poř. ${entry.sequence}.`,
         "success"
       );
     }
@@ -1393,7 +1393,7 @@ function processScan(rawValue) {
 
   activeCandidates = result.candidates;
   renderAll();
-  setMessage(`EAN ${ean} mĂˇ vĂ­ce moĹľnĂ˝ch shod. Vyber sprĂˇvnou poloĹľku.`, "warning");
+  setMessage(`EAN ${ean} má více možných shod. Vyber správnou položku.`, "warning");
 }
 
 function exportData() {
@@ -1420,9 +1420,9 @@ function importData(file) {
       activeCandidates = [];
       saveState();
       renderAll();
-      setMessage("Import dat probÄ›hl v poĹ™Ăˇdku.", "success");
+      setMessage("Import dat proběhl v pořádku.", "success");
     } catch {
-      setMessage("Import se nepodaĹ™il. Soubor nemĂˇ oÄŤekĂˇvanĂ˝ JSON formĂˇt.", "error");
+      setMessage("Import se nepodařil. Soubor nemá očekávaný JSON formát.", "error");
     }
   };
   reader.readAsText(file);
@@ -1430,10 +1430,10 @@ function importData(file) {
 
 function resetFromSeed() {
   if (!seed.items?.length) {
-    setMessage("Seed z Excelu nenĂ­ k dispozici.", "error");
+    setMessage("Seed z Excelu není k dispozici.", "error");
     return;
   }
-  if (!confirm("NaÄŤĂ­st znovu seed z Excelu? AktuĂˇlnĂ­ lokĂˇlnĂ­ odpisy se pĹ™epĂ­Ĺˇou.")) return;
+  if (!confirm("Načíst znovu seed z Excelu? Aktuální lokální odpisy se přepíšou.")) return;
   applyLoaded(cloneSeed());
   activeCandidates = [];
   saveState();
@@ -1465,7 +1465,7 @@ els.manualSearch.addEventListener("input", () => {
   activeCandidates = [];
   renderAll();
   if (normalize(els.manualSearch.value).includes("501")) {
-    setMessage("Pozor na kĂłd 501 - v pĹŻvodnĂ­m procesu mÄ›l riziko zĂˇmÄ›ny.", "warning");
+    setMessage("Pozor na kód 501 - v původním procesu měl riziko záměny.", "warning");
   }
 });
 
@@ -1500,11 +1500,11 @@ els.sortingBody.addEventListener("click", (event) => {
   const id = button.dataset.id;
   if (button.dataset.action === "deduct") {
     const entry = changeItem(id, -1, { mode: "ruční odpis" });
-    if (entry) setMessage(`OdepsĂˇno 1 ks: ${entry.variantCode}.`, "success");
+    if (entry) setMessage(`Odepsáno 1 ks: ${entry.variantCode}.`, "success");
   }
   if (button.dataset.action === "restore") {
     const entry = changeItem(id, 1, { mode: "ruční navrácení" });
-    if (entry) setMessage(`VrĂˇceno 1 ks: ${entry.variantCode}.`, "success");
+    if (entry) setMessage(`Vráceno 1 ks: ${entry.variantCode}.`, "success");
   }
 });
 
@@ -1514,7 +1514,7 @@ els.candidateList.addEventListener("click", (event) => {
   const entry = changeItem(button.dataset.id, -1, { mode: "výběr z kandidátů" });
   if (entry) {
     showScanResult(entry);
-    setMessage(`OdepsĂˇno 1 ks: ${entry.variantCode}, poĹ™. ${entry.sequence}.`, "success");
+    setMessage(`Odepsáno 1 ks: ${entry.variantCode}, poř. ${entry.sequence}.`, "success");
   }
 });
 
@@ -1545,9 +1545,9 @@ els.sortingDelete.addEventListener("click", async () => {
     const deleted = await deleteDataset(sortingState.dataset, () =>
       loadExpeditionDays(expeditionState.day?.date || "")
     );
-    if (deleted) setMessage("DĂˇvka roztĹ™Ă­dÄ›nĂ­ byla smazanĂˇ.", "success");
+    if (deleted) setMessage("Dávka roztřídění byla smazaná.", "success");
   } catch (error) {
-    setMessage(`DĂˇvku roztĹ™Ă­dÄ›nĂ­ se nepodaĹ™ilo smazat: ${error.message}`, "error");
+    setMessage(`Dávku roztřídění se nepodařilo smazat: ${error.message}`, "error");
   }
 });
 els.completionRefresh.addEventListener("click", () => loadCompletionDatasets());
@@ -1559,9 +1559,9 @@ els.completionDelete.addEventListener("click", async () => {
     const deleted = await deleteDataset(completionState.dataset, () =>
       loadExpeditionDays(expeditionState.day?.date || "")
     );
-    if (deleted) setCompletionMessage("DĂˇvka kompletace byla smazanĂˇ.", "success");
+    if (deleted) setCompletionMessage("Dávka kompletace byla smazaná.", "success");
   } catch (error) {
-    setCompletionMessage(`DĂˇvku kompletace se nepodaĹ™ilo smazat: ${error.message}`, "error");
+    setCompletionMessage(`Dávku kompletace se nepodařilo smazat: ${error.message}`, "error");
   }
 });
 
