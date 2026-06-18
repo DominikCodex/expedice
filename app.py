@@ -1333,6 +1333,19 @@ def default_settings():
         "packeta": {
             "apiUrl": os.environ.get("PACKETA_API_URL", "https://www.zasilkovna.cz/api/rest"),
             "apiPassword": os.environ.get("PACKETA_API_PASSWORD", ""),
+            "clients": {
+                "iveronika_cz": {
+                    "name": "iVeronika.cz",
+                    "apiPassword": os.environ.get("PACKETA_API_PASSWORD_IVERONIKA_CZ")
+                    or os.environ.get("PACKETA_API_PASSWORD_IVERONIKA")
+                    or os.environ.get("PACKETA_API_PASSWORD", ""),
+                },
+                "galantra_cz": {
+                    "name": "Galantra.cz",
+                    "apiPassword": os.environ.get("PACKETA_API_PASSWORD_GALANTRA_CZ")
+                    or os.environ.get("PACKETA_API_PASSWORD_GALANTRA", ""),
+                },
+            },
         },
         "dpd": {
             "apiBaseUrl": os.environ.get("DPD_API_URL", "https://geoapi.dpd.cz/v1").rstrip("/"),
@@ -1343,6 +1356,30 @@ def default_settings():
             "customerId": "",
             "shipmentType": "Standard",
             "notification": True,
+            "clients": {
+                "iveronika_cz": {
+                    "name": "iVeronika.cz",
+                    "apiKey": os.environ.get("DPD_API_TOKEN_IVERONIKA_CZ")
+                    or os.environ.get("DPD_API_KEY_IVERONIKA_CZ")
+                    or os.environ.get("DPD_API_TOKEN_IVERONIKA")
+                    or os.environ.get("DPD_API_KEY_IVERONIKA", ""),
+                    "customerDsw": os.environ.get("DPD_CUSTOMER_DSW_IVERONIKA_CZ")
+                    or os.environ.get("DPD_CUSTOMER_DSW_IVERONIKA", ""),
+                    "customerId": os.environ.get("DPD_CUSTOMER_ID_IVERONIKA_CZ")
+                    or os.environ.get("DPD_CUSTOMER_ID_IVERONIKA", ""),
+                },
+                "galantra_cz": {
+                    "name": "Galantra.cz",
+                    "apiKey": os.environ.get("DPD_API_TOKEN_GALANTRA_CZ")
+                    or os.environ.get("DPD_API_KEY_GALANTRA_CZ")
+                    or os.environ.get("DPD_API_TOKEN_GALANTRA")
+                    or os.environ.get("DPD_API_KEY_GALANTRA", ""),
+                    "customerDsw": os.environ.get("DPD_CUSTOMER_DSW_GALANTRA_CZ")
+                    or os.environ.get("DPD_CUSTOMER_DSW_GALANTRA", ""),
+                    "customerId": os.environ.get("DPD_CUSTOMER_ID_GALANTRA_CZ")
+                    or os.environ.get("DPD_CUSTOMER_ID_GALANTRA", ""),
+                },
+            },
             "senderName": "",
             "senderStreet": "",
             "senderHouseNumber": "",
@@ -1368,6 +1405,65 @@ def deep_merge_settings(base, override):
     return merged
 
 
+def normalize_carrier_client_code(value):
+    text = clean_text(value).lower()
+    text = text.replace("https://", "").replace("http://", "").replace("www.", "")
+    text = text.replace(".", "_").replace("-", "_").replace(" ", "_")
+    if "galantra" in text:
+        return "galantra_cz"
+    if "iveronika" in text:
+        return "iveronika_cz"
+    return text.strip("_")
+
+
+def row_carrier_client_code(row):
+    return normalize_carrier_client_code(
+        (row or {}).get("shopCode")
+        or (row or {}).get("shop_code")
+        or (row or {}).get("eshop")
+        or (row or {}).get("shop")
+        or ""
+    )
+
+
+def request_settings(include_secrets=True):
+    try:
+        cache = request.environ.setdefault("_expedition_settings_cache", {})
+        key = "secret" if include_secrets else "public"
+        if key not in cache:
+            cache[key] = read_settings(include_secrets=include_secrets)
+        return cache[key]
+    except RuntimeError:
+        return read_settings(include_secrets=include_secrets)
+
+
+def carrier_client_settings(section_name, row_or_code=None):
+    settings = request_settings(include_secrets=True).get(section_name, {})
+    code = row_carrier_client_code(row_or_code) if isinstance(row_or_code, dict) else normalize_carrier_client_code(row_or_code)
+    client = (settings.get("clients") or {}).get(code, {}) if code else {}
+    merged = dict(settings)
+    if code in ("iveronika_cz", "galantra_cz"):
+        for key, value in client.items():
+            if key != "clients":
+                merged[key] = value or ""
+        for field in ("apiPassword", "apiKey", "customerDsw", "customerId"):
+            if field in settings or field in client:
+                merged[field] = client.get(field, "")
+        if code == "iveronika_cz":
+            for field in ("apiPassword", "apiKey", "customerDsw", "customerId"):
+                if not merged.get(field):
+                    merged[field] = settings.get(field, "")
+    else:
+        for key, value in client.items():
+            if key == "clients":
+                continue
+            if value not in (None, ""):
+                merged[key] = value
+    merged["clientCode"] = code or "default"
+    merged["clientName"] = client.get("name") or ("Galantra.cz" if code == "galantra_cz" else "iVeronika.cz" if code == "iveronika_cz" else "Výchozí klient")
+    return merged
+
+
 def read_settings(include_secrets=False):
     ensure_schema()
     with db_conn() as conn:
@@ -1384,6 +1480,14 @@ def read_settings(include_secrets=False):
         value = public_settings.get(section, {}).get(field, "")
         public_settings[section][f"has{field[0].upper()}{field[1:]}"] = bool(value)
         public_settings[section][field] = ""
+    for code, client in (public_settings.get("packeta", {}).get("clients") or {}).items():
+        value = client.get("apiPassword", "")
+        client["hasApiPassword"] = bool(value)
+        client["apiPassword"] = ""
+    for code, client in (public_settings.get("dpd", {}).get("clients") or {}).items():
+        value = client.get("apiKey", "")
+        client["hasApiKey"] = bool(value)
+        client["apiKey"] = ""
     return public_settings
 
 
@@ -1394,6 +1498,15 @@ def merge_secret_field(next_section, current_section, field):
         next_section[field] = ""
 
 
+def merge_client_secret_fields(next_section, current_section, field):
+    next_clients = next_section.get("clients") or {}
+    current_clients = current_section.get("clients") or {}
+    for code, next_client in next_clients.items():
+        if not isinstance(next_client, dict):
+            continue
+        merge_secret_field(next_client, current_clients.get(code, {}), field)
+
+
 def save_settings_payload(payload):
     current = read_settings(include_secrets=True)
     incoming = payload if isinstance(payload, dict) else {}
@@ -1401,6 +1514,8 @@ def save_settings_payload(payload):
     merge_secret_field(next_settings["mapy"], current["mapy"], "apiKey")
     merge_secret_field(next_settings["packeta"], current["packeta"], "apiPassword")
     merge_secret_field(next_settings["dpd"], current["dpd"], "apiKey")
+    merge_client_secret_fields(next_settings["packeta"], current["packeta"], "apiPassword")
+    merge_client_secret_fields(next_settings["dpd"], current["dpd"], "apiKey")
     next_settings["dpd"]["apiBaseUrl"] = clean_text(next_settings["dpd"].get("apiBaseUrl")).rstrip("/")
 
     with db_conn() as conn:
@@ -1565,6 +1680,7 @@ def packeta_skip_reason(row):
 def packeta_dry_run_packet(row):
     route = packeta_route(row)
     currency = shipment_currency(row)
+    client_settings = carrier_client_settings("packeta", row)
     value = clean_text(row.get("amount")) or ("29" if currency == "EUR" else "0")
     company = ""
     note = clean_text(row.get("note"))
@@ -1633,6 +1749,10 @@ def packeta_dry_run_packet(row):
         "orderNumber": attrs["number"],
         "customer": " ".join(part for part in (attrs["name"], attrs["surname"]) if part),
         "shippingMethod": clean_text(row.get("shippingMethod")),
+        "shopCode": row_carrier_client_code(row),
+        "clientCode": client_settings.get("clientCode"),
+        "clientName": client_settings.get("clientName"),
+        "clientConfigured": bool(client_settings.get("apiPassword")),
         "service": route["service"],
         "addressId": attrs["addressId"],
         "eshop": attrs["eshop"],
@@ -2333,8 +2453,9 @@ def fetch_datasets(include_deleted=False, dataset_kind=None, shop_code=None, dat
             return [dataset_summary(row) for row in cur.fetchall()]
 
 
-def packeta_api_url():
-    return read_settings(include_secrets=True)["packeta"].get("apiUrl") or "https://www.zasilkovna.cz/api/rest"
+def packeta_api_url(settings=None):
+    packeta_settings = settings or request_settings(include_secrets=True).get("packeta", {})
+    return packeta_settings.get("apiUrl") or "https://www.zasilkovna.cz/api/rest"
 
 
 def packeta_validation_xml(request_xml, password):
@@ -2359,11 +2480,11 @@ def packeta_response_status(response_text):
     return "unknown"
 
 
-def packeta_post_validation_xml(validation_xml):
+def packeta_post_validation_xml(validation_xml, settings=None):
     timeout = int_from_text(os.environ.get("PACKETA_API_TIMEOUT")) or 20
     request_data = validation_xml.encode("utf-8")
     packeta_request = urllib.request.Request(
-        packeta_api_url(),
+        packeta_api_url(settings),
         data=request_data,
         headers={"Content-Type": "application/xml; charset=utf-8"},
         method="POST",
@@ -2400,12 +2521,14 @@ def packeta_post_validation_xml(validation_xml):
         }
 
 
-def dpd_api_url():
-    return read_settings(include_secrets=True)["dpd"].get("apiBaseUrl", "").rstrip("/")
+def dpd_api_url(settings=None):
+    dpd_settings = settings or request_settings(include_secrets=True).get("dpd", {})
+    return dpd_settings.get("apiBaseUrl", "").rstrip("/")
 
 
-def dpd_api_token():
-    return read_settings(include_secrets=True)["dpd"].get("apiKey", "")
+def dpd_api_token(settings=None):
+    dpd_settings = settings or request_settings(include_secrets=True).get("dpd", {})
+    return dpd_settings.get("apiKey", "")
 
 
 def dpd_country(row):
@@ -2462,9 +2585,13 @@ def dpd_skip_reason(row):
 
 def dpd_payload(row):
     delivery = delivery_info_from_row(row)
+    client_settings = carrier_client_settings("dpd", row)
     shipment = {
         "reference": clean_text(row.get("orderNumber")),
         "orderId": clean_text(row.get("orderId")),
+        "shopCode": row_carrier_client_code(row),
+        "clientCode": client_settings.get("clientCode"),
+        "clientName": client_settings.get("clientName"),
         "service": delivery["service"],
         "serviceLabel": delivery["serviceLabel"],
         "recipient": {
@@ -2507,6 +2634,9 @@ def dpd_payload(row):
         "orderNumber": row.get("orderNumber"),
         "customer": dpd_recipient_name(row),
         "shippingMethod": row.get("shippingMethod"),
+        "shopCode": row_carrier_client_code(row),
+        "clientCode": client_settings.get("clientCode"),
+        "clientName": client_settings.get("clientName"),
         "service": delivery["service"],
         "serviceLabel": delivery["serviceLabel"],
         "warnings": warnings,
@@ -2514,22 +2644,29 @@ def dpd_payload(row):
     }
 
 
-def dpd_request_headers():
+def dpd_request_headers(settings=None):
     headers = {"Content-Type": "application/json", "Accept": "application/json"}
-    token = dpd_api_token()
+    token = dpd_api_token(settings)
     if token:
         headers["x-api-key"] = token
     return headers
 
 
-def dpd_post_payload(payload):
-    settings = read_settings(include_secrets=True)["dpd"]
+def dpd_post_payload(payload, settings=None):
+    settings = settings or request_settings(include_secrets=True).get("dpd", {})
     if not settings.get("sendEnabled"):
         return {
             "httpStatus": 0,
             "ok": False,
             "responseText": "",
             "error": "DPD odesílání není povolené v Nastavení",
+        }
+    if not clean_text(settings.get("apiKey")):
+        return {
+            "httpStatus": 0,
+            "ok": False,
+            "responseText": "",
+            "error": f"DPD API key neni nastaveny pro klienta {settings.get('clientName') or 'Vychozi klient'}.",
         }
     base_url = clean_text(settings.get("apiBaseUrl")).rstrip("/")
     if not base_url:
@@ -2545,7 +2682,7 @@ def dpd_post_payload(payload):
     dpd_request = urllib.request.Request(
         f"{base_url}/shipments",
         data=request_data,
-        headers=dpd_request_headers(),
+        headers=dpd_request_headers(settings),
         method="POST",
     )
 
@@ -2813,10 +2950,6 @@ def packeta_validate():
     if auth_error:
         return auth_error
 
-    password = read_settings(include_secrets=True)["packeta"].get("apiPassword", "")
-    if not password:
-        return jsonify({"error": "PACKETA_API_PASSWORD is not configured"}), 400
-
     ensure_schema()
     data = request.get_json(silent=True) or {}
     dataset_id = data.get("datasetId") or request.args.get("datasetId") or request.args.get("id")
@@ -2862,8 +2995,30 @@ def packeta_validate():
 
     results = []
     for packet in packets[:limit]:
+        client_settings = carrier_client_settings("packeta", packet.get("clientCode") or packet.get("shopCode"))
+        password = client_settings.get("apiPassword", "")
+        if not password:
+            results.append(
+                {
+                    "rowNumber": packet.get("rowNumber"),
+                    "orderNumber": packet.get("orderNumber"),
+                    "customer": packet.get("customer"),
+                    "shippingMethod": packet.get("shippingMethod"),
+                    "service": packet.get("service"),
+                    "addressId": packet.get("addressId"),
+                    "eshop": packet.get("eshop"),
+                    "clientCode": client_settings.get("clientCode"),
+                    "clientName": client_settings.get("clientName"),
+                    "valid": False,
+                    "status": "configuration_error",
+                    "httpStatus": 0,
+                    "responseText": "",
+                    "error": f"Packeta API heslo neni nastavene pro klienta {client_settings.get('clientName')}.",
+                }
+            )
+            continue
         validation_xml = packeta_validation_xml(packet["requestXml"], password)
-        result = packeta_post_validation_xml(validation_xml)
+        result = packeta_post_validation_xml(validation_xml, client_settings)
         results.append(
             {
                 "rowNumber": packet.get("rowNumber"),
@@ -2873,6 +3028,8 @@ def packeta_validate():
                 "service": packet.get("service"),
                 "addressId": packet.get("addressId"),
                 "eshop": packet.get("eshop"),
+                "clientCode": client_settings.get("clientCode"),
+                "clientName": client_settings.get("clientName"),
                 "valid": result["valid"],
                 "status": result["status"],
                 "httpStatus": result["httpStatus"],
@@ -3031,27 +3188,52 @@ def dpd_send():
         shipments.append(dpd_payload(row))
 
     selected = shipments[:limit]
-    dpd_settings = read_settings(include_secrets=True)["dpd"]
-    api_payload = {
-        "mode": data.get("mode") or dpd_settings.get("mode") or "test",
-        "source": "expedice-railway",
-        "dataset": dataset_summary(dataset),
-        "shipments": [item["payload"] for item in selected],
-    }
-    api_result = dpd_post_payload(api_payload)
+    grouped_shipments = {}
+    for item in selected:
+        client_code = item["payload"].get("clientCode") or "default"
+        grouped_shipments.setdefault(client_code, []).append(item["payload"])
+
+    send_results = []
+    for client_code, client_shipments in grouped_shipments.items():
+        client_settings = carrier_client_settings("dpd", client_code)
+        api_payload = {
+            "mode": data.get("mode") or client_settings.get("mode") or "test",
+            "source": "expedice-railway",
+            "dataset": dataset_summary(dataset),
+            "clientCode": client_settings.get("clientCode"),
+            "clientName": client_settings.get("clientName"),
+            "client": {
+                "customerDsw": client_settings.get("customerDsw"),
+                "customerId": client_settings.get("customerId"),
+                "shipmentType": client_settings.get("shipmentType"),
+            },
+            "shipments": client_shipments,
+        }
+        api_result = dpd_post_payload(api_payload, client_settings)
+        send_results.append(
+            {
+                "clientCode": client_settings.get("clientCode"),
+                "clientName": client_settings.get("clientName"),
+                "shipmentsCount": len(client_shipments),
+                "result": api_result,
+            }
+        )
+
+    all_ok = bool(send_results) and all(item["result"].get("ok") for item in send_results)
 
     return jsonify(
         {
-            "ok": api_result["ok"],
+            "ok": all_ok,
             "carrier": "dpd",
             "endpointConfigured": bool(dpd_api_url()),
-            "sendEnabled": read_settings(include_secrets=True)["dpd"].get("sendEnabled", False),
+            "sendEnabled": request_settings(include_secrets=True).get("dpd", {}).get("sendEnabled", False),
             "dataset": dataset_summary(dataset),
             "shipmentsCount": len(shipments),
-            "sentCount": len(selected) if api_result["ok"] else 0,
+            "sentCount": len(selected) if all_ok else 0,
             "notSentCount": max(0, len(shipments) - len(selected)),
             "skippedCount": len(skipped),
-            "result": api_result,
+            "results": send_results,
+            "result": send_results[0]["result"] if len(send_results) == 1 else {"ok": all_ok, "error": "" if all_ok else "Nektera klientská DPD odeslani skoncila chybou."},
             "shipments": selected,
             "skipped": skipped,
         }
@@ -3074,13 +3256,8 @@ def update_settings():
         return auth_error
 
     payload = request.get_json(silent=True) or {}
-    saved = save_settings_payload(payload.get("settings") or payload)
-    public_settings = json.loads(json.dumps(saved))
-    for section, field in (("mapy", "apiKey"), ("packeta", "apiPassword"), ("dpd", "apiKey")):
-        value = public_settings.get(section, {}).get(field, "")
-        public_settings[section][f"has{field[0].upper()}{field[1:]}"] = bool(value)
-        public_settings[section][field] = ""
-    return jsonify({"ok": True, "settings": public_settings})
+    save_settings_payload(payload.get("settings") or payload)
+    return jsonify({"ok": True, "settings": read_settings(include_secrets=False)})
 
 
 @app.route("/api/completion/datasets")

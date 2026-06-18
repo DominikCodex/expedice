@@ -1101,6 +1101,28 @@ select:focus {
   font-weight: 800;
 }
 
+.carrier-client-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  margin-top: 4px;
+}
+
+.carrier-client-card {
+  background: rgba(26, 121, 89, 0.07);
+  border: 1px solid rgba(26, 121, 89, 0.16);
+  border-radius: 10px;
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+}
+
+.carrier-client-card strong {
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .settings-toggle {
   justify-content: flex-start;
 }

@@ -150,10 +150,18 @@ const els = {
   settingsPacketaUrl: document.getElementById("settings-packeta-url"),
   settingsPacketaPassword: document.getElementById("settings-packeta-password"),
   settingsPacketaStatus: document.getElementById("settings-packeta-status"),
+  settingsPacketaIveronikaPassword: document.getElementById("settings-packeta-iveronika-password"),
+  settingsPacketaGalantraPassword: document.getElementById("settings-packeta-galantra-password"),
   settingsDpdUrl: document.getElementById("settings-dpd-url"),
   settingsDpdKey: document.getElementById("settings-dpd-key"),
   settingsDpdCustomerDsw: document.getElementById("settings-dpd-customer-dsw"),
   settingsDpdCustomerId: document.getElementById("settings-dpd-customer-id"),
+  settingsDpdIveronikaKey: document.getElementById("settings-dpd-iveronika-key"),
+  settingsDpdIveronikaCustomerDsw: document.getElementById("settings-dpd-iveronika-customer-dsw"),
+  settingsDpdIveronikaCustomerId: document.getElementById("settings-dpd-iveronika-customer-id"),
+  settingsDpdGalantraKey: document.getElementById("settings-dpd-galantra-key"),
+  settingsDpdGalantraCustomerDsw: document.getElementById("settings-dpd-galantra-customer-dsw"),
+  settingsDpdGalantraCustomerId: document.getElementById("settings-dpd-galantra-customer-id"),
   settingsDpdShipmentType: document.getElementById("settings-dpd-shipment-type"),
   settingsDpdMode: document.getElementById("settings-dpd-mode"),
   settingsDpdEnabled: document.getElementById("settings-dpd-enabled"),
@@ -1272,23 +1280,45 @@ function renderSettings(settings) {
   const mapy = settings.mapy || {};
   const packeta = settings.packeta || {};
   const dpd = settings.dpd || {};
+  const packetaClients = packeta.clients || {};
+  const packetaIveronika = packetaClients.iveronika_cz || {};
+  const packetaGalantra = packetaClients.galantra_cz || {};
+  const dpdClients = dpd.clients || {};
+  const dpdIveronika = dpdClients.iveronika_cz || {};
+  const dpdGalantra = dpdClients.galantra_cz || {};
 
   els.settingsMapyKey.value = "";
   els.settingsMapyStatus.textContent = mapy.hasApiKey ? "API key je uložený." : "API key zatím není uložený.";
 
   els.settingsPacketaUrl.value = packeta.apiUrl || "";
   els.settingsPacketaPassword.value = "";
-  els.settingsPacketaStatus.textContent = packeta.hasApiPassword ? "API heslo je uložené." : "API heslo zatím není uložené.";
+  els.settingsPacketaIveronikaPassword.value = "";
+  els.settingsPacketaGalantraPassword.value = "";
+  els.settingsPacketaStatus.textContent = [
+    packeta.hasApiPassword ? "Výchozí API heslo je uložené." : "Výchozí API heslo zatím není uložené.",
+    packetaIveronika.hasApiPassword ? "iVeronika.cz má uložené API heslo." : "iVeronika.cz zatím nemá API heslo.",
+    packetaGalantra.hasApiPassword ? "Galantra.cz má uložené API heslo." : "Galantra.cz zatím nemá API heslo.",
+  ].join(" ");
 
   els.settingsDpdUrl.value = dpd.apiBaseUrl || "https://geoapi.dpd.cz/v1";
   els.settingsDpdKey.value = "";
   els.settingsDpdCustomerDsw.value = dpd.customerDsw || "";
   els.settingsDpdCustomerId.value = dpd.customerId || "";
+  els.settingsDpdIveronikaKey.value = "";
+  els.settingsDpdIveronikaCustomerDsw.value = dpdIveronika.customerDsw || "";
+  els.settingsDpdIveronikaCustomerId.value = dpdIveronika.customerId || "";
+  els.settingsDpdGalantraKey.value = "";
+  els.settingsDpdGalantraCustomerDsw.value = dpdGalantra.customerDsw || "";
+  els.settingsDpdGalantraCustomerId.value = dpdGalantra.customerId || "";
   els.settingsDpdShipmentType.value = dpd.shipmentType || "Standard";
   els.settingsDpdMode.value = dpd.mode || "test";
   els.settingsDpdEnabled.checked = Boolean(dpd.sendEnabled);
   els.settingsDpdNotification.checked = dpd.notification !== false;
-  els.settingsDpdStatus.textContent = dpd.hasApiKey ? "DPD API key je uložený." : "DPD API key zatím není uložený.";
+  els.settingsDpdStatus.textContent = [
+    dpd.hasApiKey ? "Výchozí DPD API key je uložený." : "Výchozí DPD API key zatím není uložený.",
+    dpdIveronika.hasApiKey ? "iVeronika.cz má uložený DPD API key." : "iVeronika.cz zatím nemá DPD API key.",
+    dpdGalantra.hasApiKey ? "Galantra.cz má uložený DPD API key." : "Galantra.cz zatím nemá DPD API key.",
+  ].join(" ");
 
   els.settingsSenderName.value = dpd.senderName || "";
   els.settingsSenderStreet.value = dpd.senderStreet || "";
@@ -1322,6 +1352,16 @@ function collectSettings() {
     packeta: {
       apiUrl: els.settingsPacketaUrl.value.trim(),
       apiPassword: els.settingsPacketaPassword.value,
+      clients: {
+        iveronika_cz: {
+          name: "iVeronika.cz",
+          apiPassword: els.settingsPacketaIveronikaPassword.value,
+        },
+        galantra_cz: {
+          name: "Galantra.cz",
+          apiPassword: els.settingsPacketaGalantraPassword.value,
+        },
+      },
     },
     dpd: {
       apiBaseUrl: els.settingsDpdUrl.value.trim(),
@@ -1330,6 +1370,20 @@ function collectSettings() {
       mode: els.settingsDpdMode.value,
       customerDsw: els.settingsDpdCustomerDsw.value.trim(),
       customerId: els.settingsDpdCustomerId.value.trim(),
+      clients: {
+        iveronika_cz: {
+          name: "iVeronika.cz",
+          apiKey: els.settingsDpdIveronikaKey.value,
+          customerDsw: els.settingsDpdIveronikaCustomerDsw.value.trim(),
+          customerId: els.settingsDpdIveronikaCustomerId.value.trim(),
+        },
+        galantra_cz: {
+          name: "Galantra.cz",
+          apiKey: els.settingsDpdGalantraKey.value,
+          customerDsw: els.settingsDpdGalantraCustomerDsw.value.trim(),
+          customerId: els.settingsDpdGalantraCustomerId.value.trim(),
+        },
+      },
       shipmentType: els.settingsDpdShipmentType.value,
       notification: els.settingsDpdNotification.checked,
       senderName: els.settingsSenderName.value.trim(),
