@@ -1,6 +1,8 @@
 import csv
 import io
 import os
+import urllib.error
+import urllib.request
 from datetime import datetime
 from xml.sax.saxutils import escape as xml_escape
 from zoneinfo import ZoneInfo
@@ -1464,6 +1466,73 @@ def fetch_datasets(include_deleted=False, dataset_kind=None, shop_code=None, dat
             return [dataset_summary(row) for row in cur.fetchall()]
 
 
+def packeta_api_url():
+    return os.environ.get("PACKETA_API_URL") or "https://www.zasilkovna.cz/api/rest"
+
+
+def packeta_validation_xml(request_xml, password):
+    xml = request_xml.replace("<createPacket>", "<packetAttributesValid>", 1)
+    xml = xml.replace("</createPacket>", "</packetAttributesValid>", 1)
+    xml = xml.replace("DRY_RUN_PASSWORD_OMITTED", packeta_text(password), 1)
+    xml = xml.replace(
+        "\n  <packetCourierNumber>\n    <packetId>1234567890</packetId>\n  </packetCourierNumber>",
+        "",
+    )
+    return xml
+
+
+def packeta_response_status(response_text):
+    compact = clean_text(response_text).lower().replace(" ", "").replace("\n", "").replace("\r", "")
+    if "<status>ok</status>" in compact:
+        return "ok"
+    if "<status>fault</status>" in compact:
+        return "fault"
+    if "<status>error</status>" in compact:
+        return "error"
+    return "unknown"
+
+
+def packeta_post_validation_xml(validation_xml):
+    timeout = int_from_text(os.environ.get("PACKETA_API_TIMEOUT")) or 20
+    request_data = validation_xml.encode("utf-8")
+    packeta_request = urllib.request.Request(
+        packeta_api_url(),
+        data=request_data,
+        headers={"Content-Type": "application/xml; charset=utf-8"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(packeta_request, timeout=timeout) as response:
+            response_text = response.read().decode("utf-8", "replace")
+            status = packeta_response_status(response_text)
+            return {
+                "httpStatus": response.getcode(),
+                "responseText": response_text,
+                "status": status,
+                "valid": status == "ok",
+                "error": "",
+            }
+    except urllib.error.HTTPError as exc:
+        response_text = exc.read().decode("utf-8", "replace")
+        status = packeta_response_status(response_text)
+        return {
+            "httpStatus": exc.code,
+            "responseText": response_text,
+            "status": status,
+            "valid": False,
+            "error": clean_text(exc.reason) or "HTTP error",
+        }
+    except urllib.error.URLError as exc:
+        return {
+            "httpStatus": 0,
+            "responseText": "",
+            "status": "request_error",
+            "valid": False,
+            "error": clean_text(getattr(exc, "reason", exc)),
+        }
+
+
 @app.route("/api/packeta/dry-run")
 def packeta_dry_run():
     auth_error = require_download_token_if_configured()
@@ -1548,6 +1617,101 @@ def packeta_dry_run():
             "skippedCount": len(skipped),
             "truncatedCount": max(0, len(packets) - len(visible_packets)),
             "packets": visible_packets,
+            "skipped": skipped,
+        }
+    )
+
+
+@app.route("/api/packeta/validate", methods=["POST"])
+def packeta_validate():
+    auth_error = require_upload_token()
+    if auth_error:
+        return auth_error
+
+    password = os.environ.get("PACKETA_API_PASSWORD", "")
+    if not password:
+        return jsonify({"error": "PACKETA_API_PASSWORD is not configured"}), 400
+
+    ensure_schema()
+    data = request.get_json(silent=True) or {}
+    dataset_id = data.get("datasetId") or request.args.get("datasetId") or request.args.get("id")
+    limit = int_from_text(data.get("limit") or request.args.get("limit")) or 30
+
+    if not dataset_id:
+        return jsonify({"error": "datasetId is required"}), 400
+
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM datasets WHERE id = %s AND dataset_kind = 'completion'",
+                (dataset_id,),
+            )
+            dataset = cur.fetchone()
+            if not dataset:
+                return jsonify({"error": "Completion dataset not found"}), 404
+
+            cur.execute(
+                "SELECT * FROM completion_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
+                (dataset["id"],),
+            )
+            rows = [completion_row_to_api(row) for row in cur.fetchall()]
+
+    packets = []
+    skipped = []
+    for row in rows:
+        reason = packeta_skip_reason(row)
+        if reason:
+            skipped.append(
+                {
+                    "rowNumber": row.get("rowNumber"),
+                    "orderNumber": row.get("orderNumber"),
+                    "customer": " ".join(
+                        part for part in [row.get("firstName"), row.get("lastName")] if part
+                    ),
+                    "shippingMethod": row.get("shippingMethod"),
+                    "reason": reason,
+                }
+            )
+            continue
+        packets.append(packeta_dry_run_packet(row))
+
+    results = []
+    for packet in packets[:limit]:
+        validation_xml = packeta_validation_xml(packet["requestXml"], password)
+        result = packeta_post_validation_xml(validation_xml)
+        results.append(
+            {
+                "rowNumber": packet.get("rowNumber"),
+                "orderNumber": packet.get("orderNumber"),
+                "customer": packet.get("customer"),
+                "shippingMethod": packet.get("shippingMethod"),
+                "service": packet.get("service"),
+                "addressId": packet.get("addressId"),
+                "eshop": packet.get("eshop"),
+                "valid": result["valid"],
+                "status": result["status"],
+                "httpStatus": result["httpStatus"],
+                "responseText": result["responseText"],
+                "error": result["error"],
+            }
+        )
+
+    return jsonify(
+        {
+            "ok": True,
+            "dryRun": False,
+            "validationOnly": True,
+            "endpoint": packeta_api_url(),
+            "method": "POST",
+            "apiPasswordIncluded": False,
+            "note": "Validation only. Packeta API was called, but no shipment should be created.",
+            "dataset": dataset_summary(dataset),
+            "rowsCount": len(rows),
+            "packetsCount": len(packets),
+            "validatedCount": len(results),
+            "skippedCount": len(skipped),
+            "notValidatedCount": max(0, len(packets) - len(results)),
+            "results": results,
             "skipped": skipped,
         }
     )

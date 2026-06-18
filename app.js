@@ -75,6 +75,7 @@ const els = {
   completionRefresh: document.getElementById("completion-refresh"),
   completionDelete: document.getElementById("completion-delete"),
   packetaDryRun: document.getElementById("packeta-dry-run"),
+  packetaValidate: document.getElementById("packeta-validate"),
   packetaDryRunResult: document.getElementById("packeta-dry-run-result"),
   completionMessage: document.getElementById("completion-message"),
   completionSummary: document.getElementById("completion-summary"),
@@ -528,6 +529,7 @@ function renderCompletionOptions() {
     els.completionDataset.innerHTML = `<option value="">Zadna davka</option>`;
     els.completionDelete.disabled = true;
     els.packetaDryRun.disabled = true;
+    els.packetaValidate.disabled = true;
     return;
   }
 
@@ -543,6 +545,7 @@ function renderCompletionOptions() {
   }
   els.completionDelete.disabled = !completionState.dataset || completionState.dataset.status !== "active";
   els.packetaDryRun.disabled = !completionState.dataset;
+  els.packetaValidate.disabled = !completionState.dataset;
 }
 
 async function loadCompletionDatasets() {
@@ -674,6 +677,124 @@ async function runPacketaDryRun() {
     setCompletionMessage(`Dry run Zasilkovny se nepodaril: ${error.message}`, "error");
   } finally {
     els.packetaDryRun.disabled = !completionState.dataset;
+  }
+}
+
+function renderPacketaValidation(data) {
+  const results = data.results || [];
+  const skipped = data.skipped || [];
+  const okCount = results.filter((item) => item.valid).length;
+  const errorCount = results.length - okCount;
+
+  const resultCards = results
+    .map((item, index) => {
+      const tone = item.valid ? "ok" : "danger";
+      const status = item.valid ? "OK" : item.status || "chyba";
+      return `
+        <details class="dry-run-item validation-item ${tone}" ${index === 0 || !item.valid ? "open" : ""}>
+          <summary>
+            <strong>${escapeHtml(item.orderNumber || "-")}</strong>
+            <span>${escapeHtml(item.customer || "-")}</span>
+            <small>${escapeHtml(status)} | HTTP ${escapeHtml(item.httpStatus || "-")} | ${escapeHtml(
+        item.service || ""
+      )}</small>
+          </summary>
+          <div class="dry-run-meta">
+            <span>Adresa ID: ${escapeHtml(item.addressId || "-")}</span>
+            <span>E-shop: ${escapeHtml(item.eshop || "-")}</span>
+            <span>Doprava: ${escapeHtml(item.shippingMethod || "-")}</span>
+          </div>
+          ${item.error ? `<div class="warning-list"><span>${escapeHtml(item.error)}</span></div>` : ""}
+          <pre>${escapeHtml(item.responseText || "Bez textove odpovedi.")}</pre>
+        </details>
+      `;
+    })
+    .join("");
+
+  const skippedHtml = skipped.length
+    ? `
+      <details class="dry-run-item dry-run-skipped">
+        <summary>
+          <strong>Preskocene radky</strong>
+          <span>${escapeHtml(skipped.length)} ks</span>
+        </summary>
+        <div class="skipped-list">
+          ${skipped
+            .slice(0, 80)
+            .map(
+              (row) => `
+                <div>
+                  <strong>${escapeHtml(row.orderNumber || "-")}</strong>
+                  <span>${escapeHtml(row.customer || "")}</span>
+                  <small>${escapeHtml(row.reason || "")}</small>
+                </div>
+              `
+            )
+            .join("")}
+        </div>
+      </details>
+    `
+    : "";
+
+  els.packetaDryRunResult.classList.remove("hidden");
+  els.packetaDryRunResult.innerHTML = `
+    <div class="section-head compact">
+      <div>
+        <p class="eyebrow">Zasilkovna / Packeta</p>
+        <h2>Test API validace</h2>
+      </div>
+      <div class="dry-run-counts">
+        <span>${escapeHtml(okCount)} OK</span>
+        <span>${escapeHtml(errorCount)} chyb</span>
+        <span>${escapeHtml(data.notValidatedCount || 0)} neovereno</span>
+      </div>
+    </div>
+    <div class="dry-run-note">
+      Tohle volalo validacni funkci Packety. Stitky se nevytvorily, ale data byla odeslana do API kvuli kontrole chyb.
+    </div>
+    <div class="dry-run-list">
+      ${resultCards || `<div class="empty">Neni co validovat.</div>`}
+      ${skippedHtml}
+    </div>
+  `;
+}
+
+async function runPacketaValidation() {
+  if (!completionState.dataset?.id) {
+    setCompletionMessage("Nejdriv nacti kompletaci pro expedicni den.", "warning");
+    return;
+  }
+
+  if (
+    !confirm(
+      "Odeslat testovaci validaci do Zasilkovny/Packety?\n\nZasilky se nemaji vytvorit, ale realna data se poslou do API kvuli kontrole chyb."
+    )
+  ) {
+    return;
+  }
+
+  els.packetaValidate.disabled = true;
+  hidePacketaDryRunResult();
+  setCompletionMessage("Posilam testovaci validaci do Packety...", "neutral");
+
+  try {
+    const data = await fetchJson("/api/packeta/validate", {
+      method: "POST",
+      body: JSON.stringify({
+        datasetId: completionState.dataset.id,
+        limit: 30,
+      }),
+    });
+    renderPacketaValidation(data);
+    const errors = (data.results || []).filter((item) => !item.valid).length;
+    setCompletionMessage(
+      `Test API hotovy: ${data.validatedCount || 0} overeno, ${errors} chyb, ${data.notValidatedCount || 0} neovereno.`,
+      errors ? "warning" : "success"
+    );
+  } catch (error) {
+    setCompletionMessage(`Test API Zasilkovny se nepodaril: ${error.message}`, "error");
+  } finally {
+    els.packetaValidate.disabled = !completionState.dataset;
   }
 }
 
@@ -1308,6 +1429,7 @@ els.completionDelete.addEventListener("click", async () => {
 });
 
 els.packetaDryRun.addEventListener("click", runPacketaDryRun);
+els.packetaValidate.addEventListener("click", runPacketaValidation);
 
 loadState();
 renderAll();
