@@ -4,6 +4,7 @@ import io
 import json
 import os
 import secrets
+import time
 import unicodedata
 import urllib.error
 import urllib.parse
@@ -28,6 +29,8 @@ SCHEMA_READY = False
 AUTH_SCHEMA_READY = False
 DB_POOL = None
 DB_POOL_DSN = ""
+SESSION_CACHE = {}
+SESSION_CACHE_SECONDS = 30
 SESSION_COOKIE = "expedice_session"
 SESSION_SECONDS = 12 * 60 * 60
 INITIAL_ADMIN_USERNAME = "d.najman@centrum.cz"
@@ -646,12 +649,18 @@ def current_user():
         return None
 
     token_hash = hash_session_token(token)
+    cached = SESSION_CACHE.get(token_hash)
+    now_ts = time.time()
+    if cached and cached["cache_until"] > now_ts:
+        g.current_user = cached["user"]
+        return g.current_user
+
     ensure_auth_schema()
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT u.*
+                SELECT u.*, s.last_seen_at
                 FROM user_sessions s
                 JOIN users u ON u.id = s.user_id
                 WHERE s.token_hash = %s
@@ -662,9 +671,16 @@ def current_user():
                 (token_hash,),
             )
             user = cur.fetchone()
-            if user:
+            if user and (
+                not user.get("last_seen_at")
+                or user["last_seen_at"] < datetime.now(user["last_seen_at"].tzinfo) - timedelta(minutes=10)
+            ):
                 cur.execute("UPDATE user_sessions SET last_seen_at = NOW() WHERE token_hash = %s", (token_hash,))
 
+    if user:
+        user = dict(user)
+        user.pop("last_seen_at", None)
+        SESSION_CACHE[token_hash] = {"user": user, "cache_until": now_ts + SESSION_CACHE_SECONDS}
     g.current_user = user
     return user
 
@@ -734,6 +750,17 @@ def set_session_cookie(response, token):
 
 def clear_session_cookie(response):
     response.delete_cookie(SESSION_COOKIE, path="/")
+
+
+def clear_session_cache_for_token(token):
+    if token:
+        SESSION_CACHE.pop(hash_session_token(token), None)
+
+
+def clear_session_cache_for_user(user_id):
+    for token_hash, cached in list(SESSION_CACHE.items()):
+        if cached.get("user", {}).get("id") == user_id:
+            SESSION_CACHE.pop(token_hash, None)
 
 
 def create_user_session(cur, user_id):
@@ -831,6 +858,7 @@ def auth_logout():
         with db_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM user_sessions WHERE token_hash = %s", (hash_session_token(token),))
+        clear_session_cache_for_token(token)
     response = jsonify({"ok": True})
     clear_session_cookie(response)
     return response
@@ -966,6 +994,7 @@ def update_user(user_id):
             user = cur.fetchone()
             if user and "active" in data and not bool(data.get("active")):
                 cur.execute("DELETE FROM user_sessions WHERE user_id = %s", (user_id,))
+                clear_session_cache_for_user(user_id)
 
     if not user:
         return jsonify({"error": "Uživatel nenalezen."}), 404
@@ -999,6 +1028,7 @@ def reset_user_password(user_id):
             user = cur.fetchone()
             if user:
                 cur.execute("DELETE FROM user_sessions WHERE user_id = %s", (user_id,))
+                clear_session_cache_for_user(user_id)
 
     if not user:
         return jsonify({"error": "Uživatel nenalezen."}), 404
