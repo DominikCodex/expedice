@@ -21,6 +21,27 @@ Set-ExecutionPolicy -Scope CurrentUser RemoteSigned
 .\install.ps1
 ```
 
+## Odinstalace / cista reinstalace
+
+Odinstalace ukonci beziciho agenta, smaze autostart a odstrani instalacni slozku:
+
+```powershell
+.\uninstall.ps1
+```
+
+Ponechat konfiguraci tiskaren pro dalsi instalaci:
+
+```powershell
+.\uninstall.ps1 -KeepConfig
+```
+
+Cisty reinstall pro testovani:
+
+```powershell
+.\uninstall.ps1
+.\install.ps1
+```
+
 V1 počítá s nainstalovaným Pythonem (`py -3`). Produkční balíček bude později přes `ExpedicePrintAgentSetup.exe`.
 
 Instalace už řeší SumatraPDF:
