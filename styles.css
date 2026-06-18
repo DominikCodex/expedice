@@ -60,6 +60,12 @@ button:hover,
   filter: brightness(0.97);
 }
 
+button:disabled {
+  cursor: not-allowed;
+  filter: grayscale(0.25);
+  opacity: 0.55;
+}
+
 .secondary,
 .file-trigger {
   color: var(--text);
@@ -239,6 +245,46 @@ select:focus {
   border-color: var(--accent-dark);
 }
 
+.day-toolbar,
+.dataset-toolbar {
+  display: grid;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+}
+
+.day-toolbar {
+  grid-template-columns: minmax(240px, 360px) auto auto minmax(280px, 1fr);
+  margin: 12px 0;
+}
+
+.dataset-toolbar {
+  grid-template-columns: minmax(280px, 520px) auto auto minmax(260px, 1fr);
+}
+
+.dataset-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-height: 40px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.dataset-summary span,
+.dataset-summary strong {
+  padding: 6px 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
 .app-view {
   display: grid;
   gap: 12px;
@@ -359,7 +405,7 @@ select:focus {
 
 .completion-toolbar {
   display: grid;
-  grid-template-columns: minmax(280px, 520px) auto minmax(260px, 1fr);
+  grid-template-columns: minmax(280px, 520px) auto auto minmax(260px, 1fr);
   gap: 10px;
   align-items: end;
   padding: 12px;
@@ -761,6 +807,11 @@ tbody tr.done {
   }
 
   .completion-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .day-toolbar,
+  .dataset-toolbar {
     grid-template-columns: 1fr;
   }
 

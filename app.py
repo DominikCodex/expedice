@@ -133,9 +133,23 @@ def ensure_schema():
             seed_core_config(cur)
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS expedition_days (
+                    id BIGSERIAL PRIMARY KEY,
+                    day_date DATE NOT NULL UNIQUE,
+                    label TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS datasets (
                     id BIGSERIAL PRIMARY KEY,
+                    expedition_day_id BIGINT REFERENCES expedition_days(id) ON DELETE SET NULL,
                     dataset_kind TEXT NOT NULL DEFAULT 'sorting',
+                    batch_name TEXT,
                     shop_code TEXT,
                     shop_name TEXT,
                     source_system TEXT,
@@ -153,6 +167,9 @@ def ensure_schema():
                     headers JSONB NOT NULL DEFAULT '[]'::jsonb,
                     raw_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
                     status TEXT NOT NULL DEFAULT 'active',
+                    replaced_at TIMESTAMPTZ,
+                    replaced_by_dataset_id BIGINT,
+                    replace_reason TEXT,
                     deleted_at TIMESTAMPTZ,
                     deleted_by TEXT,
                     delete_reason TEXT
@@ -165,10 +182,15 @@ def ensure_schema():
                 ADD COLUMN IF NOT EXISTS dataset_kind TEXT NOT NULL DEFAULT 'sorting'
                 """
             )
+            cur.execute("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS expedition_day_id BIGINT")
+            cur.execute("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS batch_name TEXT")
             cur.execute("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS shop_code TEXT")
             cur.execute("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS shop_name TEXT")
             cur.execute("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS source_system TEXT")
             cur.execute("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS external_batch_id TEXT")
+            cur.execute("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS replaced_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS replaced_by_dataset_id BIGINT")
+            cur.execute("ALTER TABLE datasets ADD COLUMN IF NOT EXISTS replace_reason TEXT")
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS dataset_rows (
@@ -240,6 +262,26 @@ def ensure_schema():
             cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS shop_code TEXT")
             cur.execute(
                 """
+                INSERT INTO expedition_days (day_date, label)
+                SELECT DISTINCT dataset_date, TO_CHAR(dataset_date, 'FMDD.FMMM.YYYY')
+                FROM datasets
+                ON CONFLICT (day_date) DO UPDATE SET
+                    label = EXCLUDED.label,
+                    updated_at = NOW()
+                """
+            )
+            cur.execute(
+                """
+                UPDATE datasets d
+                SET expedition_day_id = ed.id,
+                    batch_name = COALESCE(NULLIF(d.batch_name, ''), ed.label)
+                FROM expedition_days ed
+                WHERE d.dataset_date = ed.day_date
+                  AND (d.expedition_day_id IS NULL OR d.batch_name IS NULL OR d.batch_name = '')
+                """
+            )
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS audit_events (
                     id BIGSERIAL PRIMARY KEY,
                     event_type TEXT NOT NULL,
@@ -255,6 +297,12 @@ def ensure_schema():
             )
             cur.execute(
                 """
+                CREATE INDEX IF NOT EXISTS idx_expedition_days_date
+                ON expedition_days (day_date DESC)
+                """
+            )
+            cur.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_datasets_uploaded_at
                 ON datasets (uploaded_at DESC)
                 """
@@ -263,6 +311,18 @@ def ensure_schema():
                 """
                 CREATE INDEX IF NOT EXISTS idx_datasets_kind_date_shop
                 ON datasets (dataset_kind, dataset_date DESC, shop_code)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_datasets_expedition_day_status
+                ON datasets (expedition_day_id, status, dataset_kind, shop_code)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_datasets_replace_key
+                ON datasets (expedition_day_id, dataset_kind, shop_code, batch_name, status)
                 """
             )
             cur.execute(
@@ -368,6 +428,15 @@ def clean_text(value):
     return str(value)
 
 
+def display_date_label(value):
+    text = clean_text(value).strip()
+    try:
+        parsed = datetime.strptime(text[:10], "%Y-%m-%d")
+        return f"{parsed.day}.{parsed.month}.{parsed.year}"
+    except ValueError:
+        return text
+
+
 def int_from_text(value):
     text = clean_text(value).strip().replace(",", ".")
     if not text:
@@ -429,16 +498,48 @@ def infer_dataset_shop_code(payload, rows):
 
 def payload_date_time(payload):
     now = local_now()
-    dataset_date = clean_text(payload.get("datasetDate")) or now.strftime("%Y-%m-%d")
+    dataset_date = clean_text(payload.get("expeditionDayDate") or payload.get("datasetDate")) or now.strftime("%Y-%m-%d")
     dataset_time = clean_text(payload.get("datasetTime")) or now.strftime("%H:%M:%S")
     label = clean_text(payload.get("label")) or f"{dataset_date} {dataset_time}"
     return dataset_date, dataset_time, label
 
 
+def ensure_expedition_day(cur, dataset_date, batch_name=""):
+    label = clean_text(batch_name) or display_date_label(dataset_date)
+    cur.execute(
+        """
+        INSERT INTO expedition_days (day_date, label, status, updated_at)
+        VALUES (%s, %s, 'active', NOW())
+        ON CONFLICT (day_date) DO UPDATE SET
+            label = EXCLUDED.label,
+            status = 'active',
+            updated_at = NOW()
+        RETURNING *
+        """,
+        (dataset_date, label),
+    )
+    return cur.fetchone()
+
+
+def expedition_day_summary(row):
+    return {
+        "id": row["id"],
+        "date": row["day_date"].isoformat(),
+        "label": row["label"],
+        "status": row["status"],
+        "activeBatches": row.get("active_batches", 0),
+        "allBatches": row.get("all_batches", 0),
+        "rowsCount": row.get("rows_count", 0),
+        "latestUpload": row["latest_upload"].isoformat() if row.get("latest_upload") else None,
+    }
+
+
 def dataset_summary(row):
     return {
         "id": row["id"],
+        "expeditionDayId": row.get("expedition_day_id"),
         "datasetKind": row["dataset_kind"],
+        "batchName": row.get("batch_name"),
         "shopCode": row.get("shop_code"),
         "shopName": row.get("shop_name"),
         "sourceSystem": row.get("source_system"),
@@ -454,7 +555,12 @@ def dataset_summary(row):
         "sourceFilename": row["source_filename"],
         "rowsCount": row["rows_count"],
         "status": row["status"],
+        "replacedAt": row["replaced_at"].isoformat() if row.get("replaced_at") else None,
+        "replacedByDatasetId": row.get("replaced_by_dataset_id"),
+        "replaceReason": row.get("replace_reason"),
         "deletedAt": row["deleted_at"].isoformat() if row["deleted_at"] else None,
+        "deletedBy": row.get("deleted_by"),
+        "deleteReason": row.get("delete_reason"),
     }
 
 
@@ -666,6 +772,91 @@ def expedition_overview():
     return jsonify({"overview": overview})
 
 
+@app.route("/api/expedition-days")
+def list_expedition_days():
+    auth_error = require_download_token_if_configured()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    include_deleted = request.args.get("includeDeleted") == "1"
+    day_filter = "" if include_deleted else "WHERE ed.status = 'active'"
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    ed.*,
+                    COUNT(d.id) FILTER (WHERE d.status = 'active') AS active_batches,
+                    COUNT(d.id) AS all_batches,
+                    COALESCE(SUM(d.rows_count) FILTER (WHERE d.status = 'active'), 0) AS rows_count,
+                    MAX(d.uploaded_at) AS latest_upload
+                FROM expedition_days ed
+                LEFT JOIN datasets d ON d.expedition_day_id = ed.id
+                {day_filter}
+                GROUP BY ed.id
+                ORDER BY ed.day_date DESC
+                """
+            )
+            days = [expedition_day_summary(row) for row in cur.fetchall()]
+
+    return jsonify({"days": days})
+
+
+@app.route("/api/expedition-days/<day_date>")
+def get_expedition_day(day_date):
+    auth_error = require_download_token_if_configured()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    include_deleted = request.args.get("includeDeleted") == "1"
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT
+                    ed.*,
+                    COUNT(d.id) FILTER (WHERE d.status = 'active') AS active_batches,
+                    COUNT(d.id) AS all_batches,
+                    COALESCE(SUM(d.rows_count) FILTER (WHERE d.status = 'active'), 0) AS rows_count,
+                    MAX(d.uploaded_at) AS latest_upload
+                FROM expedition_days ed
+                LEFT JOIN datasets d ON d.expedition_day_id = ed.id
+                WHERE ed.day_date = %s
+                GROUP BY ed.id
+                """,
+                (day_date,),
+            )
+            day = cur.fetchone()
+            if not day:
+                return jsonify({"error": "Expedition day not found"}), 404
+
+            filters = ["expedition_day_id = %s"]
+            params = [day["id"]]
+            if not include_deleted:
+                filters.append("status = 'active'")
+            where = " AND ".join(filters)
+            cur.execute(
+                f"""
+                SELECT * FROM datasets
+                WHERE {where}
+                ORDER BY dataset_kind, shop_code, uploaded_at DESC, id DESC
+                """,
+                params,
+            )
+            datasets = [dataset_summary(row) for row in cur.fetchall()]
+
+    return jsonify(
+        {
+            "day": expedition_day_summary(day),
+            "datasets": datasets,
+            "sorting": [item for item in datasets if item["datasetKind"] == "sorting"],
+            "completion": [item for item in datasets if item["datasetKind"] == "completion"],
+        }
+    )
+
+
 @app.route("/api/datasets/upload", methods=["POST"])
 def upload_dataset():
     auth_error = require_upload_token()
@@ -690,22 +881,29 @@ def upload_dataset():
     shop_name = clean_text(payload.get("shopName")) or shop_name_from_code(shop_code)
     source_system = clean_text(payload.get("sourceSystem")) or "excel"
     external_batch_id = clean_text(payload.get("externalBatchId"))
+    batch_name = clean_text(payload.get("batchName")) or display_date_label(dataset_date)
+    replace_mode = clean_text(payload.get("replaceMode")) or "replace-active"
+    label = clean_text(payload.get("label")) or f"{batch_name} | {dataset_kind} | {dataset_time}"
 
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            expedition_day = ensure_expedition_day(cur, dataset_date, batch_name)
             cur.execute(
                 """
                 INSERT INTO datasets (
-                    dataset_kind, shop_code, shop_name, source_system, external_batch_id,
+                    expedition_day_id, dataset_kind, batch_name,
+                    shop_code, shop_name, source_system, external_batch_id,
                     dataset_date, dataset_time, uploaded_at_local, label, source,
                     workbook_name, worksheet_name, source_filename, rows_count,
                     headers, raw_payload
                 )
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING *
                 """,
                 (
+                    expedition_day["id"],
                     dataset_kind,
+                    batch_name,
                     shop_code,
                     shop_name,
                     source_system,
@@ -724,6 +922,34 @@ def upload_dataset():
                 ),
             )
             dataset = cur.fetchone()
+            replaced_datasets = []
+            if replace_mode == "replace-active":
+                cur.execute(
+                    """
+                    UPDATE datasets
+                    SET status = 'replaced',
+                        replaced_at = NOW(),
+                        replaced_by_dataset_id = %s,
+                        replace_reason = %s
+                    WHERE id <> %s
+                      AND status = 'active'
+                      AND expedition_day_id = %s
+                      AND dataset_kind = %s
+                      AND COALESCE(shop_code, '') = COALESCE(%s, '')
+                      AND COALESCE(batch_name, '') = COALESCE(%s, '')
+                    RETURNING *
+                    """,
+                    (
+                        dataset["id"],
+                        "Nahrazeno novym uploadem stejneho expedicniho dne",
+                        dataset["id"],
+                        expedition_day["id"],
+                        dataset_kind,
+                        shop_code,
+                        batch_name,
+                    ),
+                )
+                replaced_datasets = [dataset_summary(row) for row in cur.fetchall()]
 
             for item in rows:
                 if not isinstance(item, dict):
@@ -763,7 +989,15 @@ def upload_dataset():
                     ),
                 )
 
-    return jsonify({"ok": True, "dataset": dataset_summary(dataset), "rows": len(rows)})
+    return jsonify(
+        {
+            "ok": True,
+            "dataset": dataset_summary(dataset),
+            "expeditionDay": expedition_day_summary(expedition_day),
+            "rows": len(rows),
+            "replacedDatasets": replaced_datasets,
+        }
+    )
 
 
 def insert_completion_row(cur, dataset_id, item, shop_code=""):
@@ -1053,7 +1287,9 @@ def datasets_csv():
     writer.writerow(
         [
             "id",
+            "expedition_day_id",
             "kind",
+            "batch_name",
             "shop_code",
             "shop_name",
             "source_system",
@@ -1069,7 +1305,9 @@ def datasets_csv():
         writer.writerow(
             [
                 row["id"],
+                row["expedition_day_id"],
                 row["dataset_kind"],
+                row["batch_name"],
                 row["shop_code"],
                 row["shop_name"],
                 row["source_system"],
@@ -1093,14 +1331,30 @@ def dataset_csv():
 
     ensure_schema()
     dataset_id = request.args.get("id")
+    dataset_kind = request.args.get("kind")
+    dataset_date = request.args.get("date")
+    shop_code = request.args.get("shop")
 
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             if dataset_id:
                 cur.execute("SELECT * FROM datasets WHERE id = %s", (dataset_id,))
             else:
+                filters = ["status = 'active'"]
+                params = []
+                if dataset_kind:
+                    filters.append("dataset_kind = %s")
+                    params.append(dataset_kind)
+                if dataset_date:
+                    filters.append("dataset_date = %s")
+                    params.append(dataset_date)
+                if shop_code:
+                    filters.append("shop_code = %s")
+                    params.append(normalize_shop_code(shop_code))
+                where = " AND ".join(filters)
                 cur.execute(
-                    "SELECT * FROM datasets WHERE status = 'active' ORDER BY uploaded_at DESC, id DESC LIMIT 1"
+                    f"SELECT * FROM datasets WHERE {where} ORDER BY uploaded_at DESC, id DESC LIMIT 1",
+                    params,
                 )
             dataset = cur.fetchone()
             if not dataset:
@@ -1167,6 +1421,8 @@ def completion_csv():
 
     ensure_schema()
     dataset_id = request.args.get("id")
+    dataset_date = request.args.get("date")
+    shop_code = request.args.get("shop")
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             if dataset_id:
@@ -1175,13 +1431,23 @@ def completion_csv():
                     (dataset_id,),
                 )
             else:
+                filters = ["status = 'active'", "dataset_kind = 'completion'"]
+                params = []
+                if dataset_date:
+                    filters.append("dataset_date = %s")
+                    params.append(dataset_date)
+                if shop_code:
+                    filters.append("shop_code = %s")
+                    params.append(normalize_shop_code(shop_code))
+                where = " AND ".join(filters)
                 cur.execute(
-                    """
+                    f"""
                     SELECT * FROM datasets
-                    WHERE status = 'active' AND dataset_kind = 'completion'
+                    WHERE {where}
                     ORDER BY uploaded_at DESC, id DESC
                     LIMIT 1
-                    """
+                    """,
+                    params,
                 )
             dataset = cur.fetchone()
             if not dataset:

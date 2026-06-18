@@ -15,6 +15,19 @@ const state = {
 
 let activeCandidates = [];
 
+const expeditionState = {
+  days: [],
+  day: null,
+  loaded: false,
+  showInactive: false,
+};
+
+const sortingState = {
+  datasets: [],
+  dataset: null,
+  loaded: false,
+};
+
 const completionState = {
   datasets: [],
   dataset: null,
@@ -46,12 +59,21 @@ const els = {
   metricItems: document.getElementById("metric-items"),
   metricOrders: document.getElementById("metric-orders"),
   metricDone: document.getElementById("metric-done"),
+  expeditionDay: document.getElementById("expedition-day"),
+  expeditionRefresh: document.getElementById("expedition-refresh"),
+  expeditionShowInactive: document.getElementById("show-inactive-datasets"),
+  expeditionDaySummary: document.getElementById("expedition-day-summary"),
   tabSorting: document.getElementById("tab-sorting"),
   tabCompletion: document.getElementById("tab-completion"),
   sortingView: document.getElementById("sorting-view"),
+  sortingDataset: document.getElementById("sorting-dataset"),
+  sortingRefresh: document.getElementById("sorting-refresh"),
+  sortingDelete: document.getElementById("sorting-delete"),
+  sortingDatasetInfo: document.getElementById("sorting-dataset-info"),
   completionView: document.getElementById("completion-view"),
   completionDataset: document.getElementById("completion-dataset"),
   completionRefresh: document.getElementById("completion-refresh"),
+  completionDelete: document.getElementById("completion-delete"),
   completionMessage: document.getElementById("completion-message"),
   completionSummary: document.getElementById("completion-summary"),
   completionBody: document.getElementById("completion-body"),
@@ -183,8 +205,11 @@ function setCompletionMessage(text, type = "neutral") {
   els.completionMessage.textContent = text;
 }
 
-async function fetchJson(path) {
-  const response = await fetch(path, { cache: "no-store" });
+async function fetchJson(path, options = {}) {
+  const headers = options.body
+    ? { "Content-Type": "application/json", ...(options.headers || {}) }
+    : options.headers || {};
+  const response = await fetch(path, { cache: "no-store", ...options, headers });
   if (!response.ok) {
     let message = `API vratilo chybu ${response.status}`;
     try {
@@ -202,7 +227,29 @@ function datasetLabel(dataset) {
   if (!dataset) return "Bez davky";
   const shop = dataset.shopName || dataset.shopCode || "neznamy e-shop";
   const kind = dataset.datasetKind === "completion" ? "kompletace" : dataset.datasetKind;
-  return `${dataset.datasetDate} ${dataset.datasetTime} | ${shop} | ${kind} | ${dataset.rowsCount} radku`;
+  const status = dataset.status && dataset.status !== "active" ? ` | ${dataset.status}` : "";
+  return `${dataset.batchName || dataset.datasetDate} ${dataset.datasetTime} | ${shop} | ${kind} | ${dataset.rowsCount} radku${status}`;
+}
+
+function dayLabel(day) {
+  if (!day) return "Bez expedičního dne";
+  const latest = day.latestUpload ? ` | poslední ${formatTime(day.latestUpload)}` : "";
+  return `${day.label || day.date} | ${day.activeBatches || 0} aktivní dávky | ${day.rowsCount || 0} řádků${latest}`;
+}
+
+function datasetInfoHtml(dataset) {
+  if (!dataset) return `<span>Žádná aktivní dávka</span>`;
+  return `
+    <span><strong>${escapeHtml(dataset.batchName || dataset.datasetDate)}</strong></span>
+    <span>${escapeHtml(dataset.datasetTime || "")}</span>
+    <span>${escapeHtml(dataset.shopName || dataset.shopCode || "e-shop neurčen")}</span>
+    <span>${escapeHtml(dataset.rowsCount || 0)} řádků</span>
+    <span>${escapeHtml(dataset.status || "active")}</span>
+  `;
+}
+
+function includeInactiveQuery() {
+  return expeditionState.showInactive ? "?includeDeleted=1" : "";
 }
 
 function switchView(view) {
@@ -221,11 +268,194 @@ function switchView(view) {
   }
 }
 
+function renderExpeditionDayOptions() {
+  els.expeditionDay.innerHTML = "";
+
+  if (!expeditionState.days.length) {
+    els.expeditionDay.innerHTML = `<option value="">Žádný expediční den</option>`;
+    els.expeditionDaySummary.innerHTML = `<span>Online zatím neobsahuje žádný expediční den.</span>`;
+    return;
+  }
+
+  expeditionState.days.forEach((day) => {
+    const option = document.createElement("option");
+    option.value = day.date;
+    option.textContent = dayLabel(day);
+    els.expeditionDay.appendChild(option);
+  });
+
+  if (expeditionState.day) {
+    els.expeditionDay.value = expeditionState.day.date;
+  }
+}
+
+function renderSortingOptions() {
+  els.sortingDataset.innerHTML = "";
+
+  if (!sortingState.datasets.length) {
+    els.sortingDataset.innerHTML = `<option value="">Žádná dávka roztřídění</option>`;
+    els.sortingDatasetInfo.innerHTML = datasetInfoHtml(null);
+    els.sortingDelete.disabled = true;
+    return;
+  }
+
+  sortingState.datasets.forEach((dataset) => {
+    const option = document.createElement("option");
+    option.value = dataset.id;
+    option.textContent = datasetLabel(dataset);
+    els.sortingDataset.appendChild(option);
+  });
+
+  if (sortingState.dataset) {
+    els.sortingDataset.value = String(sortingState.dataset.id);
+  }
+  els.sortingDatasetInfo.innerHTML = datasetInfoHtml(sortingState.dataset);
+  els.sortingDelete.disabled = !sortingState.dataset || sortingState.dataset.status !== "active";
+}
+
+async function loadExpeditionDays(preferredDate = "") {
+  expeditionState.showInactive = els.expeditionShowInactive.checked;
+  els.expeditionDaySummary.innerHTML = `<span>Načítám expediční dny...</span>`;
+
+  try {
+    const data = await fetchJson(`/api/expedition-days${includeInactiveQuery()}`);
+    expeditionState.days = data.days || [];
+    expeditionState.loaded = true;
+    renderExpeditionDayOptions();
+
+    const selectedDate =
+      preferredDate ||
+      expeditionState.day?.date ||
+      els.expeditionDay.value ||
+      expeditionState.days[0]?.date ||
+      "";
+
+    if (!selectedDate) {
+      sortingState.datasets = [];
+      sortingState.dataset = null;
+      completionState.datasets = [];
+      completionState.dataset = null;
+      completionState.rows = [];
+      renderSortingOptions();
+      renderCompletionOptions();
+      renderCompletion();
+      return;
+    }
+
+    await loadExpeditionDay(selectedDate);
+  } catch (error) {
+    expeditionState.loaded = true;
+    els.expeditionDaySummary.innerHTML = `<span>Online dny se nepodařilo načíst: ${escapeHtml(error.message)}</span>`;
+  }
+}
+
+async function loadExpeditionDay(dayDate) {
+  if (!dayDate) return;
+  const data = await fetchJson(`/api/expedition-days/${encodeURIComponent(dayDate)}${includeInactiveQuery()}`);
+  expeditionState.day = data.day || null;
+  sortingState.datasets = data.sorting || [];
+  completionState.datasets = data.completion || [];
+  sortingState.loaded = true;
+  completionState.loaded = true;
+
+  renderExpeditionDayOptions();
+  els.expeditionDaySummary.innerHTML = expeditionState.day
+    ? `<span><strong>${escapeHtml(expeditionState.day.label)}</strong></span><span>${escapeHtml(
+        expeditionState.day.activeBatches || 0
+      )} aktivní dávky</span><span>${escapeHtml(expeditionState.day.rowsCount || 0)} řádků</span>`
+    : `<span>Den není načtený.</span>`;
+
+  const sortingDataset = sortingState.datasets.find((item) => item.status === "active") || sortingState.datasets[0];
+  const completionDataset =
+    completionState.datasets.find((item) => item.status === "active") || completionState.datasets[0];
+
+  renderSortingOptions();
+  renderCompletionOptions();
+
+  if (sortingDataset) {
+    await loadSortingDataset(sortingDataset.id);
+  } else {
+    sortingState.dataset = null;
+    renderSortingOptions();
+    setMessage("Pro vybraný expediční den není nahrané roztřídění.", "warning");
+  }
+
+  if (completionDataset) {
+    await loadCompletionDataset(completionDataset.id);
+  } else {
+    completionState.dataset = null;
+    completionState.rows = [];
+    renderCompletionOptions();
+    renderCompletion();
+    setCompletionMessage("Pro vybraný expediční den není nahraná kompletace.", "warning");
+  }
+}
+
+function sortingRowToItem(row) {
+  return normalizeItem({
+    id: `online-${row.id}`,
+    sourceRow: row.rowNumber || "",
+    productCode: row.productCode || "",
+    variantCode: row.variantCode || "",
+    variant: row.variant || "",
+    remaining: row.remaining ?? row.quantity ?? 0,
+    initialQuantity: row.initialQuantity || row.quantity || row.remaining || 0,
+    orderNumber: row.orderNumber || "",
+    weight: row.weight || "",
+    sequence: row.sequence || "",
+    info: row.info || "",
+    paircode: row.paircode || "",
+    brand: brandFromInfo(row.info),
+    productName: cleanInfo(row.info),
+  });
+}
+
+async function loadSortingDataset(datasetId) {
+  if (!datasetId) return;
+  setMessage("Načítám vybrané roztřídění...", "neutral");
+  try {
+    const data = await fetchJson(`/api/datasets/${datasetId}`);
+    sortingState.dataset = data.dataset || null;
+    const nextItems = (data.rows || []).map(sortingRowToItem);
+    applyLoaded({
+      items: nextItems,
+      eanMap: Object.keys(state.eanMap || {}).length ? state.eanMap : seed.eanMap || {},
+      history: [],
+      settings: state.settings,
+    });
+    activeCandidates = [];
+    saveState();
+    renderSortingOptions();
+    renderAll();
+    setMessage(`Načteno roztřídění: ${datasetLabel(sortingState.dataset)}.`, "success");
+  } catch (error) {
+    setMessage(`Roztřídění se nepodařilo načíst: ${error.message}`, "error");
+  }
+}
+
+async function deleteDataset(dataset, afterDelete) {
+  if (!dataset) return false;
+  const label = datasetLabel(dataset);
+  if (!confirm(`Smazat dávku?\n\n${label}\n\nData zůstanou v historii jako smazaná.`)) return false;
+
+  await fetchJson(`/api/datasets/${dataset.id}`, {
+    method: "DELETE",
+    body: JSON.stringify({
+      deletedBy: "web",
+      reason: "Smazáno ve webovém rozhraní",
+    }),
+  });
+
+  await afterDelete();
+  return true;
+}
+
 function renderCompletionOptions() {
   els.completionDataset.innerHTML = "";
 
   if (!completionState.datasets.length) {
     els.completionDataset.innerHTML = `<option value="">Zadna davka</option>`;
+    els.completionDelete.disabled = true;
     return;
   }
 
@@ -239,36 +469,15 @@ function renderCompletionOptions() {
   if (completionState.dataset) {
     els.completionDataset.value = String(completionState.dataset.id);
   }
+  els.completionDelete.disabled = !completionState.dataset || completionState.dataset.status !== "active";
 }
 
 async function loadCompletionDatasets() {
-  setCompletionMessage("Nacitam expediční davky...", "neutral");
-  try {
-    const data = await fetchJson("/api/completion/datasets");
-    completionState.datasets = data.datasets || [];
-    completionState.loaded = true;
-    renderCompletionOptions();
-
-    const first = completionState.datasets[0];
-    if (!first) {
-      completionState.dataset = null;
-      completionState.rows = [];
-      renderCompletion();
-      setCompletionMessage("Zatim neni nahrana zadna davka KOMPLETACE.", "warning");
-      return;
-    }
-
-    await loadCompletionDataset(first.id);
-  } catch (error) {
-    completionState.loaded = true;
-    completionState.dataset = null;
-    completionState.rows = [];
-    renderCompletion();
-    setCompletionMessage(
-      `Kompletaci se nepodarilo nacist: ${error.message}. Pokud mas otevrene jen index.html ze souboru, otevri Railway appku.`,
-      "error"
-    );
+  if (expeditionState.day?.date) {
+    await loadExpeditionDay(expeditionState.day.date);
+    return;
   }
+  await loadExpeditionDays();
 }
 
 async function loadCompletionDataset(datasetId) {
@@ -331,6 +540,7 @@ function renderCompletion() {
   els.completionRowCount.textContent = `${rows.length} radku`;
   renderCompletionSummary(rows);
   els.completionBody.innerHTML = "";
+  els.completionDelete.disabled = !completionState.dataset || completionState.dataset.status !== "active";
 
   if (!rows.length) {
     els.completionBody.innerHTML = `<tr><td colspan="11" class="empty">Zadna kompletace k zobrazeni.</td></tr>`;
@@ -863,15 +1073,48 @@ els.historyList.addEventListener("click", (event) => {
   undoHistory(button.dataset.id);
 });
 
+els.expeditionRefresh.addEventListener("click", () => loadExpeditionDays(els.expeditionDay.value));
+els.expeditionShowInactive.addEventListener("change", () => loadExpeditionDays(els.expeditionDay.value));
+els.expeditionDay.addEventListener("change", () => {
+  loadExpeditionDay(els.expeditionDay.value);
+});
+
 els.tabSorting.addEventListener("click", () => switchView("sorting"));
 els.tabCompletion.addEventListener("click", () => switchView("completion"));
+els.sortingRefresh.addEventListener("click", () => {
+  loadSortingDataset(els.sortingDataset.value);
+});
+els.sortingDataset.addEventListener("change", () => {
+  loadSortingDataset(els.sortingDataset.value);
+});
+els.sortingDelete.addEventListener("click", async () => {
+  try {
+    const deleted = await deleteDataset(sortingState.dataset, () =>
+      loadExpeditionDays(expeditionState.day?.date || els.expeditionDay.value)
+    );
+    if (deleted) setMessage("Dávka roztřídění byla smazaná.", "success");
+  } catch (error) {
+    setMessage(`Dávku roztřídění se nepodařilo smazat: ${error.message}`, "error");
+  }
+});
 els.completionRefresh.addEventListener("click", () => loadCompletionDatasets());
 els.completionDataset.addEventListener("change", () => {
   loadCompletionDataset(els.completionDataset.value);
 });
+els.completionDelete.addEventListener("click", async () => {
+  try {
+    const deleted = await deleteDataset(completionState.dataset, () =>
+      loadExpeditionDays(expeditionState.day?.date || els.expeditionDay.value)
+    );
+    if (deleted) setCompletionMessage("Dávka kompletace byla smazaná.", "success");
+  } catch (error) {
+    setCompletionMessage(`Dávku kompletace se nepodařilo smazat: ${error.message}`, "error");
+  }
+});
 
 loadState();
 renderAll();
+renderSortingOptions();
 renderCompletion();
 setMessage(
   `Načteno ${state.items.length} řádků, ${Object.keys(state.eanMap).length} EAN kódů, objednávek: ${
@@ -880,3 +1123,4 @@ setMessage(
   "neutral"
 );
 requestAnimationFrame(() => els.eanInput.focus());
+loadExpeditionDays();

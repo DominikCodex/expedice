@@ -33,7 +33,7 @@ Private Sub ExpediceUploadSheet(ByVal datasetKind As String, ByVal sheetName As 
     Dim responseText As String
     responseText = ExpedicePostJson(EXPEDICE_UPLOAD_URL, EXPEDICE_UPLOAD_TOKEN, payload)
 
-    MsgBox "Upload hotovy: " & sheetName & vbCrLf & responseText, vbInformation
+    MsgBox "Upload hotovy: " & sheetName & vbCrLf & ExpediceUploadSummary(responseText), vbInformation
     Exit Sub
 
 ErrHandler:
@@ -88,16 +88,22 @@ Private Function ExpediceBuildPayload(ByVal ws As Worksheet, ByVal datasetKind A
     Dim sb As String
     Dim r As Long
     Dim rowJson As String
+    Dim batchName As String
+
+    batchName = ExpediceBatchName()
 
     sb = "{"
     sb = sb & ExpediceJsonPair("datasetKind", datasetKind) & ","
+    sb = sb & ExpediceJsonPair("expeditionDayDate", Format$(Date, "yyyy-mm-dd")) & ","
+    sb = sb & ExpediceJsonPair("batchName", batchName) & ","
+    sb = sb & ExpediceJsonPair("replaceMode", "replace-active") & ","
     sb = sb & ExpediceJsonPair("source", "excel-vba") & ","
     sb = sb & ExpediceJsonPair("workbookName", ThisWorkbook.Name) & ","
     sb = sb & ExpediceJsonPair("worksheetName", ws.Name) & ","
     sb = sb & ExpediceJsonPair("datasetDate", Format$(Date, "yyyy-mm-dd")) & ","
     sb = sb & ExpediceJsonPair("datasetTime", Format$(Now, "hh:nn:ss")) & ","
     sb = sb & ExpediceJsonPair("uploadedAtLocal", Format$(Now, "yyyy-mm-dd\Thh:nn:ss")) & ","
-    sb = sb & ExpediceJsonPair("label", UCase$(datasetKind) & " " & Format$(Now, "yyyy-mm-dd hh:nn:ss")) & ","
+    sb = sb & ExpediceJsonPair("label", batchName & " " & ExpediceDatasetKindLabel(datasetKind) & " " & Format$(Now, "hh:nn:ss")) & ","
     sb = sb & """lastRow"":" & CStr(lastRow) & ","
     sb = sb & """lastCol"":" & CStr(lastCol) & ","
     sb = sb & """headers"":" & ExpediceBuildHeaders(ws, lastCol) & ","
@@ -113,6 +119,32 @@ Private Function ExpediceBuildPayload(ByVal ws As Worksheet, ByVal datasetKind A
 
     sb = sb & "]}"
     ExpediceBuildPayload = sb
+End Function
+
+Private Function ExpediceBatchName() As String
+    ExpediceBatchName = Format$(Date, "d.m.yyyy")
+End Function
+
+Private Function ExpediceDatasetKindLabel(ByVal datasetKind As String) As String
+    If datasetKind = "completion" Then
+        ExpediceDatasetKindLabel = "Kompletace"
+    Else
+        ExpediceDatasetKindLabel = "Roztřídění"
+    End If
+End Function
+
+Private Function ExpediceUploadSummary(ByVal responseText As String) As String
+    Dim message As String
+
+    If InStr(1, responseText, """replacedDatasets"":[]", vbTextCompare) > 0 Then
+        message = "Vznikla nova aktivni davka."
+    ElseIf InStr(1, responseText, """replacedDatasets"":", vbTextCompare) > 0 Then
+        message = "Predchozi aktivni davka pro stejny den byla oznacena jako nahrazena."
+    Else
+        message = "Server upload prijal."
+    End If
+
+    ExpediceUploadSummary = message & vbCrLf & responseText
 End Function
 
 Private Function ExpediceShouldUploadRow(ByVal ws As Worksheet, ByVal datasetKind As String, ByVal r As Long) As Boolean
