@@ -2,6 +2,7 @@ import csv
 import io
 import json
 import os
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -446,6 +447,150 @@ def clean_text(value):
     return str(value)
 
 
+def searchable_text(value):
+    text = clean_text(value).lower()
+    normalized = unicodedata.normalize("NFKD", text)
+    return "".join(char for char in normalized if not unicodedata.combining(char))
+
+
+def row_value(row, *keys):
+    for key in keys:
+        if isinstance(row, dict) and key in row:
+            return row.get(key)
+        if hasattr(row, "get") and row.get(key) is not None:
+            return row.get(key)
+    return ""
+
+
+def row_text_contains(row, *keys_and_needles):
+    values = []
+    needles = []
+    for item in keys_and_needles:
+        if isinstance(item, (tuple, list)) and len(item) == 2:
+            values.append(row_value(row, item[0], item[1]))
+        else:
+            needles.append(item)
+    haystack = searchable_text(" ".join(clean_text(value) for value in values))
+    return any(searchable_text(needle) in haystack for needle in needles)
+
+
+def delivery_info_from_row(row):
+    shipping = clean_text(row_value(row, "shippingMethod", "shipping_method"))
+    dpd_flag = clean_text(row_value(row, "dpdFlag", "dpd_flag"))
+    shop_code = clean_text(row_value(row, "shopCode", "shop_code")).lower()
+    text = searchable_text(" ".join([shipping, dpd_flag, shop_code]))
+
+    if "poukaz" in text and ("email" in text or "emailem" in text):
+        return {
+            "carrier": "email",
+            "carrierLabel": "E-mail",
+            "service": "gift_voucher_email",
+            "serviceLabel": "Dárkový poukaz e-mailem",
+            "requiresCarrier": False,
+            "requiresAddress": False,
+            "isPacketa": False,
+            "isDpd": False,
+            "isGiftVoucher": True,
+            "isSk": False,
+        }
+
+    dpd_marked = searchable_text(dpd_flag).strip() in {"1", "ano", "true", "dpd", "yes"}
+    if "dpd" in text or dpd_marked:
+        is_pickup = any(token in text for token in ["vydejni", "vydaj", "box", "pickup", "parcelshop", "pobock"])
+        return {
+            "carrier": "dpd",
+            "carrierLabel": "DPD",
+            "service": "dpd_pickup" if is_pickup else "dpd_courier",
+            "serviceLabel": "DPD výdejní místo/box" if is_pickup else "DPD kurýr na adresu",
+            "requiresCarrier": True,
+            "requiresAddress": not is_pickup,
+            "isPacketa": False,
+            "isDpd": True,
+            "isGiftVoucher": False,
+            "isSk": shop_code.endswith("_sk"),
+        }
+
+    is_sk = (
+        shop_code.endswith("_sk")
+        or "packeta.sk" in text
+        or "odberne miesto" in text
+        or "kuri" in text
+        or "slovensk" in text
+    )
+    if "ceska posta" in text:
+        return {
+            "carrier": "packeta",
+            "carrierLabel": "Zásilkovna/Packeta",
+            "service": "packeta_cz_post",
+            "serviceLabel": "Česká pošta přes Zásilkovnu",
+            "requiresCarrier": True,
+            "requiresAddress": True,
+            "isPacketa": True,
+            "isDpd": False,
+            "isGiftVoucher": False,
+            "isSk": False,
+        }
+    if "prepravni sluzba" in text or "kuryr" in text:
+        return {
+            "carrier": "packeta",
+            "carrierLabel": "Zásilkovna/Packeta",
+            "service": "packeta_cz_courier",
+            "serviceLabel": "Přepravní služba na adresu",
+            "requiresCarrier": True,
+            "requiresAddress": True,
+            "isPacketa": True,
+            "isDpd": False,
+            "isGiftVoucher": False,
+            "isSk": False,
+        }
+    is_packeta_pickup = any(
+        token in text
+        for token in ["zasilkovna", "packeta", "odberne miesto", "odberne misto", "osobni odber", "osobni odber na pobocce"]
+    )
+    is_packeta_courier = "kuri" in text and "adres" in text
+
+    if is_packeta_courier:
+        return {
+            "carrier": "packeta",
+            "carrierLabel": "Packeta",
+            "service": "packeta_sk_courier",
+            "serviceLabel": "Kuriérom na adresu",
+            "requiresCarrier": True,
+            "requiresAddress": True,
+            "isPacketa": True,
+            "isDpd": False,
+            "isGiftVoucher": False,
+            "isSk": True,
+        }
+
+    if is_packeta_pickup:
+        return {
+            "carrier": "packeta",
+            "carrierLabel": "Zásilkovna/Packeta",
+            "service": "packeta_pickup",
+            "serviceLabel": "Výdejní místo Zásilkovna/Packeta",
+            "requiresCarrier": True,
+            "requiresAddress": False,
+            "isPacketa": True,
+            "isDpd": False,
+            "isGiftVoucher": False,
+            "isSk": is_sk,
+        }
+
+    return {
+        "carrier": "manual",
+        "carrierLabel": "Ruční kontrola",
+        "service": "manual",
+        "serviceLabel": shipping or "Neurčená doprava",
+        "requiresCarrier": True,
+        "requiresAddress": True,
+        "isPacketa": False,
+        "isDpd": False,
+        "isGiftVoucher": False,
+        "isSk": is_sk,
+    }
+
+
 def display_date_label(value):
     text = clean_text(value).strip()
     try:
@@ -605,6 +750,7 @@ def row_to_api(row):
 
 
 def completion_row_to_api(row):
+    delivery = delivery_info_from_row(row)
     return {
         "id": row["id"],
         "shopCode": row.get("shop_code"),
@@ -647,6 +793,15 @@ def completion_row_to_api(row):
         if row.get("address_validation_checked_at")
         else None,
         "addressValidationResult": row.get("address_validation_result") or {},
+        "deliveryCarrier": delivery["carrier"],
+        "deliveryCarrierLabel": delivery["carrierLabel"],
+        "deliveryService": delivery["service"],
+        "deliveryServiceLabel": delivery["serviceLabel"],
+        "deliveryRequiresCarrier": delivery["requiresCarrier"],
+        "deliveryRequiresAddress": delivery["requiresAddress"],
+        "deliveryIsPacketa": delivery["isPacketa"],
+        "deliveryIsDpd": delivery["isDpd"],
+        "deliveryIsGiftVoucher": delivery["isGiftVoucher"],
         "cells": row["cells"],
         "raw": row["raw_row"],
     }
@@ -657,17 +812,12 @@ def packeta_text(value):
 
 
 def packeta_contains(value, *needles):
-    text = clean_text(value).lower()
-    return any(needle.lower() in text for needle in needles)
+    text = searchable_text(value)
+    return any(searchable_text(needle) in text for needle in needles)
 
 
 def packeta_is_sk(row):
-    shipping = row.get("shippingMethod", "")
-    shop = row.get("shopCode", "")
-    return (
-        shop.endswith("_sk")
-        or packeta_contains(shipping, ".sk", "packeta.sk", "kuri", "slovensko", "slovensk")
-    )
+    return bool(delivery_info_from_row(row).get("isSk"))
 
 
 def packeta_eshop(row):
@@ -683,16 +833,18 @@ def packeta_eshop(row):
 
 def packeta_route(row):
     shipping = row.get("shippingMethod", "")
+    delivery = delivery_info_from_row(row)
+    if delivery["service"] == "packeta_sk_courier":
+        return {"addressId": "131", "service": "sk_courier"}
     if packeta_contains(shipping, "ceska posta", "česká pošta"):
         return {"addressId": "13", "service": "ceska_posta"}
     if packeta_contains(shipping, "prepravni sluzba", "přepravní služba", "kuryr", "kurýr"):
         return {"addressId": "106", "service": "cz_courier"}
-    if packeta_contains(shipping, "kuri", "kuriér", "kurier"):
-        return {"addressId": "131", "service": "sk_courier"}
     return {"addressId": clean_text(row.get("packetaId")), "service": "pickup_point"}
 
 
 def packeta_skip_reason(row):
+    delivery = delivery_info_from_row(row)
     status_text = " ".join(
         clean_text(row.get(key))
         for key in ("completionStatus", "packetaStatus", "labelPrinted", "note", "shippingMethod")
@@ -701,8 +853,12 @@ def packeta_skip_reason(row):
         return "chybi cislo objednavky"
     if packeta_contains(status_text, "storno", "fault", "error", "chyba"):
         return "storno nebo chyba"
-    if packeta_contains(row.get("shippingMethod"), "dpd") or packeta_contains(row.get("dpdFlag"), "dpd", "1"):
-        return "DPD neni Zasilkovna"
+    if delivery["isGiftVoucher"]:
+        return "darkovy poukaz se neposila dopravci"
+    if delivery["isDpd"]:
+        return "DPD patri do DPD vystupu"
+    if not delivery["isPacketa"]:
+        return "doprava nepatri do Zasilkovny/Packety"
     if clean_text(row.get("packetaShipmentId")):
         return "zasillka uz ma ID"
     route = packeta_route(row)

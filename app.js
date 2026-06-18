@@ -963,6 +963,18 @@ function addressValidationHtml(row) {
   `;
 }
 
+function deliveryCarrierHtml(row) {
+  const carrier = row.deliveryCarrier || "manual";
+  const label = row.deliveryCarrierLabel || "Ruční kontrola";
+  const service = row.deliveryServiceLabel || row.shippingMethod || "";
+  return `
+    <div class="delivery-cell">
+      <span class="delivery-badge ${escapeHtml(carrier)}">${escapeHtml(label)}</span>
+      <small>${escapeHtml(service)}</small>
+    </div>
+  `;
+}
+
 function renderCompletion() {
   const rows = completionState.rows;
   els.completionRowCount.textContent = `${rows.length} řádků`;
@@ -1011,6 +1023,7 @@ function renderCompletion() {
       <td>${completionInput(row, "city", row.city || "")}</td>
       <td>${completionInput(row, "zipCode", row.zipCode || "", "zip-input")}</td>
       <td>${addressValidationHtml(row)}</td>
+      <td>${deliveryCarrierHtml(row)}</td>
       <td>${escapeHtml(row.shippingMethod || "")}</td>
       <td>${escapeHtml(row.paymentMethod || row.paidStatus || "")}</td>
       <td>${escapeHtml(row.codAmount || "")}</td>

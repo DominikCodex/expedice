@@ -670,7 +670,7 @@ select:focus {
 }
 
 .completion-table {
-  min-width: 3500px;
+  min-width: 3700px;
 }
 
 .completion-table th,
@@ -763,6 +763,54 @@ select:focus {
 }
 
 .address-badge.danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border: 1px solid #e6b9b9;
+}
+
+.delivery-cell {
+  display: grid;
+  gap: 4px;
+  min-width: 170px;
+}
+
+.delivery-cell small {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.25;
+  white-space: normal;
+}
+
+.delivery-badge {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.delivery-badge.packeta {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  border: 1px solid #bddbce;
+}
+
+.delivery-badge.dpd {
+  color: #1b4f9c;
+  background: #e8f0ff;
+  border: 1px solid #b9cdf5;
+}
+
+.delivery-badge.email {
+  color: #7a4c00;
+  background: #fff3d7;
+  border: 1px solid #e6c47a;
+}
+
+.delivery-badge.manual {
   color: var(--danger);
   background: var(--danger-soft);
   border: 1px solid #e6b9b9;
