@@ -3089,6 +3089,93 @@ def validate_address():
         return jsonify({"error": "Mapy.com returned invalid JSON"}), 502
 
 
+@app.route("/api/sorting/rows/<int:row_id>/adjust", methods=["POST"])
+def adjust_sorting_row(row_id):
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json(silent=True) or {}
+    try:
+        delta = int(data.get("delta"))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Chybí platná změna množství."}), 400
+
+    if delta == 0 or abs(delta) > 50:
+        return jsonify({"error": "Změna množství musí být v rozumném rozsahu."}), 400
+
+    amount = abs(delta)
+    user = current_user()
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if delta < 0:
+                cur.execute(
+                    """
+                    UPDATE dataset_rows
+                    SET remaining = remaining - %s
+                    WHERE id = %s AND remaining >= %s
+                    RETURNING *
+                    """,
+                    (amount, row_id, amount),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE dataset_rows
+                    SET remaining = remaining + %s
+                    WHERE id = %s
+                    RETURNING *
+                    """,
+                    (amount, row_id),
+                )
+            row = cur.fetchone()
+
+            if not row:
+                cur.execute("SELECT * FROM dataset_rows WHERE id = %s", (row_id,))
+                current = cur.fetchone()
+                if current:
+                    return (
+                        jsonify(
+                            {
+                                "error": "Položka už nemá dost kusů k odpisu. Načítám aktuální stav ze serveru.",
+                                "row": row_to_api(current),
+                            }
+                        ),
+                        409,
+                    )
+                return jsonify({"error": "Řádek roztřídění nebyl nalezen."}), 404
+
+            payload = {
+                "delta": delta,
+                "amount": amount,
+                "remainingAfter": row["remaining"],
+                "mode": clean_text(data.get("mode")),
+                "ean": clean_text(data.get("ean")),
+                "userId": user["id"] if user else None,
+                "username": user["username"] if user else "",
+            }
+            cur.execute(
+                """
+                INSERT INTO audit_events (
+                    event_type, dataset_id, shop_code, order_number, row_ref, payload, actor
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    "sorting_deduct" if delta < 0 else "sorting_restore",
+                    row["dataset_id"],
+                    row["shop_code"],
+                    row["order_number"],
+                    row["sequence"],
+                    Json(payload),
+                    user["username"] if user else "unknown",
+                ),
+            )
+
+    return jsonify({"ok": True, "row": row_to_api(row), "delta": delta, "actor": user_to_api(user)})
+
+
 @app.route("/api/completion/rows/<int:row_id>", methods=["PATCH"])
 def update_completion_row(row_id):
     auth_error = require_upload_token()

@@ -14,6 +14,8 @@ const state = {
 };
 
 let activeCandidates = [];
+const pendingAdjustments = new Set();
+let scanInProgress = false;
 
 const expeditionState = {
   days: [],
@@ -212,6 +214,8 @@ function normalizeItem(item) {
     productName: item.productName || cleanInfo(item.info),
     externalId: item.externalId || "",
     image: item.image || "",
+    datasetRowId: item.datasetRowId || item.rowId || "",
+    shopCode: item.shopCode || "",
   };
 }
 
@@ -283,8 +287,10 @@ async function fetchJson(path, options = {}) {
   const response = await fetch(path, { cache: "no-store", ...options, headers });
   if (!response.ok) {
     let message = `API vrátilo chybu ${response.status}`;
+    let errorData = null;
     try {
       const data = await response.json();
+      errorData = data;
       message = data.error || message;
     } catch {
       // Keep fallback message.
@@ -292,7 +298,10 @@ async function fetchJson(path, options = {}) {
     if (response.status === 401) {
       showLogin("Přihlášení vypršelo nebo je potřeba se znovu přihlásit.");
     }
-    throw new Error(message);
+    const error = new Error(message);
+    error.status = response.status;
+    error.data = errorData;
+    throw error;
   }
   return response.json();
 }
@@ -698,6 +707,8 @@ function sortingRowToItem(row) {
     paircode: row.paircode || "",
     brand: brandFromInfo(row.info),
     productName: cleanInfo(row.info),
+    datasetRowId: row.id || "",
+    shopCode: row.shopCode || "",
   });
 }
 
@@ -1877,16 +1888,32 @@ function historyEntry(item, amount, type, context = {}) {
     variantCode: item.variantCode,
     variant: item.variant,
     productName: item.productName,
+    datasetRowId: item.datasetRowId || "",
     orderNumber: item.orderNumber,
     sequence: item.sequence,
     remainingAfter: item.remaining,
     ean: context.ean || "",
     mode: context.mode || "",
+    actor: context.actor || "",
     undone: false,
   };
 }
 
-function changeItem(itemId, delta, context = {}) {
+function applyServerSortingRow(item, row) {
+  if (!item || !row) return;
+  item.remaining = Math.max(0, Math.trunc(toNumber(row.remaining, item.remaining)));
+  item.orderNumber = row.orderNumber || item.orderNumber;
+  item.sequence = row.sequence || item.sequence;
+  item.variant = row.variant || item.variant;
+  item.productCode = row.productCode || item.productCode;
+  item.variantCode = row.variantCode || item.variantCode;
+  item.paircode = row.paircode || item.paircode;
+  item.info = row.info || item.info;
+  item.productName = cleanInfo(item.info) || item.productName;
+  item.brand = brandFromInfo(item.info) || item.brand;
+}
+
+async function changeItem(itemId, delta, context = {}) {
   const item = state.items.find((entry) => entry.id === itemId);
   if (!item) return null;
 
@@ -1896,7 +1923,37 @@ function changeItem(itemId, delta, context = {}) {
   }
 
   const amount = Math.abs(delta);
-  if (delta < 0) {
+  const pendingKey = item.datasetRowId ? `row-${item.datasetRowId}` : "";
+  if (pendingKey && pendingAdjustments.has(pendingKey)) {
+    setMessage("Na tomhle řádku už čekám na potvrzení od serveru.", "warning");
+    return null;
+  }
+
+  if (item.datasetRowId) {
+    pendingAdjustments.add(pendingKey);
+    try {
+      const data = await fetchJson(`/api/sorting/rows/${encodeURIComponent(item.datasetRowId)}/adjust`, {
+        method: "POST",
+        body: JSON.stringify({
+          delta,
+          mode: context.mode || "",
+          ean: context.ean || "",
+        }),
+      });
+      applyServerSortingRow(item, data.row);
+      context.actor = data.actor?.displayName || data.actor?.username || "";
+    } catch (error) {
+      if (error.data?.row) {
+        applyServerSortingRow(item, error.data.row);
+        saveState();
+        renderAll();
+      }
+      setMessage(`Server odpis nepotvrdil: ${error.message}`, error.status === 409 ? "warning" : "error");
+      return null;
+    } finally {
+      pendingAdjustments.delete(pendingKey);
+    }
+  } else if (delta < 0) {
     item.remaining = Math.max(0, item.remaining - amount);
   } else {
     item.remaining += amount;
@@ -1911,16 +1968,15 @@ function changeItem(itemId, delta, context = {}) {
   return entry;
 }
 
-function undoHistory(historyId) {
+async function undoHistory(historyId) {
   const entry = state.history.find((item) => item.id === historyId);
   if (!entry || entry.type !== "deduct" || entry.undone) return;
   const item = state.items.find((candidate) => candidate.id === entry.itemId);
   if (!item) return;
 
-  item.remaining += entry.amount;
+  const restoreEntry = await changeItem(item.id, entry.amount, { mode: "vrácení odpisu" });
+  if (!restoreEntry) return;
   entry.undone = true;
-  state.history.unshift(historyEntry(item, entry.amount, "restore", { mode: "vrácení odpisu" }));
-  state.history = state.history.slice(0, MAX_HISTORY);
   saveState();
   renderAll();
   setMessage(`Vráceno ${entry.amount} ks pro ${entry.variantCode}.`, "success");
@@ -1960,45 +2016,51 @@ function findScanCandidates(ean) {
   };
 }
 
-function processScan(rawValue) {
+async function processScan(rawValue) {
   const ean = rawValue.replace(/\D/g, "");
   if (ean.length !== 13) return;
+  if (scanInProgress) return;
 
-  els.eanInput.value = "";
-  activeCandidates = [];
-  const result = findScanCandidates(ean);
+  scanInProgress = true;
+  try {
+    els.eanInput.value = "";
+    activeCandidates = [];
+    const result = findScanCandidates(ean);
 
-  if (!result.entries.length) {
-    setMessage(`EAN ${ean} není v načtené EAN tabulce.`, "error");
-    renderCandidates();
-    return;
-  }
-
-  if (!result.candidates.length) {
-    setMessage(`EAN ${ean} znám, ale u odpovídajícího zboží už není co odepsat.`, "warning");
-    renderCandidates();
-    return;
-  }
-
-  const exactCandidates = result.candidates.filter((candidate) => candidate.matchType === "přesná varianta");
-  if (result.entries.length === 1 && exactCandidates.length === 1) {
-    const entry = changeItem(exactCandidates[0].item.id, -1, {
-      ean,
-      mode: "EAN jednoznačná varianta",
-    });
-    if (entry) {
-      showScanResult(entry);
-      setMessage(
-        `Odepsáno 1 ks: ${entry.variantCode}, obj. ${entry.orderNumber}, poř. ${entry.sequence}.`,
-        "success"
-      );
+    if (!result.entries.length) {
+      setMessage(`EAN ${ean} není v načtené EAN tabulce.`, "error");
+      renderCandidates();
+      return;
     }
-    return;
-  }
 
-  activeCandidates = result.candidates;
-  renderAll();
-  setMessage(`EAN ${ean} má více možných shod. Vyber správnou položku.`, "warning");
+    if (!result.candidates.length) {
+      setMessage(`EAN ${ean} znám, ale u odpovídajícího zboží už není co odepsat.`, "warning");
+      renderCandidates();
+      return;
+    }
+
+    const exactCandidates = result.candidates.filter((candidate) => candidate.matchType === "přesná varianta");
+    if (result.entries.length === 1 && exactCandidates.length === 1) {
+      const entry = await changeItem(exactCandidates[0].item.id, -1, {
+        ean,
+        mode: "EAN jednoznačná varianta",
+      });
+      if (entry) {
+        showScanResult(entry);
+        setMessage(
+          `Odepsáno 1 ks: ${entry.variantCode}, obj. ${entry.orderNumber}, poř. ${entry.sequence}.`,
+          "success"
+        );
+      }
+      return;
+    }
+
+    activeCandidates = result.candidates;
+    renderAll();
+    setMessage(`EAN ${ean} má více možných shod. Vyber správnou položku.`, "warning");
+  } finally {
+    scanInProgress = false;
+  }
 }
 
 function exportData() {
@@ -2067,14 +2129,14 @@ els.eanInput.addEventListener("input", () => {
     els.eanInput.value = digits;
   }
   if (digits.length === 13) {
-    processScan(digits);
+    processScan(digits).catch((error) => setMessage(`Sken se nepodařilo zpracovat: ${error.message}`, "error"));
   }
 });
 
 els.eanInput.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
-    processScan(els.eanInput.value);
+    processScan(els.eanInput.value).catch((error) => setMessage(`Sken se nepodařilo zpracovat: ${error.message}`, "error"));
   }
 });
 
@@ -2111,24 +2173,24 @@ els.importData.addEventListener("change", (event) => {
   event.target.value = "";
 });
 
-els.sortingBody.addEventListener("click", (event) => {
+els.sortingBody.addEventListener("click", async (event) => {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
   const id = button.dataset.id;
   if (button.dataset.action === "deduct") {
-    const entry = changeItem(id, -1, { mode: "ruční odpis" });
+    const entry = await changeItem(id, -1, { mode: "ruční odpis" });
     if (entry) setMessage(`Odepsáno 1 ks: ${entry.variantCode}.`, "success");
   }
   if (button.dataset.action === "restore") {
-    const entry = changeItem(id, 1, { mode: "ruční navrácení" });
+    const entry = await changeItem(id, 1, { mode: "ruční navrácení" });
     if (entry) setMessage(`Vráceno 1 ks: ${entry.variantCode}.`, "success");
   }
 });
 
-els.candidateList.addEventListener("click", (event) => {
+els.candidateList.addEventListener("click", async (event) => {
   const button = event.target.closest("button[data-action='candidate-deduct']");
   if (!button) return;
-  const entry = changeItem(button.dataset.id, -1, { mode: "výběr z kandidátů" });
+  const entry = await changeItem(button.dataset.id, -1, { mode: "výběr z kandidátů" });
   if (entry) {
     showScanResult(entry);
     setMessage(`Odepsáno 1 ks: ${entry.variantCode}, poř. ${entry.sequence}.`, "success");
@@ -2138,7 +2200,7 @@ els.candidateList.addEventListener("click", (event) => {
 els.historyList.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-action='undo-history']");
   if (!button) return;
-  undoHistory(button.dataset.id);
+  undoHistory(button.dataset.id).catch((error) => setMessage(`Vrácení odpisu selhalo: ${error.message}`, "error"));
 });
 
 els.expeditionRefresh.addEventListener("click", () => loadExpeditionDays(expeditionState.day?.date || ""));
