@@ -952,7 +952,7 @@ function addressValidationHtml(row) {
     verified: ["Ověřeno", "ok"],
     suggestion: ["Návrh", "warning"],
     not_found: ["Nenalezeno", "danger"],
-    error: ["Chyba", "danger"],
+    error: ["Chybná adresa", "danger"],
   };
   const [label, tone] = labels[status] || ["Neověřeno", "neutral"];
   return `

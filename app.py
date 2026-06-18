@@ -1724,6 +1724,92 @@ def mapy_address_query(data):
     return ", ".join(part for part in [street_part, zip_code, city] if part).strip()
 
 
+def address_input_parts(data):
+    street_with_number = clean_text(data.get("streetWithNumber")).strip()
+    street = clean_text(data.get("street")).strip()
+    house_number = clean_text(data.get("houseNumber")).strip()
+    city = clean_text(data.get("city")).strip()
+    zip_code = clean_text(data.get("zipCode")).strip()
+
+    combined_street = street_with_number or " ".join(part for part in [street, house_number] if part)
+    return {
+        "streetWithNumber": street_with_number,
+        "street": street,
+        "houseNumber": house_number,
+        "city": city,
+        "zipCode": zip_code,
+        "combinedStreet": combined_street,
+    }
+
+
+def address_has_house_number(parts):
+    if clean_text(parts.get("houseNumber")).strip():
+        return True
+    combined = clean_text(parts.get("combinedStreet"))
+    return any(char.isdigit() for char in combined)
+
+
+def address_precheck_error(data):
+    parts = address_input_parts(data)
+    missing = []
+    if not parts["combinedStreet"]:
+        missing.append("ulice")
+    if not address_has_house_number(parts):
+        missing.append("číslo domu")
+    if not parts["city"]:
+        missing.append("město")
+    if not parts["zipCode"]:
+        missing.append("PSČ")
+
+    if missing:
+        return f"Chybí {', '.join(missing)}. Adresa musí být vyřešena se zákazníkem."
+    return ""
+
+
+def mapy_item_search_text(item):
+    regional = " ".join(clean_text(part.get("name")) for part in item.get("regionalStructure") or [])
+    return searchable_text(" ".join([item.get("name") or "", item.get("location") or "", item.get("zip") or "", regional]))
+
+
+def address_matches_mapy_result(data, item):
+    parts = address_input_parts(data)
+    result_text = mapy_item_search_text(item)
+
+    if not item or item.get("type") != "regional.address":
+        return False, "Mapy.com nenašly přesnou adresu."
+
+    if not address_has_house_number(parts):
+        return False, "Chybí číslo domu."
+
+    street = parts["street"] or parts["streetWithNumber"]
+    street_words = [
+        word
+        for word in searchable_text(street).replace("/", " ").split()
+        if not any(char.isdigit() for char in word)
+    ]
+    if street_words and not any(word in result_text for word in street_words):
+        return False, "Nalezená adresa neodpovídá zadané ulici."
+
+    if parts["houseNumber"]:
+        house_number = searchable_text(parts["houseNumber"]).replace(" ", "")
+        result_compact = result_text.replace(" ", "")
+        if house_number and house_number not in result_compact:
+            return False, "Nalezená adresa neodpovídá zadanému číslu domu."
+
+    if parts["city"]:
+        city_words = searchable_text(parts["city"]).split()
+        if city_words and not any(word in result_text for word in city_words):
+            return False, "Nalezená adresa neodpovídá zadanému městu."
+
+    if parts["zipCode"]:
+        wanted_zip = "".join(char for char in parts["zipCode"] if char.isdigit())
+        found_zip = "".join(char for char in clean_text(item.get("zip")) if char.isdigit())
+        if wanted_zip and found_zip and wanted_zip != found_zip:
+            return False, "Nalezená adresa má jiné PSČ."
+
+    return True, ""
+
+
 def mapy_country(data):
     explicit = clean_text(data.get("country")).strip().lower()
     if explicit:
@@ -1972,6 +2058,47 @@ def validate_address():
     if not query:
         return jsonify({"error": "Address query is empty"}), 400
 
+    precheck_error = "" if data.get("query") else address_precheck_error(data)
+    row_id = int_from_text(data.get("rowId"))
+    if precheck_error:
+        result_payload = {
+            "valid": False,
+            "status": "error",
+            "message": precheck_error,
+            "query": query,
+            "country": mapy_country(data),
+            "items": [],
+            "rawCount": 0,
+        }
+        if row_id:
+            ensure_schema()
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE completion_rows
+                        SET address_validation_status = %s,
+                            address_validation_message = %s,
+                            address_validation_query = %s,
+                            address_validation_checked_at = NOW(),
+                            address_validation_result = %s
+                        WHERE id = %s
+                        """,
+                        ("error", precheck_error, query, Json(result_payload), row_id),
+                    )
+        return jsonify(
+            {
+                "ok": True,
+                "valid": False,
+                "status": "error",
+                "message": precheck_error,
+                "query": query,
+                "country": mapy_country(data),
+                "items": [],
+                "rawCount": 0,
+            }
+        )
+
     params = {
         "query": query,
         "lang": clean_text(data.get("lang")) or "cs",
@@ -1993,14 +2120,16 @@ def validate_address():
             response_text = response.read().decode("utf-8", "replace")
             payload = json.loads(response_text)
             items = mapy_normalize_items(payload)
-            valid = any(item.get("type") == "regional.address" for item in items)
-            status = "verified" if valid else "suggestion" if items else "not_found"
             first = items[0] if items else {}
+            valid, match_message = address_matches_mapy_result(data, first)
+            status = "verified" if valid else "suggestion" if items else "not_found"
             message = ", ".join(
                 part for part in [clean_text(first.get("name")), clean_text(first.get("location"))] if part
             )
             if not message:
                 message = "Adresa nebyla nalezena"
+            if match_message:
+                message = f"{match_message} Návrh Mapy.com: {message}" if items else match_message
             result_payload = {
                 "valid": valid,
                 "status": status,
