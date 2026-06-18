@@ -479,6 +479,13 @@ def delivery_info_from_row(row):
     dpd_flag = clean_text(row_value(row, "dpdFlag", "dpd_flag"))
     shop_code = clean_text(row_value(row, "shopCode", "shop_code")).lower()
     text = searchable_text(" ".join([shipping, dpd_flag, shop_code]))
+    is_sk_order = (
+        shop_code.endswith("_sk")
+        or "packeta.sk" in text
+        or "odberne miesto" in text
+        or "kuri" in text
+        or "slovensk" in text
+    )
 
     if "poukaz" in text and ("email" in text or "emailem" in text):
         return {
@@ -491,11 +498,11 @@ def delivery_info_from_row(row):
             "isPacketa": False,
             "isDpd": False,
             "isGiftVoucher": True,
-            "isSk": False,
+            "isSk": is_sk_order,
         }
 
     dpd_marked = searchable_text(dpd_flag).strip() in {"1", "ano", "true", "dpd", "yes"}
-    if "dpd" in text or dpd_marked:
+    if ("dpd" in text or dpd_marked) and not is_sk_order:
         is_pickup = any(token in text for token in ["vydejni", "vydaj", "box", "pickup", "parcelshop", "pobock"])
         return {
             "carrier": "dpd",
@@ -507,16 +514,9 @@ def delivery_info_from_row(row):
             "isPacketa": False,
             "isDpd": True,
             "isGiftVoucher": False,
-            "isSk": shop_code.endswith("_sk"),
+            "isSk": False,
         }
 
-    is_sk = (
-        shop_code.endswith("_sk")
-        or "packeta.sk" in text
-        or "odberne miesto" in text
-        or "kuri" in text
-        or "slovensk" in text
-    )
     if "ceska posta" in text:
         return {
             "carrier": "packeta",
@@ -528,7 +528,7 @@ def delivery_info_from_row(row):
             "isPacketa": True,
             "isDpd": False,
             "isGiftVoucher": False,
-            "isSk": False,
+            "isSk": is_sk_order,
         }
     if "prepravni sluzba" in text or "kuryr" in text:
         return {
@@ -541,7 +541,7 @@ def delivery_info_from_row(row):
             "isPacketa": True,
             "isDpd": False,
             "isGiftVoucher": False,
-            "isSk": False,
+            "isSk": is_sk_order,
         }
     is_packeta_pickup = any(
         token in text
@@ -563,7 +563,7 @@ def delivery_info_from_row(row):
             "isSk": True,
         }
 
-    if is_packeta_pickup:
+    if is_packeta_pickup or is_sk_order:
         return {
             "carrier": "packeta",
             "carrierLabel": "Zásilkovna/Packeta",
@@ -574,7 +574,7 @@ def delivery_info_from_row(row):
             "isPacketa": True,
             "isDpd": False,
             "isGiftVoucher": False,
-            "isSk": is_sk,
+            "isSk": is_sk_order,
         }
 
     return {
@@ -587,7 +587,7 @@ def delivery_info_from_row(row):
         "isPacketa": False,
         "isDpd": False,
         "isGiftVoucher": False,
-        "isSk": is_sk,
+        "isSk": is_sk_order,
     }
 
 
@@ -802,6 +802,7 @@ def completion_row_to_api(row):
         "deliveryIsPacketa": delivery["isPacketa"],
         "deliveryIsDpd": delivery["isDpd"],
         "deliveryIsGiftVoucher": delivery["isGiftVoucher"],
+        "currency": shipment_currency(row),
         "cells": row["cells"],
         "raw": row["raw_row"],
     }
@@ -869,7 +870,7 @@ def packeta_skip_reason(row):
 
 def packeta_dry_run_packet(row):
     route = packeta_route(row)
-    currency = "EUR" if packeta_is_sk(row) else "CZK"
+    currency = shipment_currency(row)
     value = clean_text(row.get("amount")) or ("29" if currency == "EUR" else "0")
     company = ""
     note = clean_text(row.get("note"))
@@ -1720,6 +1721,14 @@ def dpd_country(row):
     return "CZ"
 
 
+def shipment_currency(row):
+    shop_code = clean_text(row.get("shopCode") or row.get("shop_code")).lower()
+    delivery = delivery_info_from_row(row)
+    if shop_code.endswith("_sk") or delivery.get("isSk") or dpd_country(row) == "SK":
+        return "EUR"
+    return "CZK"
+
+
 def dpd_recipient_name(row):
     return " ".join(part for part in [row.get("firstName"), row.get("lastName")] if part).strip()
 
@@ -1781,7 +1790,7 @@ def dpd_payload(row):
         "pickupPointId": clean_text(row.get("packetaId")) if delivery["service"] == "dpd_pickup" else "",
         "cashOnDelivery": {
             "amount": clean_text(row.get("codAmount")),
-            "currency": "EUR" if dpd_country(row) == "SK" else "CZK",
+            "currency": shipment_currency(row),
         },
         "parcel": {
             "weight": clean_text(row.get("weight")) or "1",

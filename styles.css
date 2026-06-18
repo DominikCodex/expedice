@@ -816,6 +816,25 @@ select:focus {
   border: 1px solid #e6b9b9;
 }
 
+.currency-chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  color: #31403a;
+  background: #eef1f0;
+  border: 1px solid #cad2ce;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.currency-chip.eur {
+  color: #1b4f9c;
+  background: #e8f0ff;
+  border-color: #b9cdf5;
+}
+
 .completion-table td strong,
 .completion-table td small {
   display: block;

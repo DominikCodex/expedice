@@ -1186,6 +1186,7 @@ function renderCompletion() {
       <td>${completionInput(row, "zipCode", row.zipCode || "", "zip-input")}</td>
       <td>${addressValidationHtml(row)}</td>
       <td>${deliveryCarrierHtml(row)}</td>
+      <td><span class="currency-chip ${escapeHtml((row.currency || "").toLowerCase())}">${escapeHtml(row.currency || "")}</span></td>
       <td>${escapeHtml(row.shippingMethod || "")}</td>
       <td>${escapeHtml(row.paymentMethod || row.paidStatus || "")}</td>
       <td>${escapeHtml(row.codAmount || "")}</td>
