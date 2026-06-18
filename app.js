@@ -317,8 +317,24 @@ function setAuthMessage(text, type = "neutral") {
   els.authMessage.textContent = text;
 }
 
+function setLoginBusy(isBusy) {
+  const button = els.loginForm.querySelector("button[type='submit']");
+  if (!button) return;
+  button.disabled = isBusy;
+  button.textContent = isBusy ? "Přihlašuji..." : "Přihlásit";
+}
+
+function setPasswordChangeBusy(isBusy) {
+  const button = els.passwordChangeForm.querySelector("button[type='submit']");
+  if (!button) return;
+  button.disabled = isBusy;
+  button.textContent = isBusy ? "Ukládám..." : "Uložit nové heslo";
+}
+
 function showLogin(message = "Přihlas se prosím do expedičního systému.") {
   authState.user = null;
+  setLoginBusy(false);
+  setPasswordChangeBusy(false);
   els.appShell.classList.add("hidden");
   els.authView.classList.remove("hidden");
   els.loginForm.classList.remove("hidden");
@@ -329,6 +345,8 @@ function showLogin(message = "Přihlas se prosím do expedičního systému.") {
 
 function showPasswordChange(user) {
   authState.user = user;
+  setLoginBusy(false);
+  setPasswordChangeBusy(false);
   els.appShell.classList.add("hidden");
   els.authView.classList.remove("hidden");
   els.loginForm.classList.add("hidden");
@@ -371,7 +389,7 @@ function startAppForUser(user) {
   }
 
   requestAnimationFrame(() => els.eanInput.focus());
-  loadExpeditionDays();
+  requestAnimationFrame(() => loadExpeditionDays());
 }
 
 async function checkAuth() {
@@ -400,6 +418,8 @@ async function login() {
     setAuthMessage("Vyplň uživatele i heslo.", "warning");
     return;
   }
+  setLoginBusy(true);
+  setAuthMessage("Přihlašuji a připravuji pracovní prostředí...", "neutral");
   try {
     const data = await fetchJson("/api/auth/login", {
       method: "POST",
@@ -413,6 +433,8 @@ async function login() {
     startAppForUser(data.user);
   } catch (error) {
     setAuthMessage(error.message, "error");
+  } finally {
+    setLoginBusy(false);
   }
 }
 
@@ -432,6 +454,8 @@ async function changePassword() {
     setAuthMessage("Vyplň aktuální i nové heslo.", "warning");
     return;
   }
+  setPasswordChangeBusy(true);
+  setAuthMessage("Ukládám nové heslo...", "neutral");
   try {
     const data = await fetchJson("/api/auth/change-password", {
       method: "POST",
@@ -442,6 +466,8 @@ async function changePassword() {
     startAppForUser(data.user);
   } catch (error) {
     setAuthMessage(error.message, "error");
+  } finally {
+    setPasswordChangeBusy(false);
   }
 }
 

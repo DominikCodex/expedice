@@ -23,10 +23,12 @@ PRAGUE_TZ = ZoneInfo("Europe/Prague")
 
 app = Flask(__name__, static_folder=None)
 SCHEMA_READY = False
+AUTH_SCHEMA_READY = False
 SESSION_COOKIE = "expedice_session"
 SESSION_SECONDS = 12 * 60 * 60
 INITIAL_ADMIN_USERNAME = "d.najman@centrum.cz"
 INITIAL_ADMIN_PASSWORD = "1234"
+PASSWORD_HASH_METHOD = "pbkdf2:sha256:260000"
 
 DEFAULT_SHOPS = [
     {
@@ -114,7 +116,7 @@ def db_conn():
 
 
 def ensure_schema():
-    global SCHEMA_READY
+    global SCHEMA_READY, AUTH_SCHEMA_READY
     if SCHEMA_READY:
         return
 
@@ -441,6 +443,75 @@ def ensure_schema():
                 """
             )
     SCHEMA_READY = True
+    AUTH_SCHEMA_READY = True
+
+
+def ensure_auth_schema():
+    global AUTH_SCHEMA_READY
+    if AUTH_SCHEMA_READY:
+        return
+
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS users (
+                    id BIGSERIAL PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'employee',
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    last_login_at TIMESTAMPTZ,
+                    created_by BIGINT REFERENCES users(id) ON DELETE SET NULL
+                )
+                """
+            )
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT ''")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'employee'")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE")
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by BIGINT")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_sessions (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    expires_at TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_users_username
+                ON users (username)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_user_sessions_token_hash
+                ON user_sessions (token_hash)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id
+                ON user_sessions (user_id)
+                """
+            )
+            seed_initial_admin(cur)
+
+    AUTH_SCHEMA_READY = True
 
 
 def seed_core_config(cur):
@@ -499,8 +570,16 @@ def seed_initial_admin(cur):
         )
         VALUES (%s, %s, %s, 'admin', TRUE, TRUE)
         """,
-        (username, "Dominik Najman", generate_password_hash(INITIAL_ADMIN_PASSWORD)),
+        (username, "Dominik Najman", make_password_hash(INITIAL_ADMIN_PASSWORD)),
     )
+
+
+def make_password_hash(password):
+    return generate_password_hash(password, method=PASSWORD_HASH_METHOD)
+
+
+def password_hash_needs_upgrade(password_hash):
+    return not clean_text(password_hash).startswith(PASSWORD_HASH_METHOD)
 
 
 def normalize_username(value):
@@ -542,7 +621,7 @@ def current_user():
         return None
 
     token_hash = hash_session_token(token)
-    ensure_schema()
+    ensure_auth_schema()
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
@@ -691,7 +770,7 @@ def auth_me():
 
 @app.route("/api/auth/login", methods=["POST"])
 def auth_login():
-    ensure_schema()
+    ensure_auth_schema()
     data = request.get_json(silent=True) or {}
     username = normalize_username(data.get("username") or data.get("email"))
     password = clean_text(data.get("password"))
@@ -705,8 +784,13 @@ def auth_login():
             if not user or not user["active"] or not check_password_hash(user["password_hash"], password):
                 return jsonify({"error": "Nesprávné přihlašovací údaje."}), 401
 
+            password_update_sql = ", password_hash = %s" if password_hash_needs_upgrade(user["password_hash"]) else ""
+            password_update_params = [make_password_hash(password)] if password_update_sql else []
             token = create_user_session(cur, user["id"])
-            cur.execute("UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE id = %s RETURNING *", (user["id"],))
+            cur.execute(
+                f"UPDATE users SET last_login_at = NOW(), updated_at = NOW(){password_update_sql} WHERE id = %s RETURNING *",
+                [*password_update_params, user["id"]],
+            )
             user = cur.fetchone()
 
     response = jsonify({"ok": True, "user": user_to_api(user)})
@@ -718,7 +802,7 @@ def auth_login():
 def auth_logout():
     token = request.cookies.get(SESSION_COOKIE)
     if token:
-        ensure_schema()
+        ensure_auth_schema()
         with db_conn() as conn:
             with conn.cursor() as cur:
                 cur.execute("DELETE FROM user_sessions WHERE token_hash = %s", (hash_session_token(token),))
@@ -755,7 +839,7 @@ def auth_change_password():
                 WHERE id = %s
                 RETURNING *
                 """,
-                (generate_password_hash(new_password), user["id"]),
+                (make_password_hash(new_password), user["id"]),
             )
             updated = cur.fetchone()
 
@@ -769,7 +853,7 @@ def list_users():
     if auth_error:
         return auth_error
 
-    ensure_schema()
+    ensure_auth_schema()
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("SELECT * FROM users ORDER BY active DESC, role, display_name, username")
@@ -808,7 +892,7 @@ def create_user():
                     VALUES (%s, %s, %s, %s, TRUE, TRUE, %s)
                     RETURNING *
                     """,
-                    (username, display_name or username, generate_password_hash(password), role, creator["id"]),
+                    (username, display_name or username, make_password_hash(password), role, creator["id"]),
                 )
                 user = cur.fetchone()
     except psycopg2.IntegrityError:
@@ -885,7 +969,7 @@ def reset_user_password(user_id):
                 WHERE id = %s
                 RETURNING *
                 """,
-                (generate_password_hash(password), user_id),
+                (make_password_hash(password), user_id),
             )
             user = cur.fetchone()
             if user:
