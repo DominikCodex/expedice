@@ -982,6 +982,12 @@ function renderCompletion() {
     const tr = document.createElement("tr");
     tr.dataset.completionRowId = row.id;
     tr.innerHTML = `
+      <td>
+        <div class="completion-actions">
+          <button type="button" data-action="save-completion-row" data-row-id="${escapeHtml(row.id)}">Uložit</button>
+          <button type="button" class="secondary" data-action="validate-address" data-row-id="${escapeHtml(row.id)}">Ověřit</button>
+        </div>
+      </td>
       <td><span class="shop-chip">${escapeHtml(row.shopCode || completionState.dataset?.shopCode || "-")}</span></td>
       <td class="code">${escapeHtml(row.expeditionNumber || row.rowNumber || "")}</td>
       <td class="code">${escapeHtml(row.orderNumber || "")}</td>
@@ -1012,12 +1018,6 @@ function renderCompletion() {
       <td><span class="status-chip ${status.tone}">${escapeHtml(status.label)}</span></td>
       <td>${escapeHtml(row.labelPrinted || row.packetaShipmentId || "")}</td>
       <td class="completion-note">${escapeHtml(row.note || "")}</td>
-      <td>
-        <div class="completion-actions">
-          <button type="button" data-action="save-completion-row" data-row-id="${escapeHtml(row.id)}">Uložit</button>
-          <button type="button" class="secondary" data-action="validate-address" data-row-id="${escapeHtml(row.id)}">Ověřit</button>
-        </div>
-      </td>
     `;
     els.completionBody.appendChild(tr);
   });
