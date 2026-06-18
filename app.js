@@ -2821,3 +2821,29 @@ els.dpdSend.addEventListener("click", runDpdSend);
 els.printAgentTest?.addEventListener("click", testPrintAgent);
 
 checkAuth();
+
+function ensurePrintInstallTopLink() {
+  if (document.getElementById("print-install-top-link")) return;
+  const logoutButton =
+    document.getElementById("logout-button") ||
+    document.getElementById("logout") ||
+    Array.from(document.querySelectorAll("button")).find((button) => button.textContent.trim() === "Odhlásit");
+  if (!logoutButton || !logoutButton.parentElement) return;
+
+  const link = document.createElement("a");
+  link.id = "print-install-top-link";
+  link.href = "print-agent.html";
+  link.className = "button-link secondary";
+  link.textContent = "Instalace tisku";
+  link.style.textDecoration = "none";
+  link.style.whiteSpace = "nowrap";
+  link.style.marginRight = "8px";
+
+  logoutButton.parentElement.insertBefore(link, logoutButton);
+}
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", ensurePrintInstallTopLink);
+} else {
+  ensurePrintInstallTopLink();
+}
