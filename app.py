@@ -1,18 +1,21 @@
 import csv
+import hashlib
 import io
 import json
 import os
+import secrets
 import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
-from datetime import datetime
+from datetime import datetime, timedelta
 from xml.sax.saxutils import escape as xml_escape
 from zoneinfo import ZoneInfo
 
 import psycopg2
 from psycopg2.extras import Json, RealDictCursor
-from flask import Flask, Response, jsonify, request, send_from_directory
+from flask import Flask, Response, g, jsonify, request, send_from_directory
+from werkzeug.security import check_password_hash, generate_password_hash
 
 
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -20,6 +23,10 @@ PRAGUE_TZ = ZoneInfo("Europe/Prague")
 
 app = Flask(__name__, static_folder=None)
 SCHEMA_READY = False
+SESSION_COOKIE = "expedice_session"
+SESSION_SECONDS = 12 * 60 * 60
+INITIAL_ADMIN_USERNAME = "d.najman@centrum.cz"
+INITIAL_ADMIN_PASSWORD = "1234"
 
 DEFAULT_SHOPS = [
     {
@@ -315,11 +322,68 @@ def ensure_schema():
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS users (
+                    id BIGSERIAL PRIMARY KEY,
+                    username TEXT NOT NULL UNIQUE,
+                    display_name TEXT NOT NULL DEFAULT '',
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'employee',
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    last_login_at TIMESTAMPTZ,
+                    created_by BIGINT REFERENCES users(id) ON DELETE SET NULL
+                )
+                """
+            )
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT NOT NULL DEFAULT ''")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'employee'")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS active BOOLEAN NOT NULL DEFAULT TRUE")
+            cur.execute(
+                "ALTER TABLE users ADD COLUMN IF NOT EXISTS must_change_password BOOLEAN NOT NULL DEFAULT FALSE"
+            )
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by BIGINT")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS user_sessions (
+                    id BIGSERIAL PRIMARY KEY,
+                    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    last_seen_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    expires_at TIMESTAMPTZ NOT NULL
+                )
+                """
+            )
+            seed_initial_admin(cur)
+            cur.execute(
+                """
                 CREATE TABLE IF NOT EXISTS app_settings (
                     key TEXT PRIMARY KEY,
                     value JSONB NOT NULL DEFAULT '{}'::jsonb,
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_users_username
+                ON users (username)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_user_sessions_token_hash
+                ON user_sessions (token_hash)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_user_sessions_user_id
+                ON user_sessions (user_id)
                 """
             )
             cur.execute(
@@ -422,28 +486,414 @@ def seed_core_config(cur):
         )
 
 
+def seed_initial_admin(cur):
+    username = INITIAL_ADMIN_USERNAME.lower()
+    cur.execute("SELECT id FROM users WHERE username = %s", (username,))
+    if cur.fetchone():
+        return
+
+    cur.execute(
+        """
+        INSERT INTO users (
+            username, display_name, password_hash, role, active, must_change_password
+        )
+        VALUES (%s, %s, %s, 'admin', TRUE, TRUE)
+        """,
+        (username, "Dominik Najman", generate_password_hash(INITIAL_ADMIN_PASSWORD)),
+    )
+
+
+def normalize_username(value):
+    return clean_text(value).strip().lower()
+
+
+def hash_session_token(token):
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def user_to_api(user):
+    if not user:
+        return None
+    return {
+        "id": user["id"],
+        "username": user["username"],
+        "displayName": user.get("display_name") or user["username"],
+        "role": user.get("role") or "employee",
+        "active": bool(user.get("active")),
+        "mustChangePassword": bool(user.get("must_change_password")),
+        "createdAt": user.get("created_at").isoformat() if user.get("created_at") else None,
+        "updatedAt": user.get("updated_at").isoformat() if user.get("updated_at") else None,
+        "lastLoginAt": user.get("last_login_at").isoformat() if user.get("last_login_at") else None,
+    }
+
+
+def is_admin(user=None):
+    active_user = user or current_user()
+    return bool(active_user and active_user.get("role") == "admin")
+
+
+def current_user():
+    if hasattr(g, "current_user"):
+        return g.current_user
+
+    token = request.cookies.get(SESSION_COOKIE)
+    if not token:
+        g.current_user = None
+        return None
+
+    token_hash = hash_session_token(token)
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT u.*
+                FROM user_sessions s
+                JOIN users u ON u.id = s.user_id
+                WHERE s.token_hash = %s
+                  AND s.expires_at > NOW()
+                  AND u.active = TRUE
+                LIMIT 1
+                """,
+                (token_hash,),
+            )
+            user = cur.fetchone()
+            if user:
+                cur.execute("UPDATE user_sessions SET last_seen_at = NOW() WHERE token_hash = %s", (token_hash,))
+
+    g.current_user = user
+    return user
+
+
+def valid_upload_token():
+    expected = os.environ.get("UPLOAD_TOKEN", "")
+    if not expected:
+        return False
+    provided = request.headers.get("X-Upload-Token") or request.args.get("token") or ""
+    return secrets.compare_digest(provided, expected)
+
+
+def valid_download_token():
+    expected = os.environ.get("DOWNLOAD_TOKEN", "")
+    if not expected:
+        return False
+    provided = request.headers.get("X-Download-Token") or request.args.get("token") or ""
+    return secrets.compare_digest(provided, expected)
+
+
 def require_upload_token():
+    if valid_upload_token() or current_user():
+        return None
+
     expected = os.environ.get("UPLOAD_TOKEN", "")
     if not expected:
         return None
 
-    provided = request.headers.get("X-Upload-Token") or request.args.get("token")
-    if provided != expected:
-        return jsonify({"error": "Unauthorized"}), 401
-
-    return None
+    return jsonify({"error": "Unauthorized"}), 401
 
 
 def require_download_token_if_configured():
-    expected = os.environ.get("DOWNLOAD_TOKEN", "")
-    if not expected:
+    if request.method == "GET" and valid_download_token() and not api_path_requires_admin(path):
+        return None
+    if current_user():
+        return None
+    return jsonify({"error": "Unauthorized"}), 401
+
+
+def require_login():
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Je potřeba se přihlásit."}), 401
+    return None
+
+
+def require_admin():
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+    if not is_admin():
+        return jsonify({"error": "Tahle akce je dostupná jen pro admina."}), 403
+    return None
+
+
+def set_session_cookie(response, token):
+    response.set_cookie(
+        SESSION_COOKIE,
+        token,
+        max_age=SESSION_SECONDS,
+        httponly=True,
+        secure=request.is_secure,
+        samesite="Lax",
+        path="/",
+    )
+
+
+def clear_session_cookie(response):
+    response.delete_cookie(SESSION_COOKIE, path="/")
+
+
+def create_user_session(cur, user_id):
+    token = secrets.token_urlsafe(36)
+    expires_at = local_now() + timedelta(seconds=SESSION_SECONDS)
+    cur.execute(
+        """
+        INSERT INTO user_sessions (user_id, token_hash, expires_at)
+        VALUES (%s, %s, %s)
+        """,
+        (user_id, hash_session_token(token), expires_at),
+    )
+    return token
+
+
+def api_path_requires_admin(path):
+    if path == "/api/settings" or path.startswith("/api/users"):
+        return True
+    if path == "/api/packeta/validate" or path == "/api/dpd/send":
+        return True
+    if request.method == "DELETE" and path.startswith("/api/datasets/"):
+        return True
+    if path.startswith("/api/datasets/") and path.endswith("/restore"):
+        return True
+    return False
+
+
+@app.before_request
+def enforce_api_auth():
+    path = request.path.rstrip("/") or "/"
+    if not path.startswith("/api/"):
         return None
 
-    provided = request.headers.get("X-Download-Token") or request.args.get("token")
-    if provided != expected:
-        return jsonify({"error": "Unauthorized"}), 401
+    public_paths = {"/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/me"}
+    if path in public_paths:
+        return None
+
+    if path == "/api/datasets/upload":
+        return None
+
+    if request.method == "GET" and valid_download_token():
+        return None
+
+    user = current_user()
+    if not user:
+        return jsonify({"error": "Je potřeba se přihlásit."}), 401
+
+    if api_path_requires_admin(path) and user.get("role") != "admin":
+        return jsonify({"error": "Tahle akce je dostupná jen pro admina."}), 403
 
     return None
+
+
+@app.route("/api/auth/me")
+def auth_me():
+    user = current_user()
+    return jsonify({"authenticated": bool(user), "user": user_to_api(user) if user else None})
+
+
+@app.route("/api/auth/login", methods=["POST"])
+def auth_login():
+    ensure_schema()
+    data = request.get_json(silent=True) or {}
+    username = normalize_username(data.get("username") or data.get("email"))
+    password = clean_text(data.get("password"))
+    if not username or not password:
+        return jsonify({"error": "Vyplň uživatelské jméno/e-mail a heslo."}), 400
+
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users WHERE username = %s", (username,))
+            user = cur.fetchone()
+            if not user or not user["active"] or not check_password_hash(user["password_hash"], password):
+                return jsonify({"error": "Nesprávné přihlašovací údaje."}), 401
+
+            token = create_user_session(cur, user["id"])
+            cur.execute("UPDATE users SET last_login_at = NOW(), updated_at = NOW() WHERE id = %s RETURNING *", (user["id"],))
+            user = cur.fetchone()
+
+    response = jsonify({"ok": True, "user": user_to_api(user)})
+    set_session_cookie(response, token)
+    return response
+
+
+@app.route("/api/auth/logout", methods=["POST"])
+def auth_logout():
+    token = request.cookies.get(SESSION_COOKIE)
+    if token:
+        ensure_schema()
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("DELETE FROM user_sessions WHERE token_hash = %s", (hash_session_token(token),))
+    response = jsonify({"ok": True})
+    clear_session_cookie(response)
+    return response
+
+
+@app.route("/api/auth/change-password", methods=["POST"])
+def auth_change_password():
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json(silent=True) or {}
+    current_password = clean_text(data.get("currentPassword"))
+    new_password = clean_text(data.get("newPassword"))
+    if len(new_password) < 4:
+        return jsonify({"error": "Nové heslo musí mít alespoň 4 znaky."}), 400
+
+    user = current_user()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users WHERE id = %s", (user["id"],))
+            fresh_user = cur.fetchone()
+            if not fresh_user or not check_password_hash(fresh_user["password_hash"], current_password):
+                return jsonify({"error": "Aktuální heslo nesedí."}), 400
+            cur.execute(
+                """
+                UPDATE users
+                SET password_hash = %s,
+                    must_change_password = FALSE,
+                    updated_at = NOW()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (generate_password_hash(new_password), user["id"]),
+            )
+            updated = cur.fetchone()
+
+    g.current_user = updated
+    return jsonify({"ok": True, "user": user_to_api(updated)})
+
+
+@app.route("/api/users")
+def list_users():
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM users ORDER BY active DESC, role, display_name, username")
+            users = cur.fetchall()
+    return jsonify({"users": [user_to_api(user) for user in users]})
+
+
+@app.route("/api/users", methods=["POST"])
+def create_user():
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json(silent=True) or {}
+    username = normalize_username(data.get("username") or data.get("email"))
+    display_name = clean_text(data.get("displayName") or username).strip()
+    password = clean_text(data.get("password"))
+    role = clean_text(data.get("role") or "employee").strip().lower()
+    if role not in {"admin", "employee"}:
+        return jsonify({"error": "Role musí být admin nebo employee."}), 400
+    if not username or not password:
+        return jsonify({"error": "Vyplň uživatele a heslo."}), 400
+    if len(password) < 4:
+        return jsonify({"error": "Heslo musí mít alespoň 4 znaky."}), 400
+
+    creator = current_user()
+    try:
+        with db_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    INSERT INTO users (
+                        username, display_name, password_hash, role, active,
+                        must_change_password, created_by
+                    )
+                    VALUES (%s, %s, %s, %s, TRUE, TRUE, %s)
+                    RETURNING *
+                    """,
+                    (username, display_name or username, generate_password_hash(password), role, creator["id"]),
+                )
+                user = cur.fetchone()
+    except psycopg2.IntegrityError:
+        return jsonify({"error": "Uživatel s tímto jménem/e-mailem už existuje."}), 409
+
+    return jsonify({"ok": True, "user": user_to_api(user)}), 201
+
+
+@app.route("/api/users/<int:user_id>", methods=["PATCH"])
+def update_user(user_id):
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json(silent=True) or {}
+    updates = []
+    params = []
+    if "displayName" in data:
+        updates.append("display_name = %s")
+        params.append(clean_text(data.get("displayName")).strip())
+    if "role" in data:
+        role = clean_text(data.get("role")).strip().lower()
+        if role not in {"admin", "employee"}:
+            return jsonify({"error": "Role musí být admin nebo employee."}), 400
+        updates.append("role = %s")
+        params.append(role)
+    if "active" in data:
+        if user_id == current_user()["id"] and not bool(data.get("active")):
+            return jsonify({"error": "Sám sebe raději nevypínej, to by byla administrátorská pastička."}), 400
+        updates.append("active = %s")
+        params.append(bool(data.get("active")))
+    if "mustChangePassword" in data:
+        updates.append("must_change_password = %s")
+        params.append(bool(data.get("mustChangePassword")))
+
+    if not updates:
+        return jsonify({"error": "Není co upravit."}), 400
+
+    params.append(user_id)
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"UPDATE users SET {', '.join(updates)}, updated_at = NOW() WHERE id = %s RETURNING *",
+                params,
+            )
+            user = cur.fetchone()
+            if user and "active" in data and not bool(data.get("active")):
+                cur.execute("DELETE FROM user_sessions WHERE user_id = %s", (user_id,))
+
+    if not user:
+        return jsonify({"error": "Uživatel nenalezen."}), 404
+    return jsonify({"ok": True, "user": user_to_api(user)})
+
+
+@app.route("/api/users/<int:user_id>/reset-password", methods=["POST"])
+def reset_user_password(user_id):
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json(silent=True) or {}
+    password = clean_text(data.get("password"))
+    if len(password) < 4:
+        return jsonify({"error": "Heslo musí mít alespoň 4 znaky."}), 400
+
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE users
+                SET password_hash = %s,
+                    must_change_password = TRUE,
+                    updated_at = NOW()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (generate_password_hash(password), user_id),
+            )
+            user = cur.fetchone()
+            if user:
+                cur.execute("DELETE FROM user_sessions WHERE user_id = %s", (user_id,))
+
+    if not user:
+        return jsonify({"error": "Uživatel nenalezen."}), 404
+    return jsonify({"ok": True, "user": user_to_api(user)})
 
 
 def local_now():
@@ -2808,7 +3258,7 @@ def delete_dataset(dataset_id):
                 RETURNING *
                 """,
                 (
-                    clean_text(data.get("deletedBy")) or "vba-or-admin",
+                    clean_text(data.get("deletedBy")) or (current_user() or {}).get("username") or "vba-or-admin",
                     clean_text(data.get("reason")),
                     dataset_id,
                 ),

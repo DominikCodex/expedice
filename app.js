@@ -40,7 +40,28 @@ const settingsState = {
   settings: null,
 };
 
+const authState = {
+  user: null,
+  appStarted: false,
+};
+
+const usersState = {
+  users: [],
+  loaded: false,
+};
+
 const els = {
+  appShell: document.getElementById("app-shell"),
+  authView: document.getElementById("auth-view"),
+  loginForm: document.getElementById("login-form"),
+  loginUsername: document.getElementById("login-username"),
+  loginPassword: document.getElementById("login-password"),
+  passwordChangeForm: document.getElementById("password-change-form"),
+  changeCurrentPassword: document.getElementById("change-current-password"),
+  changeNewPassword: document.getElementById("change-new-password"),
+  authMessage: document.getElementById("auth-message"),
+  authUserName: document.getElementById("auth-user-name"),
+  authLogout: document.getElementById("auth-logout"),
   eanInput: document.getElementById("ean-input"),
   manualSearch: document.getElementById("manual-search"),
   showZero: document.getElementById("show-zero"),
@@ -115,6 +136,14 @@ const els = {
   settingsSenderContact: document.getElementById("settings-sender-contact"),
   settingsSenderPhone: document.getElementById("settings-sender-phone"),
   settingsSenderEmail: document.getElementById("settings-sender-email"),
+  usersPanel: document.getElementById("users-admin-panel"),
+  usersRefresh: document.getElementById("users-refresh"),
+  usersList: document.getElementById("users-list"),
+  userCreateUsername: document.getElementById("user-create-username"),
+  userCreateDisplay: document.getElementById("user-create-display"),
+  userCreatePassword: document.getElementById("user-create-password"),
+  userCreateRole: document.getElementById("user-create-role"),
+  userCreateSubmit: document.getElementById("user-create-submit"),
 };
 
 function uid(prefix) {
@@ -253,16 +282,156 @@ async function fetchJson(path, options = {}) {
     : options.headers || {};
   const response = await fetch(path, { cache: "no-store", ...options, headers });
   if (!response.ok) {
-    let message = `API vratilo chybu ${response.status}`;
+    let message = `API vrátilo chybu ${response.status}`;
     try {
       const data = await response.json();
       message = data.error || message;
     } catch {
       // Keep fallback message.
     }
+    if (response.status === 401) {
+      showLogin("Přihlášení vypršelo nebo je potřeba se znovu přihlásit.");
+    }
     throw new Error(message);
   }
   return response.json();
+}
+
+function isAdmin() {
+  return authState.user?.role === "admin";
+}
+
+function setAuthMessage(text, type = "neutral") {
+  els.authMessage.className = `message ${type}`;
+  els.authMessage.textContent = text;
+}
+
+function showLogin(message = "Přihlas se prosím do expedičního systému.") {
+  authState.user = null;
+  els.appShell.classList.add("hidden");
+  els.authView.classList.remove("hidden");
+  els.loginForm.classList.remove("hidden");
+  els.passwordChangeForm.classList.add("hidden");
+  setAuthMessage(message, "neutral");
+  requestAnimationFrame(() => els.loginUsername.focus());
+}
+
+function showPasswordChange(user) {
+  authState.user = user;
+  els.appShell.classList.add("hidden");
+  els.authView.classList.remove("hidden");
+  els.loginForm.classList.add("hidden");
+  els.passwordChangeForm.classList.remove("hidden");
+  setAuthMessage("Tohle je první přihlášení nebo reset hesla. Nejdřív prosím nastav nové heslo.", "warning");
+  requestAnimationFrame(() => els.changeCurrentPassword.focus());
+}
+
+function applyRoleVisibility() {
+  const admin = isAdmin();
+  els.tabSettings.classList.toggle("hidden", !admin);
+  els.sortingDelete.classList.toggle("hidden", !admin);
+  els.completionDelete.classList.toggle("hidden", !admin);
+  els.packetaValidate.classList.toggle("hidden", !admin);
+  els.dpdSend.classList.toggle("hidden", !admin);
+  if (!admin && !els.settingsView.classList.contains("hidden")) {
+    switchView("sorting");
+  }
+}
+
+function startAppForUser(user) {
+  authState.user = user;
+  els.authView.classList.add("hidden");
+  els.appShell.classList.remove("hidden");
+  els.authUserName.textContent = `${user.displayName || user.username} · ${user.role === "admin" ? "admin" : "zaměstnanec"}`;
+  applyRoleVisibility();
+
+  if (!authState.appStarted) {
+    loadState();
+    renderAll();
+    renderSortingOptions();
+    renderCompletion();
+    setMessage(
+      `Načteno ${state.items.length} řádků, ${Object.keys(state.eanMap).length} EAN kódů, objednávek: ${
+        new Set(state.items.map((item) => item.orderNumber).filter(Boolean)).size
+      }.`,
+      "neutral"
+    );
+    authState.appStarted = true;
+  }
+
+  requestAnimationFrame(() => els.eanInput.focus());
+  loadExpeditionDays();
+}
+
+async function checkAuth() {
+  try {
+    const response = await fetch("/api/auth/me", { cache: "no-store" });
+    if (!response.ok) throw new Error("Auth check failed");
+    const data = await response.json();
+    if (!data.authenticated || !data.user) {
+      showLogin();
+      return;
+    }
+    if (data.user.mustChangePassword) {
+      showPasswordChange(data.user);
+      return;
+    }
+    startAppForUser(data.user);
+  } catch {
+    showLogin("Přihlášení se nepodařilo ověřit. Zkus to prosím znovu.");
+  }
+}
+
+async function login() {
+  const username = els.loginUsername.value.trim();
+  const password = els.loginPassword.value;
+  if (!username || !password) {
+    setAuthMessage("Vyplň uživatele i heslo.", "warning");
+    return;
+  }
+  try {
+    const data = await fetchJson("/api/auth/login", {
+      method: "POST",
+      body: JSON.stringify({ username, password }),
+    });
+    els.loginPassword.value = "";
+    if (data.user?.mustChangePassword) {
+      showPasswordChange(data.user);
+      return;
+    }
+    startAppForUser(data.user);
+  } catch (error) {
+    setAuthMessage(error.message, "error");
+  }
+}
+
+async function logout() {
+  try {
+    await fetchJson("/api/auth/logout", { method: "POST" });
+  } catch {
+    // Logout should be forgiving even if the session is already gone.
+  }
+  showLogin("Byl jsi odhlášen.");
+}
+
+async function changePassword() {
+  const currentPassword = els.changeCurrentPassword.value;
+  const newPassword = els.changeNewPassword.value;
+  if (!currentPassword || !newPassword) {
+    setAuthMessage("Vyplň aktuální i nové heslo.", "warning");
+    return;
+  }
+  try {
+    const data = await fetchJson("/api/auth/change-password", {
+      method: "POST",
+      body: JSON.stringify({ currentPassword, newPassword }),
+    });
+    els.changeCurrentPassword.value = "";
+    els.changeNewPassword.value = "";
+    startAppForUser(data.user);
+  } catch (error) {
+    setAuthMessage(error.message, "error");
+  }
 }
 
 function datasetLabel(dataset) {
@@ -303,6 +472,10 @@ function includeInactiveQuery() {
 }
 
 function switchView(view) {
+  if (view === "settings" && !isAdmin()) {
+    setMessage("Nastavení je dostupné jen adminovi.", "warning");
+    view = "sorting";
+  }
   const completion = view === "completion";
   const settings = view === "settings";
   els.sortingView.classList.toggle("hidden", completion || settings);
@@ -318,6 +491,10 @@ function switchView(view) {
 
   if (settings && !settingsState.loaded) {
     loadSettings();
+  }
+
+  if (settings && isAdmin() && !usersState.loaded) {
+    loadUsers();
   }
 
   if (!completion && !settings) {
@@ -1339,6 +1516,118 @@ function renderCompletion() {
   });
 }
 
+function renderUsers() {
+  if (!els.usersList) return;
+  if (!usersState.users.length) {
+    els.usersList.innerHTML = `<div class="empty">Zatím tu není žádný uživatel.</div>`;
+    return;
+  }
+
+  els.usersList.innerHTML = `
+    <table class="users-table">
+      <thead>
+        <tr>
+          <th>Uživatel</th>
+          <th>Role</th>
+          <th>Stav</th>
+          <th>Poslední přihlášení</th>
+          <th>Akce</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${usersState.users
+          .map((user) => {
+            const self = authState.user?.id === user.id;
+            return `
+              <tr class="${user.active ? "" : "inactive"}">
+                <td>
+                  <strong>${escapeHtml(user.displayName || user.username)}</strong>
+                  <small>${escapeHtml(user.username)}</small>
+                  ${user.mustChangePassword ? `<span class="status-chip warning">musí změnit heslo</span>` : ""}
+                </td>
+                <td>
+                  <select data-action="change-user-role" data-user-id="${escapeHtml(user.id)}" ${self ? "disabled" : ""}>
+                    <option value="employee" ${user.role === "employee" ? "selected" : ""}>Zaměstnanec</option>
+                    <option value="admin" ${user.role === "admin" ? "selected" : ""}>Admin</option>
+                  </select>
+                </td>
+                <td><span class="status-chip ${user.active ? "ok" : "danger"}">${user.active ? "aktivní" : "vypnutý"}</span></td>
+                <td>${escapeHtml(user.lastLoginAt ? formatTime(user.lastLoginAt) : "zatím nikdy")}</td>
+                <td>
+                  <div class="user-actions">
+                    <button type="button" class="secondary" data-action="reset-user-password" data-user-id="${escapeHtml(user.id)}">Reset hesla</button>
+                    <button type="button" class="${user.active ? "danger" : "secondary"}" data-action="toggle-user-active" data-user-id="${escapeHtml(user.id)}" data-active="${user.active ? "0" : "1"}" ${self ? "disabled" : ""}>${user.active ? "Vypnout" : "Zapnout"}</button>
+                  </div>
+                </td>
+              </tr>
+            `;
+          })
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+async function loadUsers() {
+  if (!isAdmin()) return;
+  try {
+    const data = await fetchJson("/api/users");
+    usersState.users = data.users || [];
+    usersState.loaded = true;
+    renderUsers();
+  } catch (error) {
+    usersState.loaded = true;
+    els.usersList.innerHTML = `<div class="empty">Uživatele se nepodařilo načíst: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function createUserFromForm() {
+  const username = els.userCreateUsername.value.trim();
+  const displayName = els.userCreateDisplay.value.trim();
+  const password = els.userCreatePassword.value;
+  const role = els.userCreateRole.value || "employee";
+  if (!username || !password) {
+    setSettingsMessage("Vyplň e-mail/uživatele a první heslo.", "warning");
+    return;
+  }
+  try {
+    await fetchJson("/api/users", {
+      method: "POST",
+      body: JSON.stringify({ username, displayName, password, role }),
+    });
+    els.userCreateUsername.value = "";
+    els.userCreateDisplay.value = "";
+    els.userCreatePassword.value = "";
+    setSettingsMessage("Uživatel byl vytvořený. Při prvním přihlášení si změní heslo.", "success");
+    await loadUsers();
+  } catch (error) {
+    setSettingsMessage(`Uživatele se nepodařilo vytvořit: ${error.message}`, "error");
+  }
+}
+
+async function patchUser(userId, payload) {
+  await fetchJson(`/api/users/${userId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload),
+  });
+  await loadUsers();
+}
+
+async function resetUserPassword(userId) {
+  const password = prompt("Zadej nové dočasné heslo pro zaměstnance:");
+  if (!password) return;
+  try {
+    await fetchJson(`/api/users/${userId}/reset-password`, {
+      method: "POST",
+      body: JSON.stringify({ password }),
+    });
+    setSettingsMessage("Heslo bylo resetované a uživatel ho po přihlášení změní.", "success");
+    await loadUsers();
+  } catch (error) {
+    setSettingsMessage(`Reset hesla selhal: ${error.message}`, "error");
+  }
+}
+
 function showScanResult(entry) {
   if (!entry) return;
   els.scanResult.classList.remove("hidden");
@@ -1760,6 +2049,18 @@ function resetFromSeed() {
   );
 }
 
+els.loginForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  login();
+});
+
+els.passwordChangeForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  changePassword();
+});
+
+els.authLogout.addEventListener("click", logout);
+
 els.eanInput.addEventListener("input", () => {
   const digits = els.eanInput.value.replace(/\D/g, "");
   if (digits !== els.eanInput.value) {
@@ -1852,6 +2153,28 @@ els.tabSorting.addEventListener("click", () => switchView("sorting"));
 els.tabCompletion.addEventListener("click", () => switchView("completion"));
 els.tabSettings.addEventListener("click", () => switchView("settings"));
 els.settingsSave.addEventListener("click", saveSettings);
+els.usersRefresh.addEventListener("click", loadUsers);
+els.userCreateSubmit.addEventListener("click", createUserFromForm);
+els.usersList.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-action]");
+  if (!button) return;
+  if (button.dataset.action === "reset-user-password") {
+    resetUserPassword(button.dataset.userId);
+  }
+  if (button.dataset.action === "toggle-user-active") {
+    patchUser(button.dataset.userId, { active: button.dataset.active === "1" }).catch((error) => {
+      setSettingsMessage(`Změna stavu uživatele selhala: ${error.message}`, "error");
+    });
+  }
+});
+els.usersList.addEventListener("change", (event) => {
+  const select = event.target.closest("select[data-action='change-user-role']");
+  if (!select) return;
+  patchUser(select.dataset.userId, { role: select.value }).catch((error) => {
+    setSettingsMessage(`Změna role selhala: ${error.message}`, "error");
+    loadUsers();
+  });
+});
 els.sortingRefresh.addEventListener("click", () => {
   loadSortingDataset(els.sortingDataset.value);
 });
@@ -1893,30 +2216,9 @@ els.completionBody.addEventListener("click", (event) => {
     validateCompletionAddress(button.dataset.rowId);
   }
 });
-els.completionBody.addEventListener("click", (event) => {
-  const button = event.target.closest("button[data-action]");
-  if (!button) return;
-  if (button.dataset.action === "save-completion-row") {
-    saveCompletionRow(button.dataset.rowId);
-  }
-  if (button.dataset.action === "validate-address") {
-    validateCompletionAddress(button.dataset.rowId);
-  }
-});
 els.packetaDryRun.addEventListener("click", runPacketaDryRun);
 els.packetaValidate.addEventListener("click", runPacketaValidation);
 els.dpdDryRun.addEventListener("click", runDpdDryRun);
 els.dpdSend.addEventListener("click", runDpdSend);
 
-loadState();
-renderAll();
-renderSortingOptions();
-renderCompletion();
-setMessage(
-  `Načteno ${state.items.length} řádků, ${Object.keys(state.eanMap).length} EAN kódů, objednávek: ${
-    new Set(state.items.map((item) => item.orderNumber).filter(Boolean)).size
-  }.`,
-  "neutral"
-);
-requestAnimationFrame(() => els.eanInput.focus());
-loadExpeditionDays();
+checkAuth();

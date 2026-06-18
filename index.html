@@ -6,14 +6,58 @@
     <title>Roztřídění zboží</title>
     <link rel="stylesheet" href="styles.css" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=settings-page-20260618"></script>
+    <script defer src="app.js?v=auth-users-20260618"></script>
   </head>
   <body>
-    <main class="shell">
+    <section id="auth-view" class="auth-view">
+      <div class="auth-card">
+        <div class="auth-brand">
+          <p class="eyebrow">Expedice</p>
+          <h1>Přihlášení do systému</h1>
+          <p>První admin: d.najman@centrum.cz / 1234, po přihlášení se heslo povinně změní.</p>
+        </div>
+
+        <form id="login-form" class="auth-form">
+          <label class="field">
+            <span>Uživatel / e-mail</span>
+            <input id="login-username" autocomplete="username" />
+          </label>
+          <label class="field">
+            <span>Heslo</span>
+            <input id="login-password" type="password" autocomplete="current-password" />
+          </label>
+          <button id="login-submit" type="submit">Přihlásit</button>
+        </form>
+
+        <form id="password-change-form" class="auth-form hidden">
+          <div>
+            <p class="eyebrow">První přihlášení</p>
+            <h2>Změna hesla je povinná</h2>
+          </div>
+          <label class="field">
+            <span>Aktuální heslo</span>
+            <input id="change-current-password" type="password" autocomplete="current-password" />
+          </label>
+          <label class="field">
+            <span>Nové heslo</span>
+            <input id="change-new-password" type="password" autocomplete="new-password" />
+          </label>
+          <button id="change-password-submit" type="submit">Uložit nové heslo</button>
+        </form>
+
+        <section id="auth-message" class="message neutral" aria-live="polite"></section>
+      </div>
+    </section>
+
+    <main id="app-shell" class="shell hidden">
       <header class="topbar">
         <div>
           <p class="eyebrow">Roztřídění zboží</p>
           <h1>Roztřídění zboží (Původně EXCEL)</h1>
+        </div>
+        <div class="user-panel" aria-label="Uživatel">
+          <span id="auth-user-name">Nepřihlášen</span>
+          <button id="auth-logout" type="button" class="secondary">Odhlásit</button>
         </div>
         <div class="metrics" aria-label="Souhrn">
           <div>
@@ -350,6 +394,39 @@
                   </label>
                 </fieldset>
               </div>
+
+              <section id="users-admin-panel" class="settings-user-panel">
+                <div class="section-head">
+                  <div>
+                    <p class="eyebrow">Admin</p>
+                    <h2>Uživatelé a zaměstnanci</h2>
+                  </div>
+                  <button id="users-refresh" type="button" class="secondary">Obnovit uživatele</button>
+                </div>
+                <div class="user-create-grid">
+                  <label class="field">
+                    <span>E-mail / uživatel</span>
+                    <input id="user-create-username" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>Zobrazované jméno</span>
+                    <input id="user-create-display" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>První heslo</span>
+                    <input id="user-create-password" type="password" autocomplete="new-password" />
+                  </label>
+                  <label class="field">
+                    <span>Role</span>
+                    <select id="user-create-role">
+                      <option value="employee">Zaměstnanec</option>
+                      <option value="admin">Admin</option>
+                    </select>
+                  </label>
+                  <button id="user-create-submit" type="button">Přidat uživatele</button>
+                </div>
+                <div id="users-list" class="users-list"></div>
+              </section>
             </section>
           </section>
         </section>

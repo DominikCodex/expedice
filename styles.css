@@ -15,6 +15,7 @@
   --danger-soft: #fae9e9;
   --ok: #1f7a5b;
   --shadow: 0 8px 22px rgba(31, 45, 39, 0.08);
+  --auth-gradient: linear-gradient(135deg, #f8fbf8 0%, #e3ede8 46%, #f4eadf 100%);
 }
 
 * {
@@ -94,7 +95,7 @@ button:disabled {
 
 .topbar {
   display: grid;
-  grid-template-columns: minmax(280px, 1fr) auto;
+  grid-template-columns: minmax(280px, 1fr) auto auto;
   gap: 16px;
   align-items: center;
   padding: 16px;
@@ -145,6 +146,60 @@ h2 {
   display: block;
   font-size: 23px;
   font-weight: 800;
+}
+
+.auth-view {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px;
+  background: var(--auth-gradient);
+}
+
+.auth-card {
+  display: grid;
+  gap: 16px;
+  width: min(520px, 100%);
+  padding: 24px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  box-shadow: 0 18px 48px rgba(31, 45, 39, 0.18);
+}
+
+.auth-brand p:last-child {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.auth-form {
+  display: grid;
+  gap: 12px;
+}
+
+.user-panel {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: 230px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.user-panel span {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.user-panel button {
+  min-height: 32px;
+  padding: 5px 8px;
 }
 
 .metrics small {
@@ -875,6 +930,58 @@ select:focus {
   justify-content: flex-start;
 }
 
+.settings-user-panel {
+  margin: 12px;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.user-create-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(180px, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+}
+
+.users-list {
+  padding: 0 12px 12px;
+  overflow-x: auto;
+}
+
+.users-table {
+  min-width: 980px;
+}
+
+.users-table td strong,
+.users-table td small {
+  display: block;
+}
+
+.users-table td small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.users-table tr.inactive {
+  color: #747c78;
+  background: #f2f3f1;
+}
+
+.user-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.user-actions button {
+  min-height: 32px;
+  padding: 5px 8px;
+  font-size: 12px;
+}
+
 .completion-table td strong,
 .completion-table td small {
   display: block;
@@ -1241,7 +1348,8 @@ tbody tr.done {
 @media (max-width: 1120px) {
   .topbar,
   .workspace,
-  .expedition-layout {
+  .expedition-layout,
+  .user-create-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1301,6 +1409,7 @@ tbody tr.done {
   }
 
   .metrics,
+  .user-panel,
   .control-strip {
     grid-template-columns: 1fr;
   }
