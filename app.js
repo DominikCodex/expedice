@@ -76,6 +76,8 @@ const els = {
   completionDelete: document.getElementById("completion-delete"),
   packetaDryRun: document.getElementById("packeta-dry-run"),
   packetaValidate: document.getElementById("packeta-validate"),
+  dpdDryRun: document.getElementById("dpd-dry-run"),
+  dpdSend: document.getElementById("dpd-send"),
   packetaDryRunResult: document.getElementById("packeta-dry-run-result"),
   completionMessage: document.getElementById("completion-message"),
   completionSummary: document.getElementById("completion-summary"),
@@ -530,6 +532,8 @@ function renderCompletionOptions() {
     els.completionDelete.disabled = true;
     els.packetaDryRun.disabled = true;
     els.packetaValidate.disabled = true;
+    els.dpdDryRun.disabled = true;
+    els.dpdSend.disabled = true;
     return;
   }
 
@@ -546,6 +550,8 @@ function renderCompletionOptions() {
   els.completionDelete.disabled = !completionState.dataset || completionState.dataset.status !== "active";
   els.packetaDryRun.disabled = !completionState.dataset;
   els.packetaValidate.disabled = !completionState.dataset;
+  els.dpdDryRun.disabled = !completionState.dataset;
+  els.dpdSend.disabled = !completionState.dataset;
 }
 
 async function loadCompletionDatasets() {
@@ -795,6 +801,162 @@ async function runPacketaValidation() {
     setCompletionMessage(`Test API Zásilkovny se nepodařil: ${error.message}`, "error");
   } finally {
     els.packetaValidate.disabled = !completionState.dataset;
+  }
+}
+
+function renderDpdResult(data, title = "DPD dry run") {
+  const shipments = data.shipments || [];
+  const skipped = data.skipped || [];
+  const result = data.result || null;
+
+  const shipmentCards = shipments
+    .map((shipment, index) => {
+      const warnings = shipment.warnings?.length
+        ? `<div class="warning-list">${shipment.warnings
+            .map((warning) => `<span>${escapeHtml(warning)}</span>`)
+            .join("")}</div>`
+        : "";
+      return `
+        <details class="dry-run-item" ${index === 0 ? "open" : ""}>
+          <summary>
+            <strong>${escapeHtml(shipment.orderNumber || "-")}</strong>
+            <span>${escapeHtml(shipment.customer || "-")}</span>
+            <small>${escapeHtml(shipment.serviceLabel || shipment.service || "")}</small>
+          </summary>
+          ${warnings}
+          <pre>${escapeHtml(JSON.stringify(shipment.payload || shipment, null, 2))}</pre>
+        </details>
+      `;
+    })
+    .join("");
+
+  const skippedHtml = skipped.length
+    ? `
+      <details class="dry-run-item dry-run-skipped">
+        <summary>
+          <strong>Přeskočené řádky</strong>
+          <span>${escapeHtml(skipped.length)} ks</span>
+        </summary>
+        <div class="skipped-list">
+          ${skipped
+            .slice(0, 80)
+            .map(
+              (row) => `
+                <div>
+                  <strong>${escapeHtml(row.orderNumber || "-")}</strong>
+                  <span>${escapeHtml(row.customer || "")}</span>
+                  <small>${escapeHtml(row.reason || "")}</small>
+                </div>
+              `
+            )
+            .join("")}
+        </div>
+      </details>
+    `
+    : "";
+
+  const resultHtml = result
+    ? `
+      <details class="dry-run-item ${result.ok ? "validation-item ok" : "validation-item danger"}" open>
+        <summary>
+          <strong>Odpověď DPD konektoru</strong>
+          <span>${escapeHtml(result.ok ? "OK" : "Chyba")}</span>
+          <small>HTTP ${escapeHtml(result.httpStatus || "-")}</small>
+        </summary>
+        ${result.error ? `<div class="warning-list"><span>${escapeHtml(result.error)}</span></div>` : ""}
+        <pre>${escapeHtml(result.responseText || "Bez textové odpovědi.")}</pre>
+      </details>
+    `
+    : "";
+
+  els.packetaDryRunResult.classList.remove("hidden");
+  els.packetaDryRunResult.innerHTML = `
+    <div class="section-head compact">
+      <div>
+        <p class="eyebrow">DPD</p>
+        <h2>${escapeHtml(title)}</h2>
+      </div>
+      <div class="dry-run-counts">
+        <span>${escapeHtml(data.shipmentsCount || shipments.length)} zásilek</span>
+        <span>${escapeHtml(data.skippedCount || skipped.length)} přeskočeno</span>
+        ${data.notSentCount ? `<span>${escapeHtml(data.notSentCount)} neodesláno</span>` : ""}
+      </div>
+    </div>
+    <div class="dry-run-note">
+      DPD větev zpracovává pouze řádky označené jako DPD. Packeta a e-mailové poukazy se do tohoto výstupu neposílají.
+    </div>
+    <div class="dry-run-list">
+      ${resultHtml}
+      ${shipmentCards || `<div class="empty">Nenašel jsem žádnou DPD zásilku k vytvoření.</div>`}
+      ${skippedHtml}
+    </div>
+  `;
+}
+
+async function runDpdDryRun() {
+  if (!completionState.dataset?.id) {
+    setCompletionMessage("Nejdřív načti kompletaci pro expediční den.", "warning");
+    return;
+  }
+
+  els.dpdDryRun.disabled = true;
+  hidePacketaDryRunResult();
+  setCompletionMessage("Skládám dry run DPD...", "neutral");
+
+  try {
+    const data = await fetchJson(
+      `/api/dpd/dry-run?datasetId=${encodeURIComponent(completionState.dataset.id)}&limit=50`
+    );
+    renderDpdResult(data, "DPD dry run");
+    setCompletionMessage(
+      `DPD dry run hotový: ${data.shipmentsCount || 0} zásilek, přeskočeno ${data.skippedCount || 0}.`,
+      "success"
+    );
+  } catch (error) {
+    setCompletionMessage(`DPD dry run se nepodařil: ${error.message}`, "error");
+  } finally {
+    els.dpdDryRun.disabled = !completionState.dataset;
+  }
+}
+
+async function runDpdSend() {
+  if (!completionState.dataset?.id) {
+    setCompletionMessage("Nejdřív načti kompletaci pro expediční den.", "warning");
+    return;
+  }
+
+  if (
+    !confirm(
+      "Spustit DPD API konektor?\n\nServer odešle DPD řádky jen pokud je na Railway nastavené DPD_API_ENABLED=1 a DPD_API_URL."
+    )
+  ) {
+    return;
+  }
+
+  els.dpdSend.disabled = true;
+  hidePacketaDryRunResult();
+  setCompletionMessage("Spouštím DPD API konektor...", "neutral");
+
+  try {
+    const data = await fetchJson("/api/dpd/send", {
+      method: "POST",
+      body: JSON.stringify({
+        datasetId: completionState.dataset.id,
+        limit: 30,
+        mode: "test",
+      }),
+    });
+    renderDpdResult(data, "DPD API konektor");
+    setCompletionMessage(
+      data.ok
+        ? `DPD API hotovo: odesláno ${data.sentCount || 0} zásilek.`
+        : `DPD API zatím neodeslalo data: ${data.result?.error || "zkontroluj nastavení"}.`,
+      data.ok ? "success" : "warning"
+    );
+  } catch (error) {
+    setCompletionMessage(`DPD API se nepodařilo spustit: ${error.message}`, "error");
+  } finally {
+    els.dpdSend.disabled = !completionState.dataset;
   }
 }
 
@@ -1600,6 +1762,8 @@ els.completionBody.addEventListener("click", (event) => {
 });
 els.packetaDryRun.addEventListener("click", runPacketaDryRun);
 els.packetaValidate.addEventListener("click", runPacketaValidation);
+els.dpdDryRun.addEventListener("click", runDpdDryRun);
+els.dpdSend.addEventListener("click", runDpdSend);
 
 loadState();
 renderAll();

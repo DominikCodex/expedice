@@ -1705,6 +1705,176 @@ def packeta_post_validation_xml(validation_xml):
         }
 
 
+def dpd_api_url():
+    return os.environ.get("DPD_API_URL", "")
+
+
+def dpd_api_token():
+    return os.environ.get("DPD_API_TOKEN") or os.environ.get("DPD_API_KEY") or ""
+
+
+def dpd_country(row):
+    shop_code = clean_text(row.get("shopCode") or row.get("shop_code")).lower()
+    if shop_code.endswith("_sk") or delivery_info_from_row(row).get("isSk"):
+        return "SK"
+    return "CZ"
+
+
+def dpd_recipient_name(row):
+    return " ".join(part for part in [row.get("firstName"), row.get("lastName")] if part).strip()
+
+
+def dpd_address_text(row):
+    return clean_text(row.get("streetWithNumber")) or " ".join(
+        part for part in [clean_text(row.get("street")), clean_text(row.get("houseNumber"))] if part
+    )
+
+
+def dpd_skip_reason(row):
+    delivery = delivery_info_from_row(row)
+    if not delivery["isDpd"]:
+        return "radek nepatri do DPD"
+    if not clean_text(row.get("orderNumber")):
+        return "chybi cislo objednavky"
+    if not dpd_recipient_name(row):
+        return "chybi jmeno zakaznika"
+    if not clean_text(row.get("phone")) and not clean_text(row.get("email")):
+        return "chybi telefon nebo e-mail"
+
+    if delivery["service"] == "dpd_courier":
+        if not dpd_address_text(row):
+            return "chybi adresa"
+        if not clean_text(row.get("city")):
+            return "chybi mesto"
+        if not clean_text(row.get("zipCode")):
+            return "chybi PSC"
+        if row.get("addressValidationStatus") not in ("verified", ""):
+            return "adresa neni overena"
+
+    if delivery["service"] == "dpd_pickup" and not clean_text(row.get("packetaId")):
+        return "chybi ID vydejniho mista/boxu DPD"
+
+    return ""
+
+
+def dpd_payload(row):
+    delivery = delivery_info_from_row(row)
+    shipment = {
+        "reference": clean_text(row.get("orderNumber")),
+        "orderId": clean_text(row.get("orderId")),
+        "service": delivery["service"],
+        "serviceLabel": delivery["serviceLabel"],
+        "recipient": {
+            "name": dpd_recipient_name(row),
+            "phone": clean_text(row.get("phone")),
+            "email": clean_text(row.get("email")),
+        },
+        "address": {
+            "streetWithNumber": dpd_address_text(row),
+            "street": clean_text(row.get("street")),
+            "houseNumber": clean_text(row.get("houseNumber")),
+            "city": clean_text(row.get("city")),
+            "zipCode": clean_text(row.get("zipCode")),
+            "country": dpd_country(row),
+            "validated": row.get("addressValidationStatus") == "verified",
+        },
+        "pickupPointId": clean_text(row.get("packetaId")) if delivery["service"] == "dpd_pickup" else "",
+        "cashOnDelivery": {
+            "amount": clean_text(row.get("codAmount")),
+            "currency": "EUR" if dpd_country(row) == "SK" else "CZK",
+        },
+        "parcel": {
+            "weight": clean_text(row.get("weight")) or "1",
+            "pieces": int_from_text(row.get("quantity")) or 1,
+        },
+        "note": clean_text(row.get("note")),
+        "source": {
+            "rowNumber": row.get("rowNumber"),
+            "shippingMethod": clean_text(row.get("shippingMethod")),
+            "datasetRowId": row.get("id"),
+        },
+    }
+    warnings = []
+    if not shipment["address"]["validated"] and delivery["service"] == "dpd_courier":
+        warnings.append("Adresa neni oznacena jako overena.")
+    if not shipment["cashOnDelivery"]["amount"]:
+        warnings.append("Bez dobirky.")
+    return {
+        "rowNumber": row.get("rowNumber"),
+        "orderNumber": row.get("orderNumber"),
+        "customer": dpd_recipient_name(row),
+        "shippingMethod": row.get("shippingMethod"),
+        "service": delivery["service"],
+        "serviceLabel": delivery["serviceLabel"],
+        "warnings": warnings,
+        "payload": shipment,
+    }
+
+
+def dpd_request_headers():
+    headers = {"Content-Type": "application/json", "Accept": "application/json"}
+    token = dpd_api_token()
+    if token:
+        scheme = os.environ.get("DPD_API_AUTH_SCHEME") or "Bearer"
+        headers["Authorization"] = f"{scheme} {token}".strip()
+    extra_header = os.environ.get("DPD_API_HEADER_NAME", "")
+    extra_value = os.environ.get("DPD_API_HEADER_VALUE", "")
+    if extra_header and extra_value:
+        headers[extra_header] = extra_value
+    return headers
+
+
+def dpd_post_payload(payload):
+    if os.environ.get("DPD_API_ENABLED") != "1":
+        return {
+            "httpStatus": 0,
+            "ok": False,
+            "responseText": "",
+            "error": "DPD_API_ENABLED neni nastaveno na 1",
+        }
+    if not dpd_api_url():
+        return {
+            "httpStatus": 0,
+            "ok": False,
+            "responseText": "",
+            "error": "DPD_API_URL neni nastavene",
+        }
+
+    timeout = int_from_text(os.environ.get("DPD_API_TIMEOUT")) or 25
+    request_data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    dpd_request = urllib.request.Request(
+        dpd_api_url(),
+        data=request_data,
+        headers=dpd_request_headers(),
+        method=os.environ.get("DPD_API_METHOD") or "POST",
+    )
+
+    try:
+        with urllib.request.urlopen(dpd_request, timeout=timeout) as response:
+            response_text = response.read().decode("utf-8", "replace")
+            return {
+                "httpStatus": response.getcode(),
+                "ok": 200 <= response.getcode() < 300,
+                "responseText": response_text,
+                "error": "",
+            }
+    except urllib.error.HTTPError as exc:
+        response_text = exc.read().decode("utf-8", "replace")
+        return {
+            "httpStatus": exc.code,
+            "ok": False,
+            "responseText": response_text,
+            "error": clean_text(exc.reason) or "DPD HTTP error",
+        }
+    except urllib.error.URLError as exc:
+        return {
+            "httpStatus": 0,
+            "ok": False,
+            "responseText": "",
+            "error": clean_text(getattr(exc, "reason", exc)),
+        }
+
+
 def mapy_api_key():
     return os.environ.get("MAPY_API_KEY") or os.environ.get("MAPY_API_TOKEN") or ""
 
@@ -2027,6 +2197,161 @@ def packeta_validate():
             "skippedCount": len(skipped),
             "notValidatedCount": max(0, len(packets) - len(results)),
             "results": results,
+            "skipped": skipped,
+        }
+    )
+
+
+@app.route("/api/dpd/dry-run")
+def dpd_dry_run():
+    auth_error = require_download_token_if_configured()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    dataset_id = request.args.get("datasetId") or request.args.get("id")
+    dataset_date = request.args.get("date")
+    limit = int_from_text(request.args.get("limit"))
+
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            if dataset_id:
+                cur.execute(
+                    "SELECT * FROM datasets WHERE id = %s AND dataset_kind = 'completion'",
+                    (dataset_id,),
+                )
+            else:
+                filters = ["status = 'active'", "dataset_kind = 'completion'"]
+                params = []
+                if dataset_date:
+                    filters.append("dataset_date = %s")
+                    params.append(dataset_date)
+                where = " AND ".join(filters)
+                cur.execute(
+                    f"""
+                    SELECT * FROM datasets
+                    WHERE {where}
+                    ORDER BY uploaded_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    params,
+                )
+            dataset = cur.fetchone()
+            if not dataset:
+                return jsonify({"error": "Completion dataset not found"}), 404
+
+            cur.execute(
+                "SELECT * FROM completion_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
+                (dataset["id"],),
+            )
+            rows = [completion_row_to_api(row) for row in cur.fetchall()]
+
+    shipments = []
+    skipped = []
+    for row in rows:
+        reason = dpd_skip_reason(row)
+        if reason:
+            skipped.append(
+                {
+                    "rowNumber": row.get("rowNumber"),
+                    "orderNumber": row.get("orderNumber"),
+                    "customer": dpd_recipient_name(row),
+                    "shippingMethod": row.get("shippingMethod"),
+                    "carrier": row.get("deliveryCarrierLabel"),
+                    "reason": reason,
+                }
+            )
+            continue
+        shipments.append(dpd_payload(row))
+
+    visible_shipments = shipments[:limit] if limit > 0 else shipments
+    return jsonify(
+        {
+            "ok": True,
+            "dryRun": True,
+            "carrier": "dpd",
+            "endpointConfigured": bool(dpd_api_url()),
+            "sendEnabled": os.environ.get("DPD_API_ENABLED") == "1",
+            "dataset": dataset_summary(dataset),
+            "rowsCount": len(rows),
+            "shipmentsCount": len(shipments),
+            "skippedCount": len(skipped),
+            "truncatedCount": max(0, len(shipments) - len(visible_shipments)),
+            "shipments": visible_shipments,
+            "skipped": skipped,
+        }
+    )
+
+
+@app.route("/api/dpd/send", methods=["POST"])
+def dpd_send():
+    auth_error = require_upload_token()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    data = request.get_json(silent=True) or {}
+    dataset_id = data.get("datasetId") or request.args.get("datasetId") or request.args.get("id")
+    limit = int_from_text(data.get("limit") or request.args.get("limit")) or 30
+    if not dataset_id:
+        return jsonify({"error": "datasetId is required"}), 400
+
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM datasets WHERE id = %s AND dataset_kind = 'completion'",
+                (dataset_id,),
+            )
+            dataset = cur.fetchone()
+            if not dataset:
+                return jsonify({"error": "Completion dataset not found"}), 404
+
+            cur.execute(
+                "SELECT * FROM completion_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
+                (dataset["id"],),
+            )
+            rows = [completion_row_to_api(row) for row in cur.fetchall()]
+
+    shipments = []
+    skipped = []
+    for row in rows:
+        reason = dpd_skip_reason(row)
+        if reason:
+            skipped.append(
+                {
+                    "rowNumber": row.get("rowNumber"),
+                    "orderNumber": row.get("orderNumber"),
+                    "customer": dpd_recipient_name(row),
+                    "shippingMethod": row.get("shippingMethod"),
+                    "carrier": row.get("deliveryCarrierLabel"),
+                    "reason": reason,
+                }
+            )
+            continue
+        shipments.append(dpd_payload(row))
+
+    selected = shipments[:limit]
+    api_payload = {
+        "mode": data.get("mode") or os.environ.get("DPD_API_MODE") or "test",
+        "source": "expedice-railway",
+        "dataset": dataset_summary(dataset),
+        "shipments": [item["payload"] for item in selected],
+    }
+    api_result = dpd_post_payload(api_payload)
+
+    return jsonify(
+        {
+            "ok": api_result["ok"],
+            "carrier": "dpd",
+            "endpointConfigured": bool(dpd_api_url()),
+            "sendEnabled": os.environ.get("DPD_API_ENABLED") == "1",
+            "dataset": dataset_summary(dataset),
+            "shipmentsCount": len(shipments),
+            "sentCount": len(selected) if api_result["ok"] else 0,
+            "notSentCount": max(0, len(shipments) - len(selected)),
+            "skippedCount": len(skipped),
+            "result": api_result,
+            "shipments": selected,
             "skipped": skipped,
         }
     )
