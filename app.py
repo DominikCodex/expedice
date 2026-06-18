@@ -2469,6 +2469,19 @@ def packeta_validation_xml(request_xml, password):
     return xml
 
 
+def packeta_create_xml(request_xml, password):
+    return request_xml.replace("DRY_RUN_PASSWORD_OMITTED", packeta_text(password), 1)
+
+
+def xml_tag_text(response_text, tag_name):
+    text = clean_text(response_text)
+    start = text.find(f"<{tag_name}>")
+    end = text.find(f"</{tag_name}>", start + len(tag_name) + 2)
+    if start < 0 or end < 0:
+        return ""
+    return text[start + len(tag_name) + 2 : end].strip()
+
+
 def packeta_response_status(response_text):
     compact = clean_text(response_text).lower().replace(" ", "").replace("\n", "").replace("\r", "")
     if "<status>ok</status>" in compact:
@@ -3252,6 +3265,128 @@ def dpd_send():
             "skipped": skipped,
         }
     )
+
+
+def update_completion_carrier_result(row_id, carrier, ok, status_text="", shipment_id="", response_text=""):
+    carrier_label = "DPD" if carrier == "dpd" else "Packeta"
+    label_text = f"{carrier_label} ODESLÁNO" if ok else f"{carrier_label} CHYBA"
+    row_status = clean_text(status_text) or ("ok" if ok else "error")
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE completion_rows
+                SET packeta_status = %s,
+                    packeta_shipment_id = CASE WHEN %s <> '' THEN %s ELSE packeta_shipment_id END,
+                    label_printed = CASE WHEN %s THEN %s ELSE label_printed END,
+                    note = CASE
+                        WHEN %s = '' THEN note
+                        WHEN note IS NULL OR note = '' THEN %s
+                        ELSE note || ' | ' || %s
+                    END
+                WHERE id = %s
+                RETURNING *
+                """,
+                (
+                    row_status,
+                    clean_text(shipment_id),
+                    clean_text(shipment_id),
+                    ok,
+                    label_text,
+                    clean_text(response_text)[:220],
+                    clean_text(response_text)[:220],
+                    clean_text(response_text)[:220],
+                    row_id,
+                ),
+            )
+            return completion_row_to_api(cur.fetchone())
+
+
+@app.route("/api/completion/rows/<int:row_id>/send-carrier", methods=["POST"])
+def send_completion_row_carrier(row_id):
+    auth_error = require_upload_token()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    data = request.get_json(silent=True) or {}
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM completion_rows WHERE id = %s", (row_id,))
+            row = cur.fetchone()
+    if not row:
+        return jsonify({"error": "Řádek kompletace nebyl nalezen."}), 404
+
+    row_api = completion_row_to_api(row)
+    delivery = delivery_info_from_row(row_api)
+
+    if delivery.get("isDpd"):
+        reason = dpd_skip_reason(row_api)
+        if reason:
+            return jsonify({"error": reason, "carrier": "dpd", "row": row_api}), 400
+        client_settings = carrier_client_settings("dpd", row_api)
+        item = dpd_payload(row_api)
+        api_payload = {
+            "mode": data.get("mode") or client_settings.get("mode") or "test",
+            "source": "expedice-railway-row",
+            "clientCode": client_settings.get("clientCode"),
+            "clientName": client_settings.get("clientName"),
+            "client": {
+                "customerDsw": client_settings.get("customerDsw"),
+                "customerId": client_settings.get("customerId"),
+                "shipmentType": client_settings.get("shipmentType"),
+            },
+            "shipments": [item["payload"]],
+        }
+        api_result = dpd_post_payload(api_payload, client_settings)
+        ok = bool(api_result.get("ok"))
+        updated_row = (
+            update_completion_carrier_result(row_id, "dpd", True, "ok", "", "")
+            if ok
+            else row_api
+        )
+        return jsonify(
+            {
+                "ok": ok,
+                "carrier": "dpd",
+                "clientCode": client_settings.get("clientCode"),
+                "clientName": client_settings.get("clientName"),
+                "result": api_result,
+                "row": updated_row,
+            }
+        ), 200 if ok else 400
+
+    if delivery.get("isPacketa"):
+        reason = packeta_skip_reason(row_api)
+        if reason:
+            return jsonify({"error": reason, "carrier": "packeta", "row": row_api}), 400
+        packet = packeta_dry_run_packet(row_api)
+        client_settings = carrier_client_settings("packeta", packet.get("clientCode") or packet.get("shopCode"))
+        password = client_settings.get("apiPassword", "")
+        if not password:
+            return jsonify({"error": f"Packeta API heslo není nastavené pro klienta {client_settings.get('clientName')}.", "carrier": "packeta", "row": row_api}), 400
+        create_xml = packeta_create_xml(packet["requestXml"], password)
+        api_result = packeta_post_validation_xml(create_xml, client_settings)
+        ok = bool(api_result.get("valid"))
+        shipment_id = xml_tag_text(api_result.get("responseText", ""), "id")
+        updated_row = (
+            update_completion_carrier_result(row_id, "packeta", True, api_result.get("status") or "ok", shipment_id, "")
+            if ok
+            else row_api
+        )
+        return jsonify(
+            {
+                "ok": ok,
+                "carrier": "packeta",
+                "clientCode": client_settings.get("clientCode"),
+                "clientName": client_settings.get("clientName"),
+                "shipmentId": shipment_id,
+                "result": api_result,
+                "row": updated_row,
+            }
+        ), 200 if ok else 400
+
+    return jsonify({"error": "Tento řádek nemá dopravce DPD ani Zásilkovnu/Packetu.", "carrier": delivery.get("carrier"), "row": row_api}), 400
 
 
 @app.route("/api/settings")

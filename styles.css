@@ -940,6 +940,7 @@ select:focus {
 
 .completion-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: center;
 }
@@ -948,6 +949,18 @@ select:focus {
   min-height: 32px;
   padding: 5px 8px;
   font-size: 12px;
+}
+
+.carrier-send.dpd {
+  color: #fff;
+  background: #1b4f9c;
+  border-color: #153c77;
+}
+
+.carrier-send.packeta {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent-dark);
 }
 
 .address-validation {

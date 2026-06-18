@@ -1497,6 +1497,36 @@ async function saveCompletionRow(rowId) {
   }
 }
 
+async function sendCompletionCarrier(rowId) {
+  const row = completionState.rows.find((item) => String(item.id) === String(rowId));
+  const carrierLabel = row?.deliveryCarrierLabel || "dopravce";
+  const orderNumber = row?.orderNumber || rowId;
+  const alreadySent = row?.packetaShipmentId || row?.labelPrinted;
+  const warning = alreadySent ? `\n\nPozor: řádek už má záznam štítku/zásilky (${alreadySent}).` : "";
+  if (!window.confirm(`Odeslat objednávku ${orderNumber} do ${carrierLabel}?${warning}`)) return;
+
+  const button = completionRowElement(rowId)?.querySelector(`[data-action="send-carrier-row"]`);
+  if (button) button.disabled = true;
+  setCompletionMessage(`Odesílám objednávku ${orderNumber} do ${carrierLabel}...`, "neutral");
+
+  try {
+    const data = await fetchJson(`/api/completion/rows/${encodeURIComponent(rowId)}/send-carrier`, {
+      method: "POST",
+      body: JSON.stringify({}),
+    });
+    if (data.row) {
+      replaceCompletionRow(data.row);
+      renderCompletion();
+    }
+    const shipmentId = data.shipmentId ? `, zásilka ${data.shipmentId}` : "";
+    setCompletionMessage(`Odesláno do ${carrierLabel}${shipmentId}.`, "success");
+  } catch (error) {
+    setCompletionMessage(`Odeslání do ${carrierLabel} se nepodařilo: ${error.message}`, "error");
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
 function renderAddressValidation(rowId, data) {
   const tr = completionRowElement(rowId);
   const target = tr?.querySelector("[data-address-validation]");
@@ -1632,6 +1662,18 @@ function deliveryCarrierHtml(row) {
       <small>${escapeHtml(service)}</small>
     </div>
   `;
+}
+
+function carrierSendActionHtml(row) {
+  if (authState.user?.role !== "admin") return "";
+  const carrier = row.deliveryCarrier || "manual";
+  if (carrier !== "dpd" && carrier !== "packeta") {
+    return `<button type="button" class="secondary" disabled>Bez dopravce</button>`;
+  }
+  const label = carrier === "dpd" ? "Odeslat DPD" : "Odeslat Zás.";
+  return `<button type="button" class="carrier-send ${escapeHtml(carrier)}" data-action="send-carrier-row" data-row-id="${escapeHtml(
+    row.id
+  )}">${label}</button>`;
 }
 
 function parseWorkflowBoxCode(value) {
@@ -1826,6 +1868,7 @@ function renderCompletion() {
         <div class="completion-actions">
           <button type="button" data-action="save-completion-row" data-row-id="${escapeHtml(row.id)}">Uložit</button>
           <button type="button" class="secondary" data-action="validate-address" data-row-id="${escapeHtml(row.id)}">Ověřit</button>
+          ${carrierSendActionHtml(row)}
         </div>
       </td>
       <td><span class="shop-chip">${escapeHtml(row.shopCode || completionState.dataset?.shopCode || "-")}</span></td>
@@ -2643,6 +2686,9 @@ els.completionBody.addEventListener("click", (event) => {
   }
   if (button.dataset.action === "validate-address") {
     validateCompletionAddress(button.dataset.rowId);
+  }
+  if (button.dataset.action === "send-carrier-row") {
+    sendCompletionCarrier(button.dataset.rowId);
   }
 });
 els.packetaDryRun.addEventListener("click", runPacketaDryRun);
