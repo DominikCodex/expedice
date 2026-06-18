@@ -248,8 +248,16 @@ function datasetInfoHtml(dataset) {
   `;
 }
 
+function expeditionQuery(params = {}) {
+  const query = new URLSearchParams();
+  if (expeditionState.showInactive) query.set("includeDeleted", "1");
+  if (params.date) query.set("date", params.date);
+  const text = query.toString();
+  return text ? `?${text}` : "";
+}
+
 function includeInactiveQuery() {
-  return expeditionState.showInactive ? "?includeDeleted=1" : "";
+  return expeditionQuery();
 }
 
 function switchView(view) {
@@ -314,6 +322,67 @@ function renderSortingOptions() {
   els.sortingDelete.disabled = !sortingState.dataset || sortingState.dataset.status !== "active";
 }
 
+async function loadExpeditionDays(preferredDate = "") {
+  expeditionState.showInactive = els.expeditionShowInactive.checked;
+  els.expeditionDaySummary.innerHTML = `<span>Nacitam expedicni dny...</span>`;
+
+  try {
+    const preferred = preferredDate || expeditionState.day?.date || "";
+    const data = await fetchJson(`/api/expedition-days/initial${expeditionQuery({ date: preferred })}`);
+    expeditionState.days = data.days || [];
+    expeditionState.loaded = true;
+
+    if (!data.day) {
+      expeditionState.day = null;
+      sortingState.datasets = [];
+      sortingState.dataset = null;
+      completionState.datasets = [];
+      completionState.dataset = null;
+      completionState.rows = [];
+      renderExpeditionDayOptions();
+      renderSortingOptions();
+      renderCompletionOptions();
+      renderCompletion();
+      els.expeditionDaySummary.innerHTML = `<span>Online zatim neobsahuje zadny expedicni den.</span>`;
+      return;
+    }
+
+    expeditionState.day = data.day || null;
+    sortingState.datasets = data.sorting || [];
+    completionState.datasets = data.completion || [];
+    sortingState.loaded = true;
+    completionState.loaded = true;
+
+    renderExpeditionDayOptions();
+    els.expeditionDaySummary.innerHTML = `<span><strong>${escapeHtml(expeditionState.day.label)}</strong></span><span>${escapeHtml(
+      expeditionState.day.activeBatches || 0
+    )} aktivni davky</span><span>${escapeHtml(expeditionState.day.rowsCount || 0)} radku</span>`;
+
+    renderSortingOptions();
+    renderCompletionOptions();
+
+    if (data.activeSorting?.dataset) {
+      applySortingDataset(data.activeSorting.dataset, data.activeSorting.rows || []);
+    } else {
+      sortingState.dataset = null;
+      renderSortingOptions();
+      setMessage("Pro vybrany expedicni den neni nahrane roztrideni.", "warning");
+    }
+
+    if (data.activeCompletion?.dataset) {
+      applyCompletionDataset(data.activeCompletion.dataset, data.activeCompletion.rows || []);
+    } else {
+      completionState.dataset = null;
+      completionState.rows = [];
+      renderCompletionOptions();
+      renderCompletion();
+      setCompletionMessage("Pro vybrany expedicni den neni nahrana kompletace.", "warning");
+    }
+  } catch (error) {
+    expeditionState.loaded = true;
+    els.expeditionDaySummary.innerHTML = `<span>Online dny se nepodarilo nacist: ${escapeHtml(error.message)}</span>`;
+  }
+}
 async function loadExpeditionDays(preferredDate = "") {
   expeditionState.showInactive = els.expeditionShowInactive.checked;
   els.expeditionDaySummary.innerHTML = `<span>Načítám expediční dny...</span>`;

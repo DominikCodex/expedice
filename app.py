@@ -809,6 +809,138 @@ def list_expedition_days():
     return jsonify({"days": days})
 
 
+def full_expedition_day_payload(cur, day_date, include_deleted=False):
+    cur.execute(
+        """
+        SELECT
+            ed.*,
+            COUNT(d.id) FILTER (WHERE d.status = 'active') AS active_batches,
+            COUNT(d.id) AS all_batches,
+            COALESCE(SUM(d.rows_count) FILTER (WHERE d.status = 'active'), 0) AS rows_count,
+            MAX(d.uploaded_at) AS latest_upload
+        FROM expedition_days ed
+        LEFT JOIN datasets d ON d.expedition_day_id = ed.id
+        WHERE ed.day_date = %s
+        GROUP BY ed.id
+        """,
+        (day_date,),
+    )
+    day = cur.fetchone()
+    if not day:
+        return None
+
+    filters = ["expedition_day_id = %s"]
+    params = [day["id"]]
+    if not include_deleted:
+        filters.append("status = 'active'")
+    where = " AND ".join(filters)
+    cur.execute(
+        f"""
+        SELECT * FROM datasets
+        WHERE {where}
+        ORDER BY dataset_kind, shop_code, uploaded_at DESC, id DESC
+        """,
+        params,
+    )
+    datasets_raw = cur.fetchall()
+    datasets = [dataset_summary(row) for row in datasets_raw]
+
+    active_sorting = next(
+        (row for row in datasets_raw if row["dataset_kind"] == "sorting" and row["status"] == "active"),
+        next((row for row in datasets_raw if row["dataset_kind"] == "sorting"), None),
+    )
+    active_completion = next(
+        (row for row in datasets_raw if row["dataset_kind"] == "completion" and row["status"] == "active"),
+        next((row for row in datasets_raw if row["dataset_kind"] == "completion"), None),
+    )
+
+    sorting_rows = []
+    completion_rows = []
+    if active_sorting:
+        cur.execute(
+            "SELECT * FROM dataset_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
+            (active_sorting["id"],),
+        )
+        sorting_rows = [row_to_api(row) for row in cur.fetchall()]
+    if active_completion:
+        cur.execute(
+            "SELECT * FROM completion_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
+            (active_completion["id"],),
+        )
+        completion_rows = [completion_row_to_api(row) for row in cur.fetchall()]
+
+    return {
+        "day": expedition_day_summary(day),
+        "datasets": datasets,
+        "sorting": [item for item in datasets if item["datasetKind"] == "sorting"],
+        "completion": [item for item in datasets if item["datasetKind"] == "completion"],
+        "activeSorting": {
+            "dataset": dataset_summary(active_sorting) if active_sorting else None,
+            "rows": sorting_rows,
+        },
+        "activeCompletion": {
+            "dataset": dataset_summary(active_completion) if active_completion else None,
+            "rows": completion_rows,
+        },
+    }
+
+
+@app.route("/api/expedition-days/initial")
+def initial_expedition_day():
+    auth_error = require_download_token_if_configured()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    include_deleted = request.args.get("includeDeleted") == "1"
+    requested_date = clean_text(request.args.get("date"))
+    day_filter = "" if include_deleted else "WHERE ed.status = 'active'"
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT
+                    ed.*,
+                    COUNT(d.id) FILTER (WHERE d.status = 'active') AS active_batches,
+                    COUNT(d.id) AS all_batches,
+                    COALESCE(SUM(d.rows_count) FILTER (WHERE d.status = 'active'), 0) AS rows_count,
+                    MAX(d.uploaded_at) AS latest_upload
+                FROM expedition_days ed
+                LEFT JOIN datasets d ON d.expedition_day_id = ed.id
+                {day_filter}
+                GROUP BY ed.id
+                ORDER BY ed.day_date DESC
+                """
+            )
+            days = [expedition_day_summary(row) for row in cur.fetchall()]
+
+            selected_date = ""
+            if requested_date and any(day["date"] == requested_date for day in days):
+                selected_date = requested_date
+            elif days:
+                selected_date = days[0]["date"]
+
+            if not selected_date:
+                return jsonify(
+                    {
+                        "days": days,
+                        "day": None,
+                        "datasets": [],
+                        "sorting": [],
+                        "completion": [],
+                        "activeSorting": {"dataset": None, "rows": []},
+                        "activeCompletion": {"dataset": None, "rows": []},
+                    }
+                )
+
+            payload = full_expedition_day_payload(cur, selected_date, include_deleted)
+            if not payload:
+                return jsonify({"error": "Expedition day not found"}), 404
+            payload["days"] = days
+
+    return jsonify(payload)
+
+
 @app.route("/api/expedition-days/<day_date>")
 def get_expedition_day(day_date):
     auth_error = require_download_token_if_configured()
