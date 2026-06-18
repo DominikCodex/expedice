@@ -3315,6 +3315,67 @@ def adjust_sorting_row(row_id):
     return jsonify({"ok": True, "row": row_to_api(row), "delta": delta, "actor": user_to_api(user)})
 
 
+@app.route("/api/completion/rows/<int:row_id>/workflow", methods=["POST"])
+def update_completion_workflow(row_id):
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json(silent=True) or {}
+    action = clean_text(data.get("action")).strip().lower()
+    status_by_action = {
+        "ok": "OK",
+        "error": "ERROR",
+        "unpaid": "NEZAPLACENO",
+        "unpaid_error": "NEZAPLACENO + ERROR",
+        "manual_reprint": "PŘETISK ŠTÍTKU",
+        "clear_error": "",
+    }
+    if action not in status_by_action:
+        return jsonify({"error": "Neznámá akce kompletace."}), 400
+
+    user = current_user()
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE completion_rows
+                SET completion_status = %s,
+                    label_printed = CASE
+                        WHEN %s = 'ok' THEN COALESCE(NULLIF(label_printed, ''), 'ano')
+                        ELSE label_printed
+                    END
+                WHERE id = %s
+                RETURNING *
+                """,
+                (status_by_action[action], action, row_id),
+            )
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "Řádek kompletace nebyl nalezen."}), 404
+
+            cur.execute(
+                """
+                INSERT INTO audit_events (
+                    event_type, dataset_id, shop_code, order_number, row_ref, payload, actor
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                """,
+                (
+                    "completion_workflow",
+                    row["dataset_id"],
+                    row["shop_code"],
+                    row["order_number"],
+                    row["expedition_number"],
+                    Json({"action": action, "status": status_by_action[action]}),
+                    user["username"] if user else "unknown",
+                ),
+            )
+
+    return jsonify({"ok": True, "row": completion_row_to_api(row), "actor": user_to_api(user)})
+
+
 @app.route("/api/completion/rows/<int:row_id>", methods=["PATCH"])
 def update_completion_row(row_id):
     auth_error = require_upload_token()

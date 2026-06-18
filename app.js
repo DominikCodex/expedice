@@ -38,6 +38,11 @@ const completionState = {
   loaded: false,
 };
 
+const completionWorkflowState = {
+  row: null,
+  index: -1,
+};
+
 const settingsState = {
   loaded: false,
   settings: null,
@@ -113,6 +118,30 @@ const els = {
   completionSummary: document.getElementById("completion-summary"),
   completionBody: document.getElementById("completion-body"),
   completionRowCount: document.getElementById("completion-row-count"),
+  workflowBoxCode: document.getElementById("completion-box-code"),
+  workflowExpeditionNumber: document.getElementById("workflow-expedition-number"),
+  workflowPrev: document.getElementById("workflow-prev"),
+  workflowNext: document.getElementById("workflow-next"),
+  workflowSaveOk: document.getElementById("workflow-save-ok"),
+  workflowCustomerName: document.getElementById("workflow-customer-name"),
+  workflowStreet: document.getElementById("workflow-street"),
+  workflowCity: document.getElementById("workflow-city"),
+  workflowOrderNumber: document.getElementById("workflow-order-number"),
+  workflowShipping: document.getElementById("workflow-shipping"),
+  workflowPieces: document.getElementById("workflow-pieces"),
+  workflowCod: document.getElementById("workflow-cod"),
+  workflowCountry: document.getElementById("workflow-country"),
+  workflowStatus: document.getElementById("workflow-status"),
+  workflowItems: document.getElementById("workflow-items"),
+  workflowWarning: document.getElementById("workflow-warning"),
+  workflowNote: document.getElementById("workflow-note"),
+  workflowUnpaid: document.getElementById("workflow-unpaid"),
+  workflowError: document.getElementById("workflow-error"),
+  workflowUnpaidError: document.getElementById("workflow-unpaid-error"),
+  workflowOpenOrder: document.getElementById("workflow-open-order"),
+  workflowClearError: document.getElementById("workflow-clear-error"),
+  workflowManualReprint: document.getElementById("workflow-manual-reprint"),
+  workflowMessage: document.getElementById("workflow-message"),
   settingsView: document.getElementById("settings-view"),
   settingsSave: document.getElementById("settings-save"),
   settingsMessage: document.getElementById("settings-message"),
@@ -277,6 +306,11 @@ function setCompletionMessage(text, type = "neutral") {
   els.completionMessage.textContent = text;
 }
 
+function setWorkflowMessage(text, type = "neutral") {
+  els.workflowMessage.className = `message ${type}`;
+  els.workflowMessage.textContent = text;
+}
+
 function setSettingsMessage(text, type = "neutral") {
   els.settingsMessage.className = `message ${type}`;
   els.settingsMessage.textContent = text;
@@ -379,6 +413,7 @@ function startAppForUser(user) {
     renderAll();
     renderSortingOptions();
     renderCompletion();
+    renderWorkflow();
     setMessage(
       `Načteno ${state.items.length} řádků, ${Object.keys(state.eanMap).length} EAN kódů, objednávek: ${
         new Set(state.items.map((item) => item.orderNumber).filter(Boolean)).size
@@ -602,9 +637,12 @@ async function loadExpeditionDays(preferredDate = "") {
       completionState.datasets = [];
       completionState.dataset = null;
       completionState.rows = [];
+      completionWorkflowState.row = null;
+      completionWorkflowState.index = -1;
       renderExpeditionDayOptions();
       renderSortingOptions();
       renderCompletionOptions();
+      renderWorkflow();
       renderCompletion();
       els.expeditionDaySummary.innerHTML = `<span>Online zatím neobsahuje žádný expediční den.</span>`;
       return;
@@ -637,7 +675,10 @@ async function loadExpeditionDays(preferredDate = "") {
     } else {
       completionState.dataset = null;
       completionState.rows = [];
+      completionWorkflowState.row = null;
+      completionWorkflowState.index = -1;
       renderCompletionOptions();
+      renderWorkflow();
       renderCompletion();
       setCompletionMessage("Pro vybraný expediční den není nahraná kompletace.", "warning");
     }
@@ -713,7 +754,10 @@ async function loadExpeditionDay(dayDate) {
   } else {
     completionState.dataset = null;
     completionState.rows = [];
+    completionWorkflowState.row = null;
+    completionWorkflowState.index = -1;
     renderCompletionOptions();
+    renderWorkflow();
     renderCompletion();
     setCompletionMessage("Pro vybraný expediční den není nahraná kompletace.", "warning");
   }
@@ -826,8 +870,11 @@ async function loadCompletionDatasets() {
 function applyCompletionDataset(dataset, rows) {
   completionState.dataset = dataset || null;
   completionState.rows = rows || [];
+  completionWorkflowState.row = null;
+  completionWorkflowState.index = -1;
   hidePacketaDryRunResult();
   renderCompletionOptions();
+  renderWorkflow();
   renderCompletion();
   setCompletionMessage(`Načteno: ${datasetLabel(completionState.dataset)}.`, "success");
 }
@@ -1492,6 +1539,175 @@ function deliveryCarrierHtml(row) {
       <small>${escapeHtml(service)}</small>
     </div>
   `;
+}
+
+function parseWorkflowBoxCode(value) {
+  const text = String(value || "").trim().toUpperCase();
+  const boxMatch = text.match(/^X\s*(\d+)\s*S$/);
+  if (boxMatch) return boxMatch[1];
+  if (/^\d+$/.test(text)) return text;
+  return "";
+}
+
+function workflowRowsSorted() {
+  return [...completionState.rows]
+    .filter((row) => row.expeditionNumber || row.expeditionOrderCode)
+    .sort((a, b) => toNumber(a.expeditionNumber || a.expeditionOrderCode, 0) - toNumber(b.expeditionNumber || b.expeditionOrderCode, 0));
+}
+
+function findWorkflowRowByNumber(number) {
+  const normalized = String(number || "").replace(/^0+/, "");
+  return workflowRowsSorted().find((row) => {
+    const expeditionNumber = String(row.expeditionNumber || row.expeditionOrderCode || "").replace(/^0+/, "");
+    return expeditionNumber === normalized;
+  });
+}
+
+function workflowStatusTone(row) {
+  const status = normalize(row?.completionStatus || "");
+  if (!row) return "neutral";
+  if (status.includes("error")) return "danger";
+  if (status.includes("nezaplac")) return "warning";
+  if (status.includes("ok")) return "ok";
+  return "neutral";
+}
+
+function workflowPaymentText(row) {
+  if (!row) return "Platba: -";
+  const cod = String(row.codAmount || "").trim();
+  const currency = row.currency || "";
+  const payment = row.paymentMethod || row.paidStatus || "";
+  if (toNumber(cod, 0) > 0) return `Dobírka: ${cod} ${currency}`.trim();
+  return `Platba: ${payment || "bez dobírky"}`;
+}
+
+function workflowCountryText(row) {
+  if (!row) return "-";
+  const currency = row?.currency || "";
+  if (currency === "EUR" || normalize(row?.shippingMethod || "").includes("packeta.sk")) return "SLOVENSKO";
+  return "ČESKÁ REPUBLIKA";
+}
+
+function workflowItemsHtml(row) {
+  if (!row) return "Po načtení boxu zobrazím obsah objednávky.";
+  const quantity = row.quantity || "";
+  const parts = [
+    row.orderNumber ? `Objednávka ${row.orderNumber}` : "",
+    quantity ? `${quantity} ks` : "",
+    row.weight ? `${row.weight} kg` : "",
+    row.shippingMethod || "",
+  ].filter(Boolean);
+  const note = row.note ? `<small>${escapeHtml(row.note)}</small>` : "";
+  return `
+    <strong>${escapeHtml(parts.join(" | ") || "Objednávka")}</strong>
+    ${note}
+    <small>${escapeHtml(row.email || "")}${row.phone ? ` | ${escapeHtml(row.phone)}` : ""}</small>
+  `;
+}
+
+function renderWorkflow() {
+  const row = completionWorkflowState.row;
+  const fullName = row ? `${row.firstName || ""} ${row.lastName || ""}`.trim() : "Načti expediční box";
+  const expeditionNumber = row?.expeditionNumber || row?.expeditionOrderCode || "-";
+  const tone = workflowStatusTone(row);
+  const statusText = row?.completionStatus || (row ? "Rozpracováno" : "Čekám na sken boxu");
+  const isDpd = row && (row.delivery?.isDpd || normalize(row.shippingMethod || "").includes("dpd"));
+
+  els.workflowExpeditionNumber.textContent = expeditionNumber;
+  els.workflowCustomerName.textContent = fullName || "-";
+  els.workflowStreet.textContent = row?.streetWithNumber || row?.street || "-";
+  els.workflowCity.textContent = [row?.city, row?.zipCode].filter(Boolean).join(", ") || "-";
+  els.workflowOrderNumber.textContent = row?.orderNumber || "-";
+  els.workflowShipping.textContent = row?.shippingMethod || "-";
+  els.workflowPieces.textContent = `Kusů: ${row?.quantity || "-"}`;
+  els.workflowCod.textContent = workflowPaymentText(row);
+  els.workflowCountry.textContent = workflowCountryText(row);
+  els.workflowStatus.className = `workflow-status ${tone}`;
+  els.workflowStatus.textContent = statusText;
+  els.workflowItems.innerHTML = workflowItemsHtml(row);
+  els.workflowNote.textContent = row?.completionStatus ? `Stav kompletace: ${row.completionStatus}` : "";
+  els.workflowWarning.classList.toggle("hidden", !isDpd);
+  els.workflowWarning.textContent = isDpd ? "Pozor: Doručení přes DPD = jiný svoz" : "";
+
+  const disabled = !row;
+  [
+    els.workflowSaveOk,
+    els.workflowUnpaid,
+    els.workflowError,
+    els.workflowUnpaidError,
+    els.workflowOpenOrder,
+    els.workflowClearError,
+    els.workflowManualReprint,
+  ].forEach((button) => {
+    button.disabled = disabled;
+  });
+}
+
+function selectWorkflowRow(row, message = "") {
+  if (!row) return;
+  const sorted = workflowRowsSorted();
+  completionWorkflowState.row = row;
+  completionWorkflowState.index = sorted.findIndex((entry) => entry.id === row.id);
+  renderWorkflow();
+  if (message) setWorkflowMessage(message, "success");
+}
+
+function scanWorkflowBox() {
+  const number = parseWorkflowBoxCode(els.workflowBoxCode.value);
+  if (!number) {
+    setWorkflowMessage("Box musí být ve tvaru X16S, případně jen číslo 16.", "warning");
+    return;
+  }
+  if (!completionState.rows.length) {
+    setWorkflowMessage("Nejdřív načti kompletaci pro expediční den.", "warning");
+    return;
+  }
+  const row = findWorkflowRowByNumber(number);
+  if (!row) {
+    setWorkflowMessage(`Expediční číslo ${number} v načtené kompletaci nevidím.`, "error");
+    return;
+  }
+  selectWorkflowRow(row, `Načten box X${number}S: objednávka ${row.orderNumber || "-"}.`);
+  els.workflowBoxCode.value = "";
+}
+
+function moveWorkflow(delta) {
+  const sorted = workflowRowsSorted();
+  if (!sorted.length) return;
+  const currentIndex = completionWorkflowState.index >= 0 ? completionWorkflowState.index : 0;
+  const nextIndex = Math.max(0, Math.min(sorted.length - 1, currentIndex + delta));
+  selectWorkflowRow(sorted[nextIndex], `Expediční číslo ${sorted[nextIndex].expeditionNumber || sorted[nextIndex].expeditionOrderCode}.`);
+}
+
+function updateCompletionRowInState(row) {
+  const index = completionState.rows.findIndex((entry) => entry.id === row.id);
+  if (index >= 0) completionState.rows[index] = row;
+  if (completionWorkflowState.row?.id === row.id) {
+    completionWorkflowState.row = row;
+  }
+}
+
+async function saveWorkflowAction(action) {
+  const row = completionWorkflowState.row;
+  if (!row) return;
+  try {
+    const data = await fetchJson(`/api/completion/rows/${row.id}/workflow`, {
+      method: "POST",
+      body: JSON.stringify({ action }),
+    });
+    updateCompletionRowInState(data.row);
+    renderWorkflow();
+    renderCompletion();
+    setWorkflowMessage(`Uloženo: ${data.row.completionStatus || "stav vyčištěn"}.`, "success");
+  } catch (error) {
+    setWorkflowMessage(`Uložení stavu selhalo: ${error.message}`, "error");
+  }
+}
+
+function openWorkflowOrder() {
+  const row = completionWorkflowState.row;
+  if (!row?.orderId && !row?.orderNumber) return;
+  setWorkflowMessage(`V1 zatím jen označuje objednávku ${row.orderNumber || row.orderId}. Odkaz na e-shop doplníme podle URL administrací e-shopů.`, "warning");
 }
 
 function renderCompletion() {
@@ -2294,6 +2510,27 @@ els.completionRefresh.addEventListener("click", () => loadCompletionDatasets());
 els.completionDataset.addEventListener("change", () => {
   loadCompletionDataset(els.completionDataset.value);
 });
+els.workflowBoxCode.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    scanWorkflowBox();
+  }
+});
+els.workflowBoxCode.addEventListener("input", () => {
+  const code = els.workflowBoxCode.value.trim();
+  if (/^x\s*\d+\s*s$/i.test(code)) {
+    scanWorkflowBox();
+  }
+});
+els.workflowPrev.addEventListener("click", () => moveWorkflow(-1));
+els.workflowNext.addEventListener("click", () => moveWorkflow(1));
+els.workflowSaveOk.addEventListener("click", () => saveWorkflowAction("ok"));
+els.workflowUnpaid.addEventListener("click", () => saveWorkflowAction("unpaid"));
+els.workflowError.addEventListener("click", () => saveWorkflowAction("error"));
+els.workflowUnpaidError.addEventListener("click", () => saveWorkflowAction("unpaid_error"));
+els.workflowClearError.addEventListener("click", () => saveWorkflowAction("clear_error"));
+els.workflowManualReprint.addEventListener("click", () => saveWorkflowAction("manual_reprint"));
+els.workflowOpenOrder.addEventListener("click", openWorkflowOrder);
 els.completionDelete.addEventListener("click", async () => {
   try {
     const deleted = await deleteDataset(completionState.dataset, () =>

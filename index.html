@@ -204,6 +204,55 @@
           </section>
 
           <section id="completion-view" class="app-view hidden">
+            <section class="completion-workflow-panel" aria-label="Roztřídění do kompletace">
+              <div class="workflow-scan-row">
+                <label class="field workflow-scan-field">
+                  <span>Čárový kód expedičního boxu</span>
+                  <input id="completion-box-code" autocomplete="off" placeholder="Např. X16S" />
+                </label>
+                <div class="workflow-expedition-number">
+                  <span>Expediční číslo</span>
+                  <strong id="workflow-expedition-number">-</strong>
+                </div>
+                <button id="workflow-prev" type="button" class="secondary">Předchozí</button>
+                <button id="workflow-next" type="button" class="secondary">Další</button>
+                <button id="workflow-save-ok" type="button">Uložit OK</button>
+              </div>
+
+              <div class="workflow-grid">
+                <aside class="workflow-customer-card">
+                  <strong id="workflow-customer-name">Načti expediční box</strong>
+                  <span id="workflow-street">-</span>
+                  <span id="workflow-city">-</span>
+                  <div class="workflow-order-line">
+                    <b id="workflow-order-number">-</b>
+                    <span id="workflow-shipping">-</span>
+                  </div>
+                  <div class="workflow-pieces" id="workflow-pieces">Kusů: -</div>
+                  <div class="workflow-cod" id="workflow-cod">Platba: -</div>
+                  <div class="workflow-country" id="workflow-country">-</div>
+                </aside>
+
+                <section class="workflow-package-card">
+                  <div id="workflow-status" class="workflow-status neutral">Čekám na sken boxu</div>
+                  <div id="workflow-items" class="workflow-items">Po načtení boxu zobrazím obsah objednávky.</div>
+                  <div id="workflow-warning" class="workflow-warning hidden"></div>
+                  <div id="workflow-note" class="workflow-note"></div>
+                </section>
+              </div>
+
+              <div class="workflow-actions">
+                <button id="workflow-unpaid" type="button" class="secondary">Nezaplacenka</button>
+                <button id="workflow-error" type="button" class="secondary">Error</button>
+                <button id="workflow-unpaid-error" type="button" class="secondary">Nezaplaceno + error</button>
+                <button id="workflow-open-order" type="button" class="secondary">Otevřít objednávku</button>
+                <button id="workflow-clear-error" type="button" class="secondary">Zrušit error</button>
+                <button id="workflow-manual-reprint" type="button" class="secondary">Přetisknout štítek</button>
+              </div>
+
+              <section id="workflow-message" class="message neutral" aria-live="polite"></section>
+            </section>
+
             <section class="completion-toolbar" aria-label="Ovládání kompletace">
               <label class="field">
                 <span>Expediční dávka</span>
