@@ -8,11 +8,13 @@ import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
+from contextlib import contextmanager
 from datetime import datetime, timedelta
 from xml.sax.saxutils import escape as xml_escape
 from zoneinfo import ZoneInfo
 
 import psycopg2
+from psycopg2 import pool
 from psycopg2.extras import Json, RealDictCursor
 from flask import Flask, Response, g, jsonify, request, send_from_directory
 from werkzeug.security import check_password_hash, generate_password_hash
@@ -24,6 +26,8 @@ PRAGUE_TZ = ZoneInfo("Europe/Prague")
 app = Flask(__name__, static_folder=None)
 SCHEMA_READY = False
 AUTH_SCHEMA_READY = False
+DB_POOL = None
+DB_POOL_DSN = ""
 SESSION_COOKIE = "expedice_session"
 SESSION_SECONDS = 12 * 60 * 60
 INITIAL_ADMIN_USERNAME = "d.najman@centrum.cz"
@@ -108,11 +112,32 @@ def database_url():
     return os.environ.get("DATABASE_URL", "")
 
 
-def db_conn():
+def db_pool():
+    global DB_POOL, DB_POOL_DSN
     url = database_url()
     if not url:
         raise RuntimeError("DATABASE_URL is not configured")
-    return psycopg2.connect(url)
+    if DB_POOL is None or DB_POOL_DSN != url:
+        minconn = int(os.environ.get("DB_POOL_MIN", "1"))
+        maxconn = int(os.environ.get("DB_POOL_MAX", "6"))
+        DB_POOL = pool.SimpleConnectionPool(minconn, maxconn, dsn=url)
+        DB_POOL_DSN = url
+    return DB_POOL
+
+
+@contextmanager
+def db_conn():
+    active_pool = db_pool()
+    conn = active_pool.getconn()
+    try:
+        yield conn
+        conn.commit()
+    except Exception:
+        if not conn.closed:
+            conn.rollback()
+        raise
+    finally:
+        active_pool.putconn(conn, close=bool(conn.closed))
 
 
 def ensure_schema():
