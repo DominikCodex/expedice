@@ -59,7 +59,6 @@ const els = {
   metricItems: document.getElementById("metric-items"),
   metricOrders: document.getElementById("metric-orders"),
   metricDone: document.getElementById("metric-done"),
-  expeditionDay: document.getElementById("expedition-day"),
   expeditionDayList: document.getElementById("expedition-day-list"),
   expeditionRefresh: document.getElementById("expedition-refresh"),
   expeditionShowInactive: document.getElementById("show-inactive-datasets"),
@@ -270,21 +269,14 @@ function switchView(view) {
 }
 
 function renderExpeditionDayOptions() {
-  els.expeditionDay.innerHTML = "";
   els.expeditionDayList.innerHTML = "";
 
   if (!expeditionState.days.length) {
-    els.expeditionDay.innerHTML = `<option value="">Žádný expediční den</option>`;
     els.expeditionDaySummary.innerHTML = `<span>Online zatím neobsahuje žádný expediční den.</span>`;
     return;
   }
 
   expeditionState.days.forEach((day) => {
-    const option = document.createElement("option");
-    option.value = day.date;
-    option.textContent = dayLabel(day);
-    els.expeditionDay.appendChild(option);
-
     const button = document.createElement("button");
     button.type = "button";
     button.className = `day-card ${expeditionState.day?.date === day.date ? "active" : ""}`;
@@ -296,10 +288,6 @@ function renderExpeditionDayOptions() {
     `;
     els.expeditionDayList.appendChild(button);
   });
-
-  if (expeditionState.day) {
-    els.expeditionDay.value = expeditionState.day.date;
-  }
 }
 
 function renderSortingOptions() {
@@ -339,7 +327,6 @@ async function loadExpeditionDays(preferredDate = "") {
     const selectedDate =
       preferredDate ||
       expeditionState.day?.date ||
-      els.expeditionDay.value ||
       expeditionState.days[0]?.date ||
       "";
 
@@ -1092,11 +1079,8 @@ els.historyList.addEventListener("click", (event) => {
   undoHistory(button.dataset.id);
 });
 
-els.expeditionRefresh.addEventListener("click", () => loadExpeditionDays(els.expeditionDay.value));
-els.expeditionShowInactive.addEventListener("change", () => loadExpeditionDays(els.expeditionDay.value));
-els.expeditionDay.addEventListener("change", () => {
-  loadExpeditionDay(els.expeditionDay.value);
-});
+els.expeditionRefresh.addEventListener("click", () => loadExpeditionDays(expeditionState.day?.date || ""));
+els.expeditionShowInactive.addEventListener("change", () => loadExpeditionDays(expeditionState.day?.date || ""));
 els.expeditionDayList.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-date]");
   if (!button) return;
@@ -1114,7 +1098,7 @@ els.sortingDataset.addEventListener("change", () => {
 els.sortingDelete.addEventListener("click", async () => {
   try {
     const deleted = await deleteDataset(sortingState.dataset, () =>
-      loadExpeditionDays(expeditionState.day?.date || els.expeditionDay.value)
+      loadExpeditionDays(expeditionState.day?.date || "")
     );
     if (deleted) setMessage("Dávka roztřídění byla smazaná.", "success");
   } catch (error) {
@@ -1128,7 +1112,7 @@ els.completionDataset.addEventListener("change", () => {
 els.completionDelete.addEventListener("click", async () => {
   try {
     const deleted = await deleteDataset(completionState.dataset, () =>
-      loadExpeditionDays(expeditionState.day?.date || els.expeditionDay.value)
+      loadExpeditionDays(expeditionState.day?.date || "")
     );
     if (deleted) setCompletionMessage("Dávka kompletace byla smazaná.", "success");
   } catch (error) {
