@@ -2258,7 +2258,6 @@ function renderCompletion() {
     tr.innerHTML = `
       <td>
         <div class="completion-actions">
-          <button type="button" class="detail-toggle" data-action="toggle-completion-detail" data-row-id="${escapeHtml(row.id)}" aria-expanded="${expanded ? "true" : "false"}">${expanded ? "−" : "+"}</button>
           <button type="button" data-action="save-completion-row" data-row-id="${escapeHtml(row.id)}">Uložit</button>
           <button type="button" class="secondary" data-action="validate-address" data-row-id="${escapeHtml(row.id)}">Ověřit</button>
           ${carrierSendActionHtml(row)}
@@ -3098,11 +3097,17 @@ els.completionDelete.addEventListener("click", async () => {
 });
 
 els.completionBody.addEventListener("click", (event) => {
+  const interactiveTarget = event.target.closest("button, input, select, textarea, a, label");
+  if (!interactiveTarget) {
+    const mainRow = event.target.closest("tr.completion-main-row");
+    if (mainRow?.dataset.completionRowId) {
+      toggleCompletionDetail(mainRow.dataset.completionRowId);
+    }
+    return;
+  }
+
   const button = event.target.closest("button[data-action]");
   if (!button) return;
-  if (button.dataset.action === "toggle-completion-detail") {
-    toggleCompletionDetail(button.dataset.rowId);
-  }
   if (button.dataset.action === "save-completion-row") {
     saveCompletionRow(button.dataset.rowId);
   }

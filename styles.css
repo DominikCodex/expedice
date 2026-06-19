@@ -944,6 +944,7 @@ select:focus {
 
 .completion-main-row {
   --row-accent: #8a9690;
+  cursor: pointer;
 }
 
 .completion-main-row td:first-child {
@@ -986,6 +987,25 @@ select:focus {
   background: #fff;
 }
 
+.completion-main-row:hover {
+  filter: brightness(0.985);
+}
+
+.completion-main-row.expanded td {
+  border-bottom-color: #d3ddd7;
+}
+
+.completion-main-row .completion-actions,
+.completion-main-row input,
+.completion-main-row button,
+.completion-main-row select {
+  cursor: default;
+}
+
+.completion-main-row .completion-actions button {
+  cursor: pointer;
+}
+
 .table-input {
   width: 100%;
   min-width: 0;
@@ -1020,10 +1040,10 @@ select:focus {
 
 .completion-actions {
   display: grid;
-  grid-template-columns: 32px repeat(2, minmax(58px, 1fr));
+  grid-template-columns: repeat(2, minmax(58px, 1fr));
   gap: 6px;
   align-items: center;
-  min-width: 194px;
+  min-width: 146px;
 }
 
 .completion-actions button {
@@ -1031,16 +1051,6 @@ select:focus {
   padding: 4px 7px;
   font-size: 11px;
   white-space: nowrap;
-}
-
-.completion-actions .detail-toggle {
-  min-width: 32px;
-  padding: 0;
-  color: var(--accent-dark);
-  background: #eef7f2;
-  border-color: #bddbce;
-  font-size: 18px;
-  line-height: 1;
 }
 
 .completion-actions .carrier-send,
