@@ -53,6 +53,19 @@ const authState = {
   appStarted: false,
 };
 
+const VIEW_ROUTES = {
+  sorting: "/roztrideni",
+  completion: "/kompletace",
+  settings: "/nastaveni",
+};
+
+const ROUTE_VIEWS = {
+  "/": "sorting",
+  "/roztrideni": "sorting",
+  "/kompletace": "completion",
+  "/nastaveni": "settings",
+};
+
 const usersState = {
   users: [],
   loaded: false,
@@ -415,6 +428,25 @@ function applyRoleVisibility() {
   }
 }
 
+function normalizedRoutePath(path = window.location.pathname) {
+  return (path.replace(/\/+$/, "") || "/").toLowerCase();
+}
+
+function viewFromRoute() {
+  return ROUTE_VIEWS[normalizedRoutePath()] || "sorting";
+}
+
+function routeForView(view) {
+  return VIEW_ROUTES[view] || VIEW_ROUTES.sorting;
+}
+
+function setRouteForView(view, replace = false) {
+  const targetPath = routeForView(view);
+  if (normalizedRoutePath() === targetPath) return;
+  const method = replace ? "replaceState" : "pushState";
+  window.history[method]({ view }, "", targetPath);
+}
+
 function startAppForUser(user) {
   authState.user = user;
   els.authView.classList.add("hidden");
@@ -437,7 +469,7 @@ function startAppForUser(user) {
     authState.appStarted = true;
   }
 
-  requestAnimationFrame(() => els.eanInput.focus());
+  switchView(viewFromRoute(), { replaceRoute: true });
   requestAnimationFrame(() => loadExpeditionDays());
 }
 
@@ -557,7 +589,7 @@ function includeInactiveQuery() {
   return expeditionQuery();
 }
 
-function switchView(view) {
+function switchView(view, options = {}) {
   if (view === "settings" && !isAdmin()) {
     setMessage("Nastavení je dostupné jen adminovi.", "warning");
     view = "sorting";
@@ -585,6 +617,10 @@ function switchView(view) {
 
   if (!completion && !settings) {
     requestAnimationFrame(() => els.eanInput.focus());
+  }
+
+  if (options.updateRoute !== false) {
+    setRouteForView(view, Boolean(options.replaceRoute));
   }
 }
 
@@ -2723,6 +2759,10 @@ els.expeditionDayList.addEventListener("click", (event) => {
 els.tabSorting.addEventListener("click", () => switchView("sorting"));
 els.tabCompletion.addEventListener("click", () => switchView("completion"));
 els.tabSettings.addEventListener("click", () => switchView("settings"));
+window.addEventListener("popstate", () => {
+  if (!authState.user) return;
+  switchView(viewFromRoute(), { updateRoute: false });
+});
 els.settingsSave.addEventListener("click", saveSettings);
 els.usersRefresh.addEventListener("click", loadUsers);
 els.userCreateSubmit.addEventListener("click", createUserFromForm);

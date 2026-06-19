@@ -1775,6 +1775,8 @@ def index():
 def static_files(path):
     if path.startswith("api/"):
         return jsonify({"error": "Not found"}), 404
+    if path.strip("/").lower() in {"roztrideni", "kompletace", "nastaveni"}:
+        return send_from_directory(APP_DIR, "index.html")
     return send_from_directory(APP_DIR, path)
 
 
