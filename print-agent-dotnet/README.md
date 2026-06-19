@@ -17,6 +17,7 @@ ExpedicePrintAgentV2Setup.exe
 Dvojklik:
 
 - zkopiruje se do `%LOCALAPPDATA%\ExpedicePrintAgentV2`,
+- rozbali prilozenou `SumatraPDF.exe` do `%LOCALAPPDATA%\ExpedicePrintAgentV2\bin`,
 - vytvori konfiguraci v `%APPDATA%\ExpedicePrintAgentV2\config.json`,
 - prida autostart pres `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`,
 - spusti server na `127.0.0.1:8787`.

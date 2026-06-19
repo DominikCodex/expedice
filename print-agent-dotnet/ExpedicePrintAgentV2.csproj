@@ -8,4 +8,7 @@
     <AssemblyName>ExpedicePrintAgentV2</AssemblyName>
     <RootNamespace>ExpedicePrintAgentV2</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Resources\SumatraPDF.exe" LogicalName="SumatraPDF.exe" Condition="Exists('Resources\SumatraPDF.exe')" />
+  </ItemGroup>
 </Project>

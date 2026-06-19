@@ -26,6 +26,21 @@ jobs:
         with:
           dotnet-version: "8.0.x"
 
+      - name: Bundle SumatraPDF
+        shell: pwsh
+        run: |
+          $sumatraVersion = "3.6.1"
+          $zipUrl = "https://www.sumatrapdfreader.org/dl/rel/$sumatraVersion/SumatraPDF-$sumatraVersion-64.zip"
+          $zipPath = "print-agent-dotnet/SumatraPDF-$sumatraVersion-64.zip"
+          $extractPath = "print-agent-dotnet/SumatraPDF-$sumatraVersion-64"
+          $resourcePath = "print-agent-dotnet/Resources"
+          New-Item -ItemType Directory -Force -Path $resourcePath | Out-Null
+          Invoke-WebRequest -Uri $zipUrl -OutFile $zipPath -UseBasicParsing -Headers @{ "User-Agent" = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/126.0" }
+          Expand-Archive -Path $zipPath -DestinationPath $extractPath -Force
+          $sumatraExe = Get-ChildItem -Path $extractPath -Filter "SumatraPDF*.exe" -Recurse | Select-Object -First 1
+          if (-not $sumatraExe) { throw "SumatraPDF.exe not found" }
+          Copy-Item -Force $sumatraExe.FullName "$resourcePath/SumatraPDF.exe"
+
       - name: Publish single-file agent
         shell: pwsh
         run: |

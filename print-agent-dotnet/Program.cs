@@ -1,6 +1,7 @@
 using Microsoft.Win32;
 using System.Diagnostics;
 using System.Drawing.Printing;
+using System.Reflection;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -67,6 +68,7 @@ internal static class Program
         Directory.CreateDirectory(configDir);
         File.Copy(currentExe, installedExe, overwrite: true);
         EnsureConfigFile();
+        ExtractBundledSumatra();
 
         using var runKey = Registry.CurrentUser.OpenSubKey(
             @"Software\Microsoft\Windows\CurrentVersion\Run",
@@ -483,6 +485,32 @@ internal static class Program
         };
 
         return candidates.FirstOrDefault(path => !string.IsNullOrWhiteSpace(path) && File.Exists(path));
+    }
+
+    private static void ExtractBundledSumatra()
+    {
+        var assembly = Assembly.GetExecutingAssembly();
+        var resourceName = assembly
+            .GetManifestResourceNames()
+            .FirstOrDefault(name => name.EndsWith("SumatraPDF.exe", StringComparison.OrdinalIgnoreCase));
+
+        if (resourceName is null)
+        {
+            return;
+        }
+
+        var binDir = Path.Combine(InstallDir(), "bin");
+        Directory.CreateDirectory(binDir);
+        var target = Path.Combine(binDir, "SumatraPDF.exe");
+
+        using var input = assembly.GetManifestResourceStream(resourceName);
+        if (input is null)
+        {
+            return;
+        }
+
+        using var output = File.Create(target);
+        input.CopyTo(output);
     }
 
     private static void StopExistingV2Processes()
