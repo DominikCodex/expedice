@@ -1601,6 +1601,35 @@ async function printCompletionCarrierLabel(rowId) {
   }
 }
 
+async function printCompletionIssueDocument(rowId, kind) {
+  const row = completionState.rows.find((item) => String(item.id) === String(rowId));
+  const labels = {
+    unpaid: "nezaplacenku",
+    error: "errorku",
+    unpaid_error: "nezaplaceno + error",
+  };
+  const label = labels[kind] || "kontrolní papír";
+  const orderNumber = row?.orderNumber || rowId;
+  const url = `/api/completion/rows/${encodeURIComponent(rowId)}/issue-document?kind=${encodeURIComponent(kind)}`;
+  setCompletionMessage(`Tisknu ${label} pro objednávku ${orderNumber} na výchozí tiskárnu...`, "neutral");
+
+  try {
+    const result = await printPdfViaAgent({
+      pdfUrl: url,
+      type: "default",
+      carrier: "",
+      filename: `${kind}-${orderNumber}.pdf`,
+    });
+    setCompletionMessage(`Kontrolní papír byl odeslán na tiskárnu (${result.printer || "výchozí"}).`, "success");
+  } catch (error) {
+    window.open(url, "_blank", "noopener");
+    setCompletionMessage(
+      `Lokální tiskový agent netiskl (${error.message}). Otevřel jsem PDF pro ruční tisk.`,
+      "warning"
+    );
+  }
+}
+
 function renderAddressValidation(rowId, data) {
   const tr = completionRowElement(rowId);
   const target = tr?.querySelector("[data-address-validation]");
@@ -1754,6 +1783,20 @@ function carrierSendActionHtml(row) {
   return `<button type="button" class="carrier-send ${escapeHtml(carrier)}" data-action="send-carrier-row" data-row-id="${escapeHtml(
     row.id
   )}">${label}</button>`;
+}
+
+function issueDocumentActionsHtml(row) {
+  return `
+    <button type="button" class="secondary" data-action="print-issue-document" data-kind="unpaid" data-row-id="${escapeHtml(
+      row.id
+    )}">Nezapl.</button>
+    <button type="button" class="secondary" data-action="print-issue-document" data-kind="error" data-row-id="${escapeHtml(
+      row.id
+    )}">Error</button>
+    <button type="button" class="secondary" data-action="print-issue-document" data-kind="unpaid_error" data-row-id="${escapeHtml(
+      row.id
+    )}">Nez.+Err</button>
+  `;
 }
 
 const PRINT_AGENT_URL = localStorage.getItem("expedicePrintAgentUrl") || "http://127.0.0.1:8787";
@@ -2024,6 +2067,7 @@ function renderCompletion() {
         <div class="completion-actions">
           <button type="button" data-action="save-completion-row" data-row-id="${escapeHtml(row.id)}">Uložit</button>
           <button type="button" class="secondary" data-action="validate-address" data-row-id="${escapeHtml(row.id)}">Ověřit</button>
+          ${issueDocumentActionsHtml(row)}
           ${carrierSendActionHtml(row)}
         </div>
       </td>
@@ -2852,6 +2896,9 @@ els.completionBody.addEventListener("click", (event) => {
   }
   if (button.dataset.action === "print-carrier-label") {
     printCompletionCarrierLabel(button.dataset.rowId);
+  }
+  if (button.dataset.action === "print-issue-document") {
+    printCompletionIssueDocument(button.dataset.rowId, button.dataset.kind || "unpaid");
   }
 });
 els.packetaDryRun.addEventListener("click", runPacketaDryRun);

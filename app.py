@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import unicodedata
 import secrets
 import time
 import unicodedata
@@ -3512,6 +3513,334 @@ def completion_row_label(row_id):
             "Cache-Control": "no-store",
             "X-Carrier": carrier,
             "X-Label-Number": label_number,
+        },
+    )
+
+
+CODE128_PATTERNS = [
+    "212222",
+    "222122",
+    "222221",
+    "121223",
+    "121322",
+    "131222",
+    "122213",
+    "122312",
+    "132212",
+    "221213",
+    "221312",
+    "231212",
+    "112232",
+    "122132",
+    "122231",
+    "113222",
+    "123122",
+    "123221",
+    "223211",
+    "221132",
+    "221231",
+    "213212",
+    "223112",
+    "312131",
+    "311222",
+    "321122",
+    "321221",
+    "312212",
+    "322112",
+    "322211",
+    "212123",
+    "212321",
+    "232121",
+    "111323",
+    "131123",
+    "131321",
+    "112313",
+    "132113",
+    "132311",
+    "211313",
+    "231113",
+    "231311",
+    "112133",
+    "112331",
+    "132131",
+    "113123",
+    "113321",
+    "133121",
+    "313121",
+    "211331",
+    "231131",
+    "213113",
+    "213311",
+    "213131",
+    "311123",
+    "311321",
+    "331121",
+    "312113",
+    "312311",
+    "332111",
+    "314111",
+    "221411",
+    "431111",
+    "111224",
+    "111422",
+    "121124",
+    "121421",
+    "141122",
+    "141221",
+    "112214",
+    "112412",
+    "122114",
+    "122411",
+    "142112",
+    "142211",
+    "241211",
+    "221114",
+    "413111",
+    "241112",
+    "134111",
+    "111242",
+    "121142",
+    "121241",
+    "114212",
+    "124112",
+    "124211",
+    "411212",
+    "421112",
+    "421211",
+    "212141",
+    "214121",
+    "412121",
+    "111143",
+    "111341",
+    "131141",
+    "114113",
+    "114311",
+    "411113",
+    "411311",
+    "113141",
+    "114131",
+    "311141",
+    "411131",
+    "211412",
+    "211214",
+    "211232",
+    "2331112",
+]
+
+
+def ascii_pdf_text(value):
+    text = clean_text(value)
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode("ascii")
+    return text.replace("\r", " ").replace("\n", " ").strip()
+
+
+def pdf_escape(value):
+    return ascii_pdf_text(value).replace("\\", "\\\\").replace("(", "\\(").replace(")", "\\)")
+
+
+def wrap_pdf_text(value, limit=78):
+    words = ascii_pdf_text(value).split()
+    lines = []
+    current = ""
+    for word in words:
+        next_text = f"{current} {word}".strip()
+        if len(next_text) > limit and current:
+            lines.append(current)
+            current = word
+        else:
+            current = next_text
+    if current:
+        lines.append(current)
+    return lines or [""]
+
+
+def code128_values(text):
+    safe = ascii_pdf_text(text)
+    values = [104]
+    checksum = 104
+    for index, char in enumerate(safe, start=1):
+        code = ord(char)
+        if code < 32 or code > 126:
+            continue
+        value = code - 32
+        values.append(value)
+        checksum += value * index
+    values.append(checksum % 103)
+    values.append(106)
+    return values
+
+
+def issue_document_kind(kind):
+    normalized = clean_text(kind).lower().replace("-", "_")
+    if normalized in {"error", "errorka"}:
+        return {
+            "code": "error",
+            "title": "ERRORKA",
+            "headline": "ERRORKA: zkontrolovat zbozi",
+            "banner": (1, 0.55, 0.55),
+            "suffix": "ERR",
+        }
+    if normalized in {"unpaid_error", "nezaplaceno_error", "nezaplaceno+error"}:
+        return {
+            "code": "unpaid_error",
+            "title": "NEZAPLACENO + ERROR",
+            "headline": "NEZAPLACENO + ERRORKA",
+            "banner": (1, 0.72, 0.42),
+            "suffix": "NEZERR",
+        }
+    return {
+        "code": "unpaid",
+        "title": "NEZAPLACENO",
+        "headline": "NEZAPLACENO",
+        "banner": (1, 0.84, 0.28),
+        "suffix": "NEZ",
+    }
+
+
+def payment_barcode_value(row, kind_meta):
+    order_number = ascii_pdf_text(row.get("orderNumber") or row.get("orderId") or row.get("id"))
+    amount = ascii_pdf_text(row.get("codAmount") or row.get("paidStatus") or "0")
+    amount = "".join(char for char in amount.replace(",", ".") if char.isdigit() or char == ".")
+    if "." in amount:
+        amount = amount.split(".", 1)[0]
+    amount = amount or "0"
+    currency = ascii_pdf_text(row.get("currency") or "KC").upper().replace("CZK", "KC").replace("KČ", "KC")
+    return f"{order_number}X{amount}X{currency}X{kind_meta['suffix']}"
+
+
+def issue_document_lines(row):
+    customer = " ".join(filter(None, [row.get("firstName"), row.get("lastName")]))
+    street = row.get("streetWithNumber") or " ".join(filter(None, [row.get("street"), row.get("houseNumber")]))
+    city = " ".join(filter(None, [row.get("zipCode"), row.get("city")]))
+    lines = [
+        ("Zakaznik", customer or "-"),
+        ("Castka", f"{row.get('codAmount') or '-'} {row.get('currency') or ''}".strip()),
+        ("Doprava", row.get("deliveryServiceLabel") or row.get("shippingMethod") or "-"),
+        ("Objednavka", row.get("orderNumber") or "-"),
+        ("Adresa", ", ".join(part for part in [street, city] if part) or "-"),
+        ("Kod v expedici", row.get("expeditionNumber") or row.get("rowNumber") or "-"),
+        ("Kusu pro kontrolu", row.get("quantity") or "-"),
+        ("Platba", row.get("paymentMethod") or row.get("paidStatus") or "-"),
+        ("Stav kompletace", row.get("completionStatus") or "-"),
+    ]
+    note = row.get("note") or row.get("packetaStatus") or row.get("labelPrinted") or ""
+    if note:
+        lines.append(("Poznamka", note))
+    return lines
+
+
+def build_issue_document_pdf(row, kind_meta):
+    width = 595
+    height = 842
+    commands = ["0 0 0 rg"]
+
+    def rect(x, y, w, h, color=(0, 0, 0)):
+        commands.append(f"{color[0]:.3f} {color[1]:.3f} {color[2]:.3f} rg {x:.2f} {y:.2f} {w:.2f} {h:.2f} re f")
+
+    def text(x, y, value, size=12, bold=False):
+        font = "F2" if bold else "F1"
+        commands.append(f"0 0 0 rg BT /{font} {size} Tf {x:.2f} {y:.2f} Td ({pdf_escape(value)}) Tj ET")
+
+    barcode = payment_barcode_value(row, kind_meta)
+    values = code128_values(barcode)
+    pattern_modules = sum(sum(int(char) for char in CODE128_PATTERNS[value]) for value in values)
+    module = min(1.65, 455 / max(pattern_modules, 1))
+    x = 70
+    y = 735
+    barcode_height = 48
+    for value in values:
+        pattern = CODE128_PATTERNS[value]
+        is_bar = True
+        for char in pattern:
+            bar_width = int(char) * module
+            if is_bar:
+                rect(x, y, bar_width, barcode_height)
+            x += bar_width
+            is_bar = not is_bar
+
+    text(70, 705, barcode, 18, True)
+    text(70, 675, "Expedice - kontrolni papir pro sklad", 12, False)
+
+    rect(70, 632, 455, 28, kind_meta["banner"])
+    text(84, 641, kind_meta["headline"], 17, True)
+
+    y_cursor = 598
+    for label, value in issue_document_lines(row):
+        text(70, y_cursor, f"{label}:", 12, True)
+        for line in wrap_pdf_text(value, 64):
+            text(190, y_cursor, line, 12, False)
+            y_cursor -= 16
+        y_cursor -= 5
+
+    y_cursor -= 10
+    text(70, y_cursor, "Polozky / kontrolni info:", 13, True)
+    y_cursor -= 18
+    details = [
+        row.get("expeditionOrderCode"),
+        row.get("shippingMethod"),
+        row.get("deliveryCarrierLabel"),
+        row.get("packetaShipmentId"),
+        row.get("addressValidationMessage"),
+    ]
+    for detail in [item for item in details if clean_text(item)]:
+        for line in wrap_pdf_text(detail, 82):
+            text(76, y_cursor, line, 9, False)
+            y_cursor -= 12
+
+    text(70, 48, "Po vyreseni naskenuj carovy kod v expedici pro rychlou kontrolu platby/stavu.", 9, False)
+    stream = "\n".join(commands).encode("ascii", "ignore")
+
+    objects = [
+        b"<< /Type /Catalog /Pages 2 0 R >>",
+        b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+        b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << /Font << /F1 4 0 R /F2 5 0 R >> >> /Contents 6 0 R >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+        b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>",
+        b"<< /Length " + str(len(stream)).encode("ascii") + b" >>\nstream\n" + stream + b"\nendstream",
+    ]
+    pdf = bytearray(b"%PDF-1.4\n")
+    offsets = [0]
+    for index, obj in enumerate(objects, start=1):
+        offsets.append(len(pdf))
+        pdf.extend(f"{index} 0 obj\n".encode("ascii"))
+        pdf.extend(obj)
+        pdf.extend(b"\nendobj\n")
+    xref = len(pdf)
+    pdf.extend(f"xref\n0 {len(objects) + 1}\n0000000000 65535 f \n".encode("ascii"))
+    for offset in offsets[1:]:
+        pdf.extend(f"{offset:010d} 00000 n \n".encode("ascii"))
+    pdf.extend(
+        f"trailer << /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode("ascii")
+    )
+    return bytes(pdf), barcode
+
+
+@app.route("/api/completion/rows/<int:row_id>/issue-document")
+def completion_issue_document(row_id):
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM completion_rows WHERE id = %s", (row_id,))
+            row = cur.fetchone()
+    if not row:
+        return jsonify({"error": "Řádek kompletace nebyl nalezen."}), 404
+
+    kind_meta = issue_document_kind(request.args.get("kind") or "unpaid")
+    row_api = completion_row_to_api(row)
+    pdf_bytes, barcode = build_issue_document_pdf(row_api, kind_meta)
+    filename = f"{kind_meta['code']}-{ascii_pdf_text(row_api.get('orderNumber') or row_id)}.pdf"
+    return Response(
+        pdf_bytes,
+        mimetype="application/pdf",
+        headers={
+            "Content-Disposition": f'inline; filename="{filename}"',
+            "Cache-Control": "no-store",
+            "X-Issue-Document": kind_meta["code"],
+            "X-Issue-Barcode": barcode,
         },
     )
 
