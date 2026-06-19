@@ -9,3 +9,8 @@ print-agent/bin/
 print-agent/*.spec
 print-agent/ExpedicePrintAgentSetup.exe
 print-agent/ExpedicePrintAgentUninstall.exe
+print-agent-dotnet/bin/
+print-agent-dotnet/obj/
+print-agent-dotnet/dist/
+print-agent-dotnet/ExpedicePrintAgentV2Setup.exe
+print-agent-dotnet/ExpedicePrintAgentV2Uninstall.exe

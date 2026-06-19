@@ -27,8 +27,8 @@ Stačí stáhnout z webu v `Nastavení -> Lokální tisk` a spustit dvojklikem. 
 Produkční `.exe` balíčky se staví přes GitHub Actions a publikují se do GitHub Release:
 
 ```text
-https://github.com/DominikCodex/expedice/releases/latest/download/ExpedicePrintAgentSetup.exe
-https://github.com/DominikCodex/expedice/releases/latest/download/ExpedicePrintAgentUninstall.exe
+https://github.com/DominikCodex/expedice/releases/download/print-agent-latest/ExpedicePrintAgentSetup.exe
+https://github.com/DominikCodex/expedice/releases/download/print-agent-latest/ExpedicePrintAgentUninstall.exe
 ```
 
 Nestavět je na skladovém PC. Lokální build používá PyInstaller a antiviry mohou na kombinaci build skriptu, balení EXE a přibaleného PDF nástroje reagovat falešným poplachem.

@@ -223,11 +223,11 @@
           </p>
 
           <div class="actions">
-            <a class="button" href="https://github.com/DominikCodex/expedice/releases/latest/download/ExpedicePrintAgentSetup.exe">
-              Stáhnout instalátor
+            <a class="button" href="https://github.com/DominikCodex/expedice/releases/download/print-agent-v2-latest/ExpedicePrintAgentV2Setup.exe">
+              Stáhnout instalátor V2 (.NET)
             </a>
-            <a class="button secondary" href="https://github.com/DominikCodex/expedice/releases/latest/download/ExpedicePrintAgentUninstall.exe">
-              Stáhnout odinstalátor
+            <a class="button secondary" href="https://github.com/DominikCodex/expedice/releases/download/print-agent-v2-latest/ExpedicePrintAgentV2Uninstall.exe">
+              Stáhnout odinstalátor V2
             </a>
             <button id="agent-test" class="button secondary" type="button">Otestovat agenta</button>
             <a class="button secondary" href="/">Zpět do expedice</a>
@@ -251,7 +251,7 @@
           </div>
 
           <p class="note">
-            Instalátor neobsahuje žádné API klíče, hesla, přístup k databázi ani Railway tajné proměnné.
+            V2 je nová testovací .NET verze. Původní V1 zůstává dostupná níže jako záložní varianta.
           </p>
         </div>
 
@@ -267,12 +267,19 @@
             <code>Brother QL-700</code>.
           </p>
 
-          <details>
-            <summary>Servisní soubory</summary>
+          <details open>
+            <summary>Původní V1 a servisní soubory</summary>
             <p>
-              Pro ruční diagnostiku zůstávají dostupné i původní servisní soubory.
+              Pokud by V2 na konkrétním PC zlobila, původní V1 zůstává k dispozici. V1 a V2 ale nepouštěj současně,
+              protože oba používají lokální port <code>8787</code>.
             </p>
             <div class="actions">
+              <a class="button secondary" href="https://github.com/DominikCodex/expedice/releases/download/print-agent-latest/ExpedicePrintAgentSetup.exe">
+                Stáhnout instalátor V1
+              </a>
+              <a class="button secondary" href="https://github.com/DominikCodex/expedice/releases/download/print-agent-latest/ExpedicePrintAgentUninstall.exe">
+                Stáhnout odinstalátor V1
+              </a>
               <a class="button secondary" href="print-agent/install.ps1" download>PowerShell instalace</a>
               <a class="button secondary" href="print-agent/uninstall.ps1" download>PowerShell odinstalace</a>
               <a class="button secondary" href="print-agent/README.md" target="_blank" rel="noreferrer">Návod</a>

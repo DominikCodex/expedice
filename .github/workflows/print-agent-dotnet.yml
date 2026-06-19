@@ -1,0 +1,67 @@
+name: Build print agent V2 dotnet
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    paths:
+      - "print-agent-dotnet/**"
+      - ".github/workflows/print-agent-dotnet.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows .NET agent
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Publish single-file agent
+        shell: pwsh
+        run: |
+          dotnet publish print-agent-dotnet/ExpedicePrintAgentV2.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:PublishTrimmed=false -o print-agent-dotnet/dist
+          Copy-Item -Force print-agent-dotnet/dist/ExpedicePrintAgentV2.exe print-agent-dotnet/ExpedicePrintAgentV2Setup.exe
+          Copy-Item -Force print-agent-dotnet/dist/ExpedicePrintAgentV2.exe print-agent-dotnet/ExpedicePrintAgentV2Uninstall.exe
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: expedice-print-agent-v2-dotnet
+          path: |
+            print-agent-dotnet/ExpedicePrintAgentV2Setup.exe
+            print-agent-dotnet/ExpedicePrintAgentV2Uninstall.exe
+
+      - name: Move V2 latest tag
+        if: github.ref == 'refs/heads/master'
+        shell: pwsh
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -f print-agent-v2-latest $env:GITHUB_SHA
+          git push -f origin print-agent-v2-latest
+
+      - name: Publish V2 release assets
+        if: github.ref == 'refs/heads/master'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: print-agent-v2-latest
+          name: Expedice Print Agent V2 dotnet
+          body: |
+            Nova paralelni C#/.NET verze lokalniho tiskoveho agenta.
+
+            V1 zustava k dispozici; V2 pouziva stejne lokalni API na 127.0.0.1:8787.
+          make_latest: false
+          overwrite_files: true
+          files: |
+            print-agent-dotnet/ExpedicePrintAgentV2Setup.exe
+            print-agent-dotnet/ExpedicePrintAgentV2Uninstall.exe
