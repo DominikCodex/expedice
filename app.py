@@ -3708,6 +3708,168 @@ def payment_barcode_value(row, kind_meta):
     return f"{order_number}X{amount}X{currency}X{kind_meta['suffix']}"
 
 
+def issue_document_clean_item_line(value):
+    text_value = ascii_pdf_text(clean_text(value)).strip()
+    while "  " in text_value:
+        text_value = text_value.replace("  ", " ")
+    return text_value.strip(" |;")
+
+
+def issue_document_split_text(value):
+    text_value = clean_text(value)
+    if not text_value:
+        return []
+    text_value = text_value.replace("\r", "\n")
+    chunks = []
+    for line in text_value.split("\n"):
+        for part in line.split(";"):
+            cleaned = issue_document_clean_item_line(part)
+            if cleaned:
+                chunks.append(cleaned)
+    return chunks
+
+
+def issue_document_value_lines(value):
+    if isinstance(value, dict):
+        ordered_keys = (
+            "productCode",
+            "product_code",
+            "variantCode",
+            "variant_code",
+            "code",
+            "sku",
+            "variant",
+            "name",
+            "title",
+            "quantity",
+            "qty",
+            "amount",
+        )
+        parts = [issue_document_clean_item_line(value.get(key)) for key in ordered_keys if value.get(key)]
+        return [" ".join(part for part in parts if part)] if parts else []
+    if isinstance(value, list):
+        lines = []
+        for item in value:
+            lines.extend(issue_document_value_lines(item))
+        return lines
+    return issue_document_split_text(value)
+
+
+def issue_document_looks_like_item(text_value):
+    normalized = issue_document_clean_item_line(text_value).lower()
+    if len(normalized) < 8:
+        return False
+    if normalized.startswith("error:"):
+        return True
+    has_digit = any(char.isdigit() for char in normalized)
+    has_item_shape = "-" in normalized or "/" in normalized or " ks" in normalized or "x " in normalized or normalized.endswith("x")
+    excluded_words = (
+        "zasilkovna",
+        "packeta",
+        "dobirka",
+        "platba",
+        "objednavka",
+        "telefon",
+        "email",
+        "ulice",
+        "mesto",
+        "psc",
+        "kuryr",
+        "kurier",
+        "dpd",
+    )
+    if any(word in normalized for word in excluded_words) and not normalized.startswith("error:"):
+        return False
+    return has_digit and has_item_shape
+
+
+def issue_document_known_values(row):
+    keys = (
+        "firstName",
+        "lastName",
+        "note",
+        "streetWithNumber",
+        "street",
+        "houseNumber",
+        "city",
+        "zipCode",
+        "phone",
+        "email",
+        "weight",
+        "codAmount",
+        "paymentMethod",
+        "orderNumber",
+        "shippingMethod",
+        "amount",
+        "quantity",
+        "paidStatus",
+        "expeditionNumber",
+        "expeditionOrderCode",
+        "packetaId",
+        "completionStatus",
+        "orderId",
+        "dpdFlag",
+        "packetaStatus",
+        "packetaShipmentId",
+        "orderDate",
+        "twistoPaid",
+        "dpdOrderAndPieces",
+        "canceledOrderBackup",
+        "labelPrinted",
+    )
+    known = set()
+    for key in keys:
+        value = issue_document_clean_item_line(row.get(key))
+        if value:
+            known.add(value.lower())
+    return known
+
+
+def issue_document_item_lines(row):
+    raw = row.get("raw") if isinstance(row.get("raw"), dict) else {}
+    cells = row.get("cells") if isinstance(row.get("cells"), list) else []
+    known_values = issue_document_known_values(row)
+    candidates = []
+
+    for key in (
+        "items",
+        "orderItems",
+        "order_items",
+        "products",
+        "productItems",
+        "product_items",
+        "productsText",
+        "products_text",
+        "itemsText",
+        "items_text",
+        "goods",
+        "zbozi",
+        "zboziText",
+        "orderProducts",
+    ):
+        if key in raw:
+            candidates.extend(issue_document_value_lines(raw.get(key)))
+
+    for index, value in enumerate(cells):
+        for line in issue_document_value_lines(value):
+            if index >= 34 or issue_document_looks_like_item(line):
+                candidates.append(line)
+
+    unique = []
+    seen = set()
+    for candidate in candidates:
+        line = issue_document_clean_item_line(candidate)
+        key = line.lower()
+        if not line or key in known_values or key in seen:
+            continue
+        if len(line) < 8:
+            continue
+        if issue_document_looks_like_item(line) or len(unique) < 1:
+            unique.append(line)
+            seen.add(key)
+    return unique
+
+
 def issue_document_lines(row):
     customer = " ".join(filter(None, [row.get("firstName"), row.get("lastName")]))
     street = row.get("streetWithNumber") or " ".join(filter(None, [row.get("street"), row.get("houseNumber")]))
@@ -3744,10 +3906,10 @@ def build_issue_document_pdf(row, kind_meta):
     barcode = payment_barcode_value(row, kind_meta)
     values = code128_values(barcode)
     pattern_modules = sum(sum(int(char) for char in CODE128_PATTERNS[value]) for value in values)
-    module = min(1.65, 455 / max(pattern_modules, 1))
+    module = min(0.82, 240 / max(pattern_modules, 1))
     x = 70
-    y = 735
-    barcode_height = 48
+    y = 778
+    barcode_height = 26
     for value in values:
         pattern = CODE128_PATTERNS[value]
         is_bar = True
@@ -3758,13 +3920,13 @@ def build_issue_document_pdf(row, kind_meta):
             x += bar_width
             is_bar = not is_bar
 
-    text(70, 705, barcode, 18, True)
-    text(70, 675, "Expedice - kontrolni papir pro sklad", 12, False)
+    text(70, 758, barcode, 11, True)
+    text(70, 735, "Expedice - kontrolni papir pro sklad", 12, False)
 
-    rect(70, 632, 455, 28, kind_meta["banner"])
-    text(84, 641, kind_meta["headline"], 17, True)
+    rect(70, 692, 455, 28, kind_meta["banner"])
+    text(84, 701, kind_meta["headline"], 17, True)
 
-    y_cursor = 598
+    y_cursor = 660
     for label, value in issue_document_lines(row):
         text(70, y_cursor, f"{label}:", 12, True)
         for line in wrap_pdf_text(value, 64):
@@ -3773,8 +3935,37 @@ def build_issue_document_pdf(row, kind_meta):
         y_cursor -= 5
 
     y_cursor -= 10
-    text(70, y_cursor, "Polozky / kontrolni info:", 13, True)
-    y_cursor -= 18
+    text(70, y_cursor, "Zbozi v objednavce:", 13, True)
+    y_cursor -= 16
+    item_lines = issue_document_item_lines(row)
+    if item_lines:
+        printed = 0
+        for item in item_lines:
+            if y_cursor < 78:
+                text(76, y_cursor, "... dalsi polozky se uz na papir nevesly", 7.5, False)
+                y_cursor -= 10
+                break
+            prefix = "- "
+            for line in wrap_pdf_text(f"{prefix}{item}", 118):
+                if y_cursor < 78:
+                    break
+                text(76, y_cursor, line, 7.5, False)
+                y_cursor -= 9
+                prefix = "  "
+            printed += 1
+            y_cursor -= 2
+            if printed >= 26:
+                if len(item_lines) > printed and y_cursor >= 78:
+                    text(76, y_cursor, f"... a dalsich {len(item_lines) - printed} polozek", 7.5, False)
+                    y_cursor -= 10
+                break
+    else:
+        text(76, y_cursor, "Polozky nebyly v uploadu rozpoznane.", 8, False)
+        y_cursor -= 12
+
+    y_cursor -= 8
+    text(70, y_cursor, "Doplnkove info:", 10, True)
+    y_cursor -= 13
     details = [
         row.get("expeditionOrderCode"),
         row.get("shippingMethod"),
@@ -3783,6 +3974,8 @@ def build_issue_document_pdf(row, kind_meta):
         row.get("addressValidationMessage"),
     ]
     for detail in [item for item in details if clean_text(item)]:
+        if y_cursor < 64:
+            break
         for line in wrap_pdf_text(detail, 82):
             text(76, y_cursor, line, 9, False)
             y_cursor -= 12
