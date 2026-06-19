@@ -38,6 +38,15 @@ const completionState = {
   loaded: false,
 };
 
+const completionFilters = {
+  search: "",
+  carrier: "",
+  status: "",
+  shop: "",
+};
+
+const expandedCompletionRows = new Set();
+
 const completionWorkflowState = {
   row: null,
   index: -1,
@@ -131,6 +140,11 @@ const els = {
   completionSummary: document.getElementById("completion-summary"),
   completionBody: document.getElementById("completion-body"),
   completionRowCount: document.getElementById("completion-row-count"),
+  completionFilterSearch: document.getElementById("completion-filter-search"),
+  completionFilterCarrier: document.getElementById("completion-filter-carrier"),
+  completionFilterStatus: document.getElementById("completion-filter-status"),
+  completionFilterShop: document.getElementById("completion-filter-shop"),
+  completionFilterReset: document.getElementById("completion-filter-reset"),
   workflowBoxCode: document.getElementById("completion-box-code"),
   workflowExpeditionNumber: document.getElementById("workflow-expedition-number"),
   workflowPrev: document.getElementById("workflow-prev"),
@@ -922,6 +936,7 @@ function applyCompletionDataset(dataset, rows) {
   completionState.rows = rows || [];
   completionWorkflowState.row = null;
   completionWorkflowState.index = -1;
+  expandedCompletionRows.clear();
   hidePacketaDryRunResult();
   renderCompletionOptions();
   renderWorkflow();
@@ -1502,10 +1517,9 @@ function completionRowElement(rowId) {
 }
 
 function collectCompletionRowEdits(rowId) {
-  const tr = completionRowElement(rowId);
   const values = {};
-  if (!tr) return values;
-  tr.querySelectorAll("[data-field]").forEach((input) => {
+  els.completionBody.querySelectorAll("[data-field]").forEach((input) => {
+    if (String(input.dataset.rowId) !== String(rowId)) return;
     values[input.dataset.field] = input.value.trim();
   });
   return values;
@@ -1740,6 +1754,172 @@ function completionMetaLine(label, value, className = "") {
   const text = String(value ?? "").trim();
   if (!text) return "";
   return `<small class="${escapeHtml(className)}"><b>${escapeHtml(label)}:</b> ${escapeHtml(text)}</small>`;
+}
+
+function completionCarrierKey(row) {
+  if (row.deliveryCarrier) return row.deliveryCarrier;
+  if (row.deliveryIsDpd) return "dpd";
+  if (row.deliveryIsPacketa) return "packeta";
+  if (row.deliveryIsGiftVoucher) return "gift";
+  return "manual";
+}
+
+function completionCarrierTone(row) {
+  const carrier = completionCarrierKey(row);
+  if (carrier === "dpd") return "carrier-dpd";
+  if (carrier === "packeta") return "carrier-packeta";
+  if (carrier === "gift") return "carrier-gift";
+  return "carrier-manual";
+}
+
+function completionRowTone(row, status) {
+  const tones = [completionCarrierTone(row)];
+  if (status?.tone) tones.push(`status-${status.tone}`);
+  if (row.packetaShipmentId || row.labelPrinted) tones.push("has-label");
+  return tones.join(" ");
+}
+
+function completionMainBadges(row, status) {
+  const badges = [
+    `<span class="completion-type-badge ${escapeHtml(completionCarrierTone(row))}">${escapeHtml(
+      row.deliveryCarrierLabel || "Ruční"
+    )}</span>`,
+    `<span class="status-chip ${escapeHtml(status.tone)}">${escapeHtml(status.label)}</span>`,
+  ];
+  if (row.packetaShipmentId || row.labelPrinted) {
+    badges.push(`<span class="completion-type-badge has-label">štítek</span>`);
+  }
+  if (normalize(row.paidStatus).includes("nezaplaceno") || normalize(row.completionStatus).includes("nezaplaceno")) {
+    badges.push(`<span class="completion-type-badge payment-warning">nezapl.</span>`);
+  }
+  return badges.join("");
+}
+
+function completionSearchText(row) {
+  return normalize(
+    [
+      row.orderNumber,
+      row.orderId,
+      row.expeditionNumber,
+      row.expeditionOrderCode,
+      row.firstName,
+      row.lastName,
+      row.streetWithNumber,
+      row.street,
+      row.houseNumber,
+      row.city,
+      row.zipCode,
+      row.phone,
+      row.email,
+      row.shippingMethod,
+      row.deliveryCarrierLabel,
+      row.packetaShipmentId,
+      row.packetaId,
+      row.note,
+      row.shopCode,
+    ].join(" ")
+  );
+}
+
+function completionMatchesFilters(row) {
+  const status = completionStatus(row);
+  if (completionFilters.search && !completionSearchText(row).includes(normalize(completionFilters.search))) {
+    return false;
+  }
+  if (completionFilters.carrier && completionCarrierKey(row) !== completionFilters.carrier) {
+    return false;
+  }
+  if (completionFilters.shop && (row.shopCode || completionState.dataset?.shopCode || "") !== completionFilters.shop) {
+    return false;
+  }
+  if (completionFilters.status === "label") {
+    return Boolean(row.packetaShipmentId || row.labelPrinted);
+  }
+  if (completionFilters.status === "open") {
+    return !row.completionStatus && status.tone !== "ok" && !row.packetaShipmentId && !row.labelPrinted;
+  }
+  if (completionFilters.status && status.tone !== completionFilters.status) {
+    return false;
+  }
+  return true;
+}
+
+function filteredCompletionRows() {
+  return completionState.rows.filter((row) => completionMatchesFilters(row));
+}
+
+function renderCompletionFilterOptions(rows) {
+  const carrierOptions = new Map();
+  const shopOptions = new Map();
+  rows.forEach((row) => {
+    carrierOptions.set(completionCarrierKey(row), row.deliveryCarrierLabel || completionCarrierKey(row));
+    const shop = row.shopCode || completionState.dataset?.shopCode || "";
+    if (shop) shopOptions.set(shop, shop);
+  });
+
+  const currentCarrier = completionFilters.carrier;
+  const currentShop = completionFilters.shop;
+  els.completionFilterCarrier.innerHTML = `<option value="">Všichni dopravci</option>${Array.from(carrierOptions.entries())
+    .sort((a, b) => a[1].localeCompare(b[1], "cs"))
+    .map(([value, label]) => `<option value="${escapeHtml(value)}">${escapeHtml(label)}</option>`)
+    .join("")}`;
+  els.completionFilterShop.innerHTML = `<option value="">Všechny e-shopy</option>${Array.from(shopOptions.keys())
+    .sort((a, b) => a.localeCompare(b, "cs"))
+    .map((shop) => `<option value="${escapeHtml(shop)}">${escapeHtml(shop)}</option>`)
+    .join("")}`;
+  els.completionFilterCarrier.value = currentCarrier;
+  els.completionFilterShop.value = currentShop;
+}
+
+function completionDetailHtml(row) {
+  const editableAddress = row.streetWithNumber || [row.street, row.houseNumber].filter(Boolean).join(" ");
+  return `
+    <div class="completion-detail-grid">
+      <section>
+        <h3>Kontakt a adresa</h3>
+        <div class="completion-detail-fields">
+          ${completionInput(row, "streetWithNumber", editableAddress, "address-input")}
+          <div class="completion-inline-inputs">
+            ${completionInput(row, "city", row.city || "", "city-input")}
+            ${completionInput(row, "zipCode", row.zipCode || "", "zip-input")}
+          </div>
+          <div class="completion-inline-inputs">
+            ${completionInput(row, "street", row.street || "", "street-input")}
+            ${completionInput(row, "houseNumber", row.houseNumber || "", "house-input")}
+          </div>
+          ${completionInput(row, "phone", row.phone || "", "phone-input")}
+          ${completionInput(row, "email", row.email || "", "email-input")}
+        </div>
+      </section>
+      <section>
+        <h3>Doprava a štítky</h3>
+        ${completionMetaLine("Doprava", row.shippingMethod)}
+        ${completionMetaLine("Dopravce", row.deliveryCarrierLabel)}
+        ${completionMetaLine("Zásilkovna ID", row.packetaId, "code")}
+        ${completionMetaLine("ID zásilky", row.packetaShipmentId, "code")}
+        ${completionMetaLine("Stav Zásilkovna", row.packetaStatus)}
+        ${completionMetaLine("Štítek", row.labelPrinted)}
+        ${completionMetaLine("DPD", row.dpdFlag)}
+      </section>
+      <section>
+        <h3>Objednávka</h3>
+        ${completionMetaLine("Objednávka", row.orderNumber, "code")}
+        ${completionMetaLine("ID objednávky", row.orderId, "code")}
+        ${completionMetaLine("Kód pořadí", row.expeditionOrderCode, "code")}
+        ${completionMetaLine("Datum", row.orderDate, "code")}
+        ${completionMetaLine("E-shop", row.shopCode || completionState.dataset?.shopCode)}
+        ${completionMetaLine("Měna", row.currency)}
+        ${completionMetaLine("Dobírka", row.codAmount)}
+      </section>
+      <section>
+        <h3>Poznámky</h3>
+        <p>${escapeHtml(row.note || "Bez poznámky.")}</p>
+        ${completionMetaLine("Status kompletace", row.completionStatus)}
+        ${completionMetaLine("Platba", row.paymentMethod || row.paidStatus)}
+        ${completionMetaLine("Zrušená záloha", row.canceledOrderBackup)}
+      </section>
+    </div>
+  `;
 }
 
 function addressValidationHtml(row) {
@@ -2051,8 +2231,10 @@ function openWorkflowOrder() {
 }
 
 function renderCompletion() {
-  const rows = completionState.rows;
-  els.completionRowCount.textContent = `${rows.length} řádků`;
+  const allRows = completionState.rows;
+  renderCompletionFilterOptions(allRows);
+  const rows = filteredCompletionRows();
+  els.completionRowCount.textContent = `${rows.length} / ${allRows.length} řádků`;
   renderCompletionSummary(rows);
   els.completionBody.innerHTML = "";
   els.completionDelete.disabled = !completionState.dataset || completionState.dataset.status !== "active";
@@ -2067,13 +2249,16 @@ function renderCompletion() {
     const customer = [row.firstName, row.lastName].filter(Boolean).join(" ");
     const address = [row.city, row.zipCode].filter(Boolean).join(" ");
     const shop = row.shopCode || completionState.dataset?.shopCode || "-";
-    const editableAddress = row.streetWithNumber || [row.street, row.houseNumber].filter(Boolean).join(" ");
     const labelOrShipment = row.labelPrinted || row.packetaShipmentId || "";
+    const rowId = String(row.id);
+    const expanded = expandedCompletionRows.has(rowId);
     const tr = document.createElement("tr");
+    tr.className = `completion-main-row ${completionRowTone(row, status)} ${expanded ? "expanded" : ""}`;
     tr.dataset.completionRowId = row.id;
     tr.innerHTML = `
       <td>
         <div class="completion-actions">
+          <button type="button" class="detail-toggle" data-action="toggle-completion-detail" data-row-id="${escapeHtml(row.id)}" aria-expanded="${expanded ? "true" : "false"}">${expanded ? "−" : "+"}</button>
           <button type="button" data-action="save-completion-row" data-row-id="${escapeHtml(row.id)}">Uložit</button>
           <button type="button" class="secondary" data-action="validate-address" data-row-id="${escapeHtml(row.id)}">Ověřit</button>
           ${carrierSendActionHtml(row)}
@@ -2085,54 +2270,57 @@ function renderCompletion() {
       </td>
       <td class="completion-order-cell">
         <strong class="code">${escapeHtml(row.orderNumber || "-")}</strong>
-        ${completionMetaLine("ID", row.orderId, "code")}
-        ${completionMetaLine("Kód", row.expeditionOrderCode, "code")}
-        ${completionMetaLine("Datum", row.orderDate, "code")}
+        <div class="completion-badges">${completionMainBadges(row, status)}</div>
       </td>
       <td class="completion-customer-cell">
         <strong>${escapeHtml(customer || "-")}</strong>
         <small>${escapeHtml(address)}</small>
         ${completionMetaLine("E-shop", shop)}
       </td>
-      <td class="completion-address-cell">
-        ${completionInput(row, "streetWithNumber", editableAddress, "address-input compact-address")}
-        <div class="completion-inline-inputs">
-          ${completionInput(row, "city", row.city || "", "city-input")}
-          ${completionInput(row, "zipCode", row.zipCode || "", "zip-input")}
-        </div>
-        <div class="completion-inline-inputs">
-          ${completionInput(row, "street", row.street || "", "street-input")}
-          ${completionInput(row, "houseNumber", row.houseNumber || "", "house-input")}
-        </div>
+      <td class="completion-address-summary">
+        <strong>${escapeHtml(row.streetWithNumber || [row.street, row.houseNumber].filter(Boolean).join(" ") || "-")}</strong>
+        <small>${escapeHtml(address)}</small>
       </td>
       <td class="completion-contact-cell">
-        ${completionInput(row, "phone", row.phone || "", "phone-input")}
-        ${completionInput(row, "email", row.email || "", "email-input")}
+        <strong>${escapeHtml(row.phone || "-")}</strong>
+        <small>${escapeHtml(row.email || "")}</small>
       </td>
       <td>${addressValidationHtml(row)}</td>
       <td class="completion-carrier-cell">
         ${deliveryCarrierHtml(row)}
-        ${completionMetaLine("Pobočka", row.packetaId, "code")}
-        ${completionMetaLine("Zásilka", row.packetaShipmentId, "code")}
-        ${completionMetaLine("Štítek", row.labelPrinted)}
+        ${labelOrShipment ? `<small class="code">${escapeHtml(labelOrShipment)}</small>` : ""}
       </td>
       <td class="completion-payment-cell">
         <span class="currency-chip ${escapeHtml((row.currency || "").toLowerCase())}">${escapeHtml(row.currency || "")}</span>
-        ${completionMetaLine("Platba", row.paymentMethod || row.paidStatus)}
         ${completionMetaLine("Dobírka", row.codAmount)}
+        ${completionMetaLine("Platba", row.paymentMethod || row.paidStatus)}
       </td>
       <td><span class="qty">${escapeHtml(row.quantity || "")}</span></td>
       <td><span class="status-chip ${status.tone}">${escapeHtml(status.label)}</span></td>
       <td class="completion-note">${escapeHtml(row.note || "")}</td>
       <td class="completion-tech-cell">
-        ${completionMetaLine("DPD", row.dpdFlag)}
-        ${completionMetaLine("Zás.", row.packetaStatus)}
-        ${completionMetaLine("Tisk", labelOrShipment)}
-        ${completionMetaLine("Doprava", row.shippingMethod)}
+        ${completionMetaLine("ID", row.orderId, "code")}
+        ${completionMetaLine("Datum", row.orderDate, "code")}
       </td>
     `;
     els.completionBody.appendChild(tr);
+
+    const detailRow = document.createElement("tr");
+    detailRow.className = `completion-detail-row ${expanded ? "" : "hidden"}`;
+    detailRow.dataset.detailFor = row.id;
+    detailRow.innerHTML = `<td colspan="13">${completionDetailHtml(row)}</td>`;
+    els.completionBody.appendChild(detailRow);
   });
+}
+
+function toggleCompletionDetail(rowId) {
+  const key = String(rowId);
+  if (expandedCompletionRows.has(key)) {
+    expandedCompletionRows.delete(key);
+  } else {
+    expandedCompletionRows.add(key);
+  }
+  renderCompletion();
 }
 
 function renderUsers() {
@@ -2912,6 +3100,9 @@ els.completionDelete.addEventListener("click", async () => {
 els.completionBody.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
+  if (button.dataset.action === "toggle-completion-detail") {
+    toggleCompletionDetail(button.dataset.rowId);
+  }
   if (button.dataset.action === "save-completion-row") {
     saveCompletionRow(button.dataset.rowId);
   }
@@ -2924,6 +3115,31 @@ els.completionBody.addEventListener("click", (event) => {
   if (button.dataset.action === "print-carrier-label") {
     printCompletionCarrierLabel(button.dataset.rowId);
   }
+});
+els.completionFilterSearch?.addEventListener("input", () => {
+  completionFilters.search = els.completionFilterSearch.value.trim();
+  renderCompletion();
+});
+els.completionFilterCarrier?.addEventListener("change", () => {
+  completionFilters.carrier = els.completionFilterCarrier.value;
+  renderCompletion();
+});
+els.completionFilterStatus?.addEventListener("change", () => {
+  completionFilters.status = els.completionFilterStatus.value;
+  renderCompletion();
+});
+els.completionFilterShop?.addEventListener("change", () => {
+  completionFilters.shop = els.completionFilterShop.value;
+  renderCompletion();
+});
+els.completionFilterReset?.addEventListener("click", () => {
+  completionFilters.search = "";
+  completionFilters.carrier = "";
+  completionFilters.status = "";
+  completionFilters.shop = "";
+  els.completionFilterSearch.value = "";
+  els.completionFilterStatus.value = "";
+  renderCompletion();
 });
 els.packetaDryRun.addEventListener("click", runPacketaDryRun);
 els.packetaValidate.addEventListener("click", runPacketaValidation);

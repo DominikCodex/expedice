@@ -6,7 +6,7 @@
     <title>Roztřídění zboží</title>
     <link rel="stylesheet" href="styles.css?v=issue-documents-20260619" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=completion-redesign-20260619"></script>
+    <script defer src="app.js?v=completion-compact-filters-20260619"></script>
   </head>
   <body>
     <section id="auth-view" class="auth-view">
@@ -270,6 +270,37 @@
             <section id="completion-message" class="message neutral" aria-live="polite"></section>
 
             <section id="packeta-dry-run-result" class="dry-run-result hidden" aria-live="polite"></section>
+
+            <section class="completion-filter-panel" aria-label="Filtry kompletace">
+              <label class="field">
+                <span>Hledat v objednávkách</span>
+                <input id="completion-filter-search" autocomplete="off" placeholder="Objednávka, zákazník, adresa, telefon..." />
+              </label>
+              <label class="field">
+                <span>Dopravce</span>
+                <select id="completion-filter-carrier">
+                  <option value="">Všichni dopravci</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>Stav</span>
+                <select id="completion-filter-status">
+                  <option value="">Všechny stavy</option>
+                  <option value="open">Rozpracované</option>
+                  <option value="ok">OK / hotové</option>
+                  <option value="warning">Nezaplacené</option>
+                  <option value="danger">Chyby / storna</option>
+                  <option value="label">Mají štítek</option>
+                </select>
+              </label>
+              <label class="field">
+                <span>E-shop</span>
+                <select id="completion-filter-shop">
+                  <option value="">Všechny e-shopy</option>
+                </select>
+              </label>
+              <button id="completion-filter-reset" type="button" class="secondary">Vyčistit filtry</button>
+            </section>
 
             <section class="table-panel completion-panel">
               <div class="section-head">
