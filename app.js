@@ -1736,6 +1736,12 @@ function completionInput(row, field, value, className = "") {
   )}" value="${escapeHtml(value || "")}" />`;
 }
 
+function completionMetaLine(label, value, className = "") {
+  const text = String(value ?? "").trim();
+  if (!text) return "";
+  return `<small class="${escapeHtml(className)}"><b>${escapeHtml(label)}:</b> ${escapeHtml(text)}</small>`;
+}
+
 function addressValidationHtml(row) {
   const status = row.addressValidationStatus || "";
   const message = row.addressValidationMessage || "";
@@ -2052,7 +2058,7 @@ function renderCompletion() {
   els.completionDelete.disabled = !completionState.dataset || completionState.dataset.status !== "active";
 
   if (!rows.length) {
-    els.completionBody.innerHTML = `<tr><td colspan="11" class="empty">Zadna kompletace k zobrazeni.</td></tr>`;
+    els.completionBody.innerHTML = `<tr><td colspan="13" class="empty">Zadna kompletace k zobrazeni.</td></tr>`;
     return;
   }
 
@@ -2060,6 +2066,9 @@ function renderCompletion() {
     const status = completionStatus(row);
     const customer = [row.firstName, row.lastName].filter(Boolean).join(" ");
     const address = [row.city, row.zipCode].filter(Boolean).join(" ");
+    const shop = row.shopCode || completionState.dataset?.shopCode || "-";
+    const editableAddress = row.streetWithNumber || [row.street, row.houseNumber].filter(Boolean).join(" ");
+    const labelOrShipment = row.labelPrinted || row.packetaShipmentId || "";
     const tr = document.createElement("tr");
     tr.dataset.completionRowId = row.id;
     tr.innerHTML = `
@@ -2070,38 +2079,57 @@ function renderCompletion() {
           ${carrierSendActionHtml(row)}
         </div>
       </td>
-      <td><span class="shop-chip">${escapeHtml(row.shopCode || completionState.dataset?.shopCode || "-")}</span></td>
-      <td class="code">${escapeHtml(row.expeditionNumber || row.rowNumber || "")}</td>
-      <td class="code">${escapeHtml(row.orderNumber || "")}</td>
-      <td class="code">${escapeHtml(row.expeditionOrderCode || "")}</td>
-      <td class="code">${escapeHtml(row.packetaId || "")}</td>
-      <td>${escapeHtml(row.completionStatus || "")}</td>
-      <td class="code">${escapeHtml(row.orderId || "")}</td>
-      <td>${completionInput(row, "street", row.street || "")}</td>
-      <td>${completionInput(row, "houseNumber", row.houseNumber || "")}</td>
-      <td>${escapeHtml(row.dpdFlag || "")}</td>
-      <td>${escapeHtml(row.packetaStatus || "")}</td>
-      <td class="code">${escapeHtml(row.packetaShipmentId || "")}</td>
-      <td class="code">${escapeHtml(row.orderDate || "")}</td>
-      <td>
+      <td class="completion-sequence">
+        <strong class="code">${escapeHtml(row.expeditionNumber || row.rowNumber || "")}</strong>
+        <span class="shop-chip">${escapeHtml(shop)}</span>
+      </td>
+      <td class="completion-order-cell">
+        <strong class="code">${escapeHtml(row.orderNumber || "-")}</strong>
+        ${completionMetaLine("ID", row.orderId, "code")}
+        ${completionMetaLine("Kód", row.expeditionOrderCode, "code")}
+        ${completionMetaLine("Datum", row.orderDate, "code")}
+      </td>
+      <td class="completion-customer-cell">
         <strong>${escapeHtml(customer || "-")}</strong>
         <small>${escapeHtml(address)}</small>
+        ${completionMetaLine("E-shop", shop)}
       </td>
-      <td>${completionInput(row, "phone", row.phone || "", "phone-input")}</td>
-      <td>${completionInput(row, "email", row.email || "", "email-input")}</td>
-      <td>${completionInput(row, "streetWithNumber", row.streetWithNumber || [row.street, row.houseNumber].filter(Boolean).join(" "), "address-input")}</td>
-      <td>${completionInput(row, "city", row.city || "")}</td>
-      <td>${completionInput(row, "zipCode", row.zipCode || "", "zip-input")}</td>
+      <td class="completion-address-cell">
+        ${completionInput(row, "streetWithNumber", editableAddress, "address-input compact-address")}
+        <div class="completion-inline-inputs">
+          ${completionInput(row, "city", row.city || "", "city-input")}
+          ${completionInput(row, "zipCode", row.zipCode || "", "zip-input")}
+        </div>
+        <div class="completion-inline-inputs">
+          ${completionInput(row, "street", row.street || "", "street-input")}
+          ${completionInput(row, "houseNumber", row.houseNumber || "", "house-input")}
+        </div>
+      </td>
+      <td class="completion-contact-cell">
+        ${completionInput(row, "phone", row.phone || "", "phone-input")}
+        ${completionInput(row, "email", row.email || "", "email-input")}
+      </td>
       <td>${addressValidationHtml(row)}</td>
-      <td>${deliveryCarrierHtml(row)}</td>
-      <td><span class="currency-chip ${escapeHtml((row.currency || "").toLowerCase())}">${escapeHtml(row.currency || "")}</span></td>
-      <td>${escapeHtml(row.shippingMethod || "")}</td>
-      <td>${escapeHtml(row.paymentMethod || row.paidStatus || "")}</td>
-      <td>${escapeHtml(row.codAmount || "")}</td>
+      <td class="completion-carrier-cell">
+        ${deliveryCarrierHtml(row)}
+        ${completionMetaLine("Pobočka", row.packetaId, "code")}
+        ${completionMetaLine("Zásilka", row.packetaShipmentId, "code")}
+        ${completionMetaLine("Štítek", row.labelPrinted)}
+      </td>
+      <td class="completion-payment-cell">
+        <span class="currency-chip ${escapeHtml((row.currency || "").toLowerCase())}">${escapeHtml(row.currency || "")}</span>
+        ${completionMetaLine("Platba", row.paymentMethod || row.paidStatus)}
+        ${completionMetaLine("Dobírka", row.codAmount)}
+      </td>
       <td><span class="qty">${escapeHtml(row.quantity || "")}</span></td>
       <td><span class="status-chip ${status.tone}">${escapeHtml(status.label)}</span></td>
-      <td>${escapeHtml(row.labelPrinted || row.packetaShipmentId || "")}</td>
       <td class="completion-note">${escapeHtml(row.note || "")}</td>
+      <td class="completion-tech-cell">
+        ${completionMetaLine("DPD", row.dpdFlag)}
+        ${completionMetaLine("Zás.", row.packetaStatus)}
+        ${completionMetaLine("Tisk", labelOrShipment)}
+        ${completionMetaLine("Doprava", row.shippingMethod)}
+      </td>
     `;
     els.completionBody.appendChild(tr);
   });

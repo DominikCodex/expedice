@@ -901,33 +901,47 @@ select:focus {
 }
 
 .completion-table {
-  min-width: 3700px;
+  min-width: 1960px;
+  font-size: 12px;
 }
 
 .completion-table th,
 .completion-table td {
+  white-space: normal;
+  vertical-align: top;
+}
+
+.completion-table th {
   white-space: nowrap;
 }
 
-.completion-table td:nth-child(8) {
-  max-width: 260px;
-  overflow: hidden;
-  text-overflow: ellipsis;
+.completion-table th:first-child,
+.completion-table td:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 3;
+  background: var(--surface);
+  box-shadow: 8px 0 14px rgba(22, 34, 28, 0.06);
+}
+
+.completion-table th:first-child {
+  background: #eef4f0;
 }
 
 .table-input {
-  min-width: 120px;
-  min-height: 32px;
-  padding: 5px 7px;
+  width: 100%;
+  min-width: 0;
+  min-height: 28px;
+  padding: 4px 6px;
   font-size: 12px;
 }
 
 .table-input.phone-input {
-  min-width: 135px;
+  min-width: 118px;
 }
 
 .table-input.email-input {
-  min-width: 210px;
+  min-width: 200px;
 }
 
 .table-input.address-input {
@@ -935,20 +949,93 @@ select:focus {
 }
 
 .table-input.zip-input {
-  min-width: 86px;
+  min-width: 76px;
+}
+
+.table-input.city-input {
+  min-width: 132px;
+}
+
+.table-input.house-input {
+  min-width: 76px;
 }
 
 .completion-actions {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(58px, 1fr));
   gap: 6px;
   align-items: center;
+  min-width: 146px;
 }
 
 .completion-actions button {
-  min-height: 32px;
-  padding: 5px 8px;
-  font-size: 12px;
+  min-height: 28px;
+  padding: 4px 7px;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.completion-actions .carrier-send,
+.completion-actions .label-print {
+  grid-column: 1 / -1;
+}
+
+.completion-sequence,
+.completion-order-cell,
+.completion-customer-cell,
+.completion-carrier-cell,
+.completion-payment-cell,
+.completion-tech-cell {
+  min-width: 120px;
+}
+
+.completion-sequence strong,
+.completion-order-cell strong,
+.completion-customer-cell strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.completion-address-cell {
+  display: grid;
+  gap: 5px;
+  min-width: 300px;
+}
+
+.completion-contact-cell {
+  display: grid;
+  gap: 5px;
+  min-width: 220px;
+}
+
+.completion-inline-inputs {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 82px;
+  gap: 5px;
+}
+
+.completion-carrier-cell,
+.completion-payment-cell,
+.completion-tech-cell {
+  display: grid;
+  gap: 4px;
+}
+
+.completion-payment-cell .currency-chip {
+  width: fit-content;
+}
+
+.completion-tech-cell {
+  min-width: 210px;
+  max-width: 260px;
+}
+
+.completion-order-cell {
+  min-width: 155px;
+}
+
+.completion-customer-cell {
+  min-width: 180px;
 }
 
 .carrier-send.dpd {
@@ -1257,10 +1344,10 @@ select:focus {
 }
 
 .completion-note {
-  max-width: 280px;
+  max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .shop-chip,
