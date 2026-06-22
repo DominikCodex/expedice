@@ -146,6 +146,8 @@ const els = {
   completionFilterStatus: document.getElementById("completion-filter-status"),
   completionFilterShop: document.getElementById("completion-filter-shop"),
   completionFilterReset: document.getElementById("completion-filter-reset"),
+  addressValidationLog: document.getElementById("address-validation-log"),
+  addressValidationLogRefresh: document.getElementById("address-validation-log-refresh"),
   workflowBoxCode: document.getElementById("completion-box-code"),
   workflowExpeditionNumber: document.getElementById("workflow-expedition-number"),
   workflowPrev: document.getElementById("workflow-prev"),
@@ -944,6 +946,7 @@ function applyCompletionDataset(dataset, rows) {
   renderCompletionOptions();
   renderWorkflow();
   renderCompletion();
+  loadAddressValidationLog();
   setCompletionMessage(`Načteno: ${datasetLabel(completionState.dataset)}.`, "success");
 }
 
@@ -1754,6 +1757,7 @@ async function validateAddressDeliveriesBulk() {
   const skippedOk = addressRows.length - rows.length;
   if (!rows.length) {
     setCompletionMessage(`Všechny adresní zásilky už jsou ověřené a v pořádku (${skippedOk} přeskočeno).`, "success");
+    window.alert(addressValidationPopupSummary({ checked: 0, skippedOk, failed: 0, addressErrors: 0, results: [] }));
     return;
   }
 
@@ -1765,12 +1769,14 @@ async function validateAddressDeliveriesBulk() {
   els.completionValidateAddresses.disabled = true;
   let checked = 0;
   let failed = 0;
+  const results = [];
   const queue = rows.slice();
   const workers = Array.from({ length: Math.min(4, queue.length) }, async () => {
     while (queue.length) {
       const row = queue.shift();
       try {
-        await validateAddressRow(row);
+        const data = await validateAddressRow(row);
+        results.push({ row, data });
       } catch (error) {
         row.addressValidationStatus = "error";
         row.addressValidationMessage = error.message || "Ověření adresy selhalo";
@@ -1791,6 +1797,8 @@ async function validateAddressDeliveriesBulk() {
     completionFilters.status = "address_error";
     els.completionFilterStatus.value = "address_error";
     renderCompletion();
+    loadAddressValidationLog();
+    window.alert(addressValidationPopupSummary({ checked, skippedOk, failed, addressErrors, results }));
     setCompletionMessage(
       `Kontrola adres hotová: ${checked} ověřeno, ${skippedOk} OK přeskočeno, ${addressErrors} problematických adres${failed ? `, ${failed} technických chyb` : ""}.`,
       addressErrors || failed ? "warning" : "success"
@@ -1851,6 +1859,86 @@ function renderCompletionSummary(rows) {
     <span><strong>${addressErrors}</strong> chyb adres</span>
     <span>${escapeHtml(shops || "bez e-shopu")}</span>
   `;
+}
+
+function addressValidationActionLabel(action) {
+  const labels = {
+    "address-replaced": "Přepsaná adresa",
+    "address-completed": "Doplněná adresa",
+    "carrier-note": "Pozn. přepravce",
+    verified: "Ověřeno",
+    suggestion: "Návrh",
+    not_found: "Nenalezeno",
+    error: "Chyba",
+  };
+  return labels[action] || action || "-";
+}
+
+function renderAddressValidationLog(logs = []) {
+  if (!els.addressValidationLog) return;
+  if (!logs.length) {
+    els.addressValidationLog.innerHTML = `<p class="empty-log">Zatím tu nejsou žádné záznamy ověření adres.</p>`;
+    return;
+  }
+  els.addressValidationLog.innerHTML = logs
+    .map(
+      (item) => `
+        <article class="address-log-item ${escapeHtml(item.status || "")}">
+          <strong>${escapeHtml(addressValidationActionLabel(item.action))}</strong>
+          <span>${escapeHtml(formatTime(item.createdAt) || "")}</span>
+          ${item.actorName ? `<small>Uživatel: ${escapeHtml(item.actorName)}</small>` : ""}
+          <small>${escapeHtml(item.orderNumber || "-")} | ${escapeHtml(item.customerName || "-")}</small>
+          <p>${escapeHtml(item.message || "")}</p>
+          <small>${escapeHtml(item.originalAddress || "-")} → ${escapeHtml(item.resolvedAddress || "-")}</small>
+          ${
+            item.carrierNoteAfter
+              ? `<small>Pozn. přepravce: ${escapeHtml(item.carrierNoteAfter)}</small>`
+              : ""
+          }
+        </article>
+      `
+    )
+    .join("");
+}
+
+async function loadAddressValidationLog() {
+  if (!els.addressValidationLog) return;
+  if (!completionState.dataset?.id) {
+    renderAddressValidationLog([]);
+    return;
+  }
+  els.addressValidationLog.innerHTML = `<p class="empty-log">Načítám log ověření adres...</p>`;
+  try {
+    const data = await fetchJson(
+      `/api/address-validation-logs?datasetId=${encodeURIComponent(completionState.dataset.id)}&limit=40`
+    );
+    renderAddressValidationLog(data.logs || []);
+  } catch (error) {
+    els.addressValidationLog.innerHTML = `<p class="empty-log error">Log se nepodařilo načíst: ${escapeHtml(error.message)}</p>`;
+  }
+}
+
+function addressValidationPopupSummary({ checked, skippedOk, failed, addressErrors, results }) {
+  const verified = results.filter((item) => item.data?.valid).length;
+  const replaced = results.filter((item) => item.data?.appliedSuggestion).length;
+  const completed = results.filter((item) => item.data?.appliedAddressCompletion).length;
+  const carrierNotes = results.filter((item) => item.data?.appliedCarrierNote).length;
+  const notFound = results.filter((item) => item.data?.status === "not_found").length;
+  return [
+    "Ověření adres je hotové.",
+    "",
+    `Nově zkontrolováno: ${checked}`,
+    `Již OK přeskočeno: ${skippedOk}`,
+    `Ověřeno jako v pořádku: ${verified}`,
+    `Přepsané návrhy adres: ${replaced}`,
+    `Doplněné chybějící údaje: ${completed}`,
+    `Doplněné poznámky pro přepravce: ${carrierNotes}`,
+    `Nenalezeno: ${notFound}`,
+    `Chyby volání: ${failed}`,
+    `Aktuálně problematické adresy: ${addressErrors}`,
+    "",
+    "Detail je uložený dole v Logu ověření adres.",
+  ].join("\n");
 }
 
 function completionInput(row, field, value, className = "") {
@@ -3346,6 +3434,7 @@ els.completionFilterReset?.addEventListener("click", () => {
   renderCompletion();
 });
 els.completionValidateAddresses?.addEventListener("click", validateAddressDeliveriesBulk);
+els.addressValidationLogRefresh?.addEventListener("click", loadAddressValidationLog);
 els.packetaDryRun.addEventListener("click", runPacketaDryRun);
 els.packetaValidate.addEventListener("click", runPacketaValidation);
 els.dpdDryRun.addEventListener("click", runDpdDryRun);

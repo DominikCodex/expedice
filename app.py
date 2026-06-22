@@ -321,6 +321,36 @@ def ensure_schema():
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS address_validation_logs (
+                    id BIGSERIAL PRIMARY KEY,
+                    dataset_id BIGINT REFERENCES datasets(id) ON DELETE SET NULL,
+                    row_id BIGINT REFERENCES completion_rows(id) ON DELETE SET NULL,
+                    actor_user_id BIGINT,
+                    actor_name TEXT,
+                    order_number TEXT,
+                    customer_name TEXT,
+                    original_address TEXT,
+                    resolved_address TEXT,
+                    carrier_note_before TEXT,
+                    carrier_note_after TEXT,
+                    status TEXT,
+                    action TEXT,
+                    message TEXT,
+                    details JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute("ALTER TABLE address_validation_logs ADD COLUMN IF NOT EXISTS actor_user_id BIGINT")
+            cur.execute("ALTER TABLE address_validation_logs ADD COLUMN IF NOT EXISTS actor_name TEXT")
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_address_validation_logs_dataset
+                ON address_validation_logs (dataset_id, created_at DESC)
+                """
+            )
+            cur.execute(
+                """
                 INSERT INTO expedition_days (day_date, label)
                 SELECT DISTINCT dataset_date, TO_CHAR(dataset_date, 'FMDD.FMMM.YYYY')
                 FROM datasets
@@ -3062,6 +3092,100 @@ def mapy_address_fills_missing_input(data, address):
     return any(clean_text(address.get(address_key)) and not clean_text(parts.get(input_key)) for input_key, address_key in field_pairs)
 
 
+def address_log_address(row):
+    if not row:
+        return ""
+    street = row_value(row, "streetWithNumber", "street_with_number")
+    if not clean_text(street):
+        street = " ".join(
+            part
+            for part in [
+                clean_text(row_value(row, "street", "street")),
+                clean_text(row_value(row, "houseNumber", "house_number")),
+            ]
+            if part
+        )
+    return ", ".join(
+        part
+        for part in [
+            clean_text(street),
+            clean_text(row_value(row, "zipCode", "zip_code")),
+            clean_text(row_value(row, "city", "city")),
+        ]
+        if part
+    )
+
+
+def address_validation_action(result_payload):
+    if result_payload.get("appliedCarrierNote"):
+        return "carrier-note"
+    if result_payload.get("appliedSuggestion"):
+        return "address-replaced"
+    if result_payload.get("appliedAddressCompletion"):
+        return "address-completed"
+    if result_payload.get("valid"):
+        return "verified"
+    return clean_text(result_payload.get("status")) or "error"
+
+
+def insert_address_validation_log(cur, original_row, updated_row, result_payload):
+    row = updated_row or original_row or {}
+    actor = current_user() or {}
+    cur.execute(
+        """
+        INSERT INTO address_validation_logs (
+            dataset_id, row_id, actor_user_id, actor_name, order_number, customer_name, original_address,
+            resolved_address, carrier_note_before, carrier_note_after,
+            status, action, message, details
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        """,
+        (
+            row_value(row, "datasetId", "dataset_id"),
+            row_value(row, "id", "id"),
+            actor.get("id"),
+            actor.get("displayName") or actor.get("display_name") or actor.get("username") or actor.get("email"),
+            row_value(row, "orderNumber", "order_number"),
+            " ".join(
+                part
+                for part in [
+                    clean_text(row_value(row, "firstName", "first_name")),
+                    clean_text(row_value(row, "lastName", "last_name")),
+                ]
+                if part
+            ),
+            address_log_address(original_row),
+            address_log_address(updated_row or original_row),
+            row_value(original_row or {}, "carrierNote", "carrier_note"),
+            row_value(updated_row or original_row or {}, "carrierNote", "carrier_note"),
+            result_payload.get("status"),
+            address_validation_action(result_payload),
+            result_payload.get("message"),
+            Json(result_payload),
+        ),
+    )
+
+
+def address_validation_log_to_api(row):
+    return {
+        "id": row["id"],
+        "datasetId": row.get("dataset_id"),
+        "rowId": row.get("row_id"),
+        "actorName": row.get("actor_name") or "",
+        "orderNumber": row.get("order_number") or "",
+        "customerName": row.get("customer_name") or "",
+        "originalAddress": row.get("original_address") or "",
+        "resolvedAddress": row.get("resolved_address") or "",
+        "carrierNoteBefore": row.get("carrier_note_before") or "",
+        "carrierNoteAfter": row.get("carrier_note_after") or "",
+        "status": row.get("status") or "",
+        "action": row.get("action") or "",
+        "message": row.get("message") or "",
+        "details": row.get("details") or {},
+        "createdAt": row["created_at"].isoformat() if row.get("created_at") else None,
+    }
+
+
 @app.route("/api/packeta/dry-run")
 def packeta_dry_run():
     auth_error = require_download_token_if_configured()
@@ -4217,7 +4341,9 @@ def validate_address():
         if row_id:
             ensure_schema()
             with db_conn() as conn:
-                with conn.cursor() as cur:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("SELECT * FROM completion_rows WHERE id = %s", (row_id,))
+                    original_row = cur.fetchone()
                     cur.execute(
                         """
                         UPDATE completion_rows
@@ -4227,9 +4353,12 @@ def validate_address():
                             address_validation_checked_at = NOW(),
                             address_validation_result = %s
                         WHERE id = %s
+                        RETURNING *
                         """,
                         ("error", precheck_error, query, Json(result_payload), row_id),
                     )
+                    updated_row = cur.fetchone()
+                    insert_address_validation_log(cur, original_row, updated_row, result_payload)
         return jsonify(
             {
                 "ok": True,
@@ -4313,6 +4442,8 @@ def validate_address():
                 ensure_schema()
                 with db_conn() as conn:
                     with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                        cur.execute("SELECT * FROM completion_rows WHERE id = %s", (row_id,))
+                        original_row = cur.fetchone()
                         if suggested_address:
                             cur.execute(
                                 """
@@ -4358,6 +4489,7 @@ def validate_address():
                                 (status, message, query, Json(result_payload), row_id),
                             )
                         updated_row = cur.fetchone()
+                        insert_address_validation_log(cur, original_row, updated_row, result_payload)
             if updated_row:
                 result_payload["row"] = completion_row_to_api(updated_row)
             return jsonify({"ok": True, **result_payload})
@@ -4368,6 +4500,44 @@ def validate_address():
         return jsonify({"error": clean_text(getattr(exc, "reason", exc)) or "Mapy.com request failed"}), 502
     except json.JSONDecodeError:
         return jsonify({"error": "Mapy.com returned invalid JSON"}), 502
+
+
+@app.route("/api/address-validation-logs")
+def address_validation_logs():
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    dataset_id = int_from_text(request.args.get("datasetId"))
+    row_id = int_from_text(request.args.get("rowId"))
+    limit = min(max(int_from_text(request.args.get("limit")) or 50, 1), 200)
+    filters = []
+    params = []
+    if dataset_id:
+        filters.append("dataset_id = %s")
+        params.append(dataset_id)
+    if row_id:
+        filters.append("row_id = %s")
+        params.append(row_id)
+    where = f"WHERE {' AND '.join(filters)}" if filters else ""
+    params.append(limit)
+
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT *
+                FROM address_validation_logs
+                {where}
+                ORDER BY created_at DESC, id DESC
+                LIMIT %s
+                """,
+                params,
+            )
+            logs = [address_validation_log_to_api(row) for row in cur.fetchall()]
+
+    return jsonify({"logs": logs})
 
 
 @app.route("/api/sorting/rows/<int:row_id>/adjust", methods=["POST"])

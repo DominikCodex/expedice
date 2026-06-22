@@ -919,6 +919,58 @@ select:focus {
   border-radius: 7px;
 }
 
+.address-log-panel {
+  margin-top: 12px;
+}
+
+.address-validation-log {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 8px;
+  padding: 10px;
+}
+
+.address-log-item {
+  border: 1px solid #dfe8e3;
+  border-left: 4px solid #8a9690;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px 10px;
+}
+
+.address-log-item.verified {
+  border-left-color: var(--green);
+}
+
+.address-log-item.error,
+.address-log-item.not_found {
+  border-left-color: #c94444;
+}
+
+.address-log-item strong,
+.address-log-item small {
+  display: block;
+}
+
+.address-log-item span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.address-log-item p {
+  margin: 5px 0;
+  font-size: 12px;
+}
+
+.empty-log {
+  color: var(--muted);
+  margin: 0;
+}
+
+.empty-log.error {
+  color: #a43a3a;
+}
+
 .completion-table {
   min-width: 1840px;
   font-size: 12px;
