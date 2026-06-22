@@ -2944,6 +2944,71 @@ def mapy_normalize_items(payload):
     return normalized
 
 
+def mapy_strip_leading_zip(value, zip_code=""):
+    text = clean_text(value)
+    zip_text = clean_text(zip_code)
+    if zip_text and text.startswith(zip_text):
+        return text[len(zip_text) :].strip(" ,-")
+    if len(text) >= 6 and text[:3].isdigit() and text[3] == " " and text[4:6].isdigit():
+        return text[6:].strip(" ,-")
+    return text
+
+
+def mapy_split_street_house(street_with_number):
+    text = clean_text(street_with_number)
+    if not text:
+        return "", ""
+    parts = text.rsplit(" ", 1)
+    if len(parts) == 2 and any(char.isdigit() for char in parts[1]):
+        return parts[0].strip(), parts[1].strip()
+    return text, ""
+
+
+def mapy_city_from_item(item):
+    if not item:
+        return ""
+    location = clean_text(item.get("location"))
+    street_name = clean_text(item.get("name")).lower()
+    zip_code = clean_text(item.get("zip"))
+    pieces = []
+    for raw_piece in location.split(","):
+        piece = raw_piece.strip()
+        lowered = piece.lower()
+        if not piece:
+            continue
+        if lowered in {"cesko", "česko", "czechia", "czech republic", "slovensko", "slovakia"}:
+            continue
+        if street_name and lowered == street_name:
+            continue
+        pieces.append(piece)
+    if pieces:
+        return mapy_strip_leading_zip(pieces[0], zip_code)
+    return ""
+
+
+def mapy_address_from_item(item):
+    if not item or item.get("type") != "regional.address":
+        return None
+    street_with_number = clean_text(item.get("name"))
+    if not street_with_number:
+        return None
+    street, house_number = mapy_split_street_house(street_with_number)
+    return {
+        "streetWithNumber": street_with_number,
+        "street": street,
+        "houseNumber": house_number,
+        "city": mapy_city_from_item(item),
+        "zipCode": clean_text(item.get("zip")),
+    }
+
+
+def mapy_address_label(address):
+    if not address:
+        return ""
+    city_line = " ".join(part for part in [address.get("zipCode"), address.get("city")] if part)
+    return ", ".join(part for part in [address.get("streetWithNumber"), city_line] if part)
+
+
 @app.route("/api/packeta/dry-run")
 def packeta_dry_run():
     auth_error = require_download_token_if_configured()
@@ -4165,35 +4230,76 @@ def validate_address():
                 "items": items,
                 "rawCount": len(items),
             }
+            suggested_address = mapy_address_from_item(first) if status == "suggestion" else None
+            if suggested_address:
+                valid = True
+                status = "verified"
+                message = "Adresa byla upravena podle návrhu Mapy.com: " + mapy_address_label(suggested_address)
+                result_payload.update(
+                    {
+                        "valid": valid,
+                        "status": status,
+                        "message": message,
+                        "appliedSuggestion": True,
+                        "appliedAddress": suggested_address,
+                        "originalStatus": "suggestion",
+                        "originalMessage": match_message,
+                    }
+                )
             row_id = int_from_text(data.get("rowId"))
+            updated_row = None
             if row_id:
                 ensure_schema()
                 with db_conn() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            UPDATE completion_rows
-                            SET address_validation_status = %s,
-                                address_validation_message = %s,
-                                address_validation_query = %s,
-                                address_validation_checked_at = NOW(),
-                                address_validation_result = %s
-                            WHERE id = %s
-                            """,
-                            (status, message, query, Json(result_payload), row_id),
-                        )
-            return jsonify(
-                {
-                    "ok": True,
-                    "valid": valid,
-                    "status": status,
-                    "message": message,
-                    "query": query,
-                    "country": mapy_country(data),
-                    "items": items,
-                    "rawCount": len(items),
-                }
-            )
+                    with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                        if suggested_address:
+                            cur.execute(
+                                """
+                                UPDATE completion_rows
+                                SET street_with_number = %s,
+                                    street = %s,
+                                    house_number = %s,
+                                    city = %s,
+                                    zip_code = %s,
+                                    address_validation_status = %s,
+                                    address_validation_message = %s,
+                                    address_validation_query = %s,
+                                    address_validation_checked_at = NOW(),
+                                    address_validation_result = %s
+                                WHERE id = %s
+                                RETURNING *
+                                """,
+                                (
+                                    suggested_address.get("streetWithNumber"),
+                                    suggested_address.get("street"),
+                                    suggested_address.get("houseNumber"),
+                                    suggested_address.get("city"),
+                                    suggested_address.get("zipCode"),
+                                    status,
+                                    message,
+                                    query,
+                                    Json(result_payload),
+                                    row_id,
+                                ),
+                            )
+                        else:
+                            cur.execute(
+                                """
+                                UPDATE completion_rows
+                                SET address_validation_status = %s,
+                                    address_validation_message = %s,
+                                    address_validation_query = %s,
+                                    address_validation_checked_at = NOW(),
+                                    address_validation_result = %s
+                                WHERE id = %s
+                                RETURNING *
+                                """,
+                                (status, message, query, Json(result_payload), row_id),
+                            )
+                        updated_row = cur.fetchone()
+            if updated_row:
+                result_payload["row"] = completion_row_to_api(updated_row)
+            return jsonify({"ok": True, **result_payload})
     except urllib.error.HTTPError as exc:
         response_text = exc.read().decode("utf-8", "replace")
         return jsonify({"error": response_text or clean_text(exc.reason) or "Mapy.com API error"}), exc.code

@@ -1667,6 +1667,26 @@ function renderAddressValidation(rowId, data) {
   `;
 }
 
+function applyAddressValidationResponse(row, data) {
+  if (data.row) {
+    replaceCompletionRow(data.row);
+    return data.row;
+  }
+  row.addressValidationStatus = data.status || (data.valid ? "verified" : "suggestion");
+  row.addressValidationMessage = data.message || "";
+  row.addressValidationQuery = data.query || "";
+  row.addressValidationCheckedAt = new Date().toISOString();
+  row.addressValidationResult = data;
+  if (data.appliedAddress) {
+    row.streetWithNumber = data.appliedAddress.streetWithNumber || row.streetWithNumber || "";
+    row.street = data.appliedAddress.street || row.street || "";
+    row.houseNumber = data.appliedAddress.houseNumber || row.houseNumber || "";
+    row.city = data.appliedAddress.city || row.city || "";
+    row.zipCode = data.appliedAddress.zipCode || row.zipCode || "";
+  }
+  return row;
+}
+
 function completionAddressPayload(row, rowId) {
   const edited = collectCompletionRowEdits(rowId);
   return {
@@ -1694,13 +1714,13 @@ async function validateCompletionAddress(rowId) {
       method: "POST",
       body: JSON.stringify(completionAddressPayload(row, rowId)),
     });
-    row.addressValidationStatus = data.status || (data.valid ? "verified" : "suggestion");
-    row.addressValidationMessage = data.message || "";
-    row.addressValidationQuery = data.query || "";
-    row.addressValidationCheckedAt = new Date().toISOString();
-    row.addressValidationResult = data;
-    renderAddressValidation(rowId, data);
-    setCompletionMessage(data.valid ? "Adresa je ověřena přes Mapy.com." : "Mapy.com našly jen návrh adresy.", data.valid ? "success" : "warning");
+    applyAddressValidationResponse(row, data);
+    renderCompletion();
+    const applied = data.appliedSuggestion ? " Návrh jsem rovnou propsal do adresy." : "";
+    setCompletionMessage(
+      data.valid ? `Adresa je ověřena přes Mapy.com.${applied}` : "Mapy.com našly jen návrh adresy.",
+      data.valid ? "success" : "warning"
+    );
   } catch (error) {
     const tr = completionRowElement(rowId);
     const target = tr?.querySelector("[data-address-validation]");
@@ -1714,11 +1734,7 @@ async function validateAddressRow(row) {
     method: "POST",
     body: JSON.stringify(completionAddressPayload(row, row.id)),
   });
-  row.addressValidationStatus = data.status || (data.valid ? "verified" : "suggestion");
-  row.addressValidationMessage = data.message || "";
-  row.addressValidationQuery = data.query || "";
-  row.addressValidationCheckedAt = new Date().toISOString();
-  row.addressValidationResult = data;
+  applyAddressValidationResponse(row, data);
   return data;
 }
 
