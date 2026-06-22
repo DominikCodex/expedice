@@ -1728,14 +1728,21 @@ async function validateAddressDeliveriesBulk() {
     return;
   }
 
-  const rows = completionState.rows.filter((row) => completionRequiresAddressValidation(row));
-  if (!rows.length) {
+  const addressRows = completionState.rows.filter((row) => completionRequiresAddressValidation(row));
+  if (!addressRows.length) {
     setCompletionMessage("V načtené kompletaci nevidím žádné objednávky s doručením na adresu.", "warning");
     return;
   }
 
+  const rows = addressRows.filter((row) => !completionAddressIsResolvedOk(row));
+  const skippedOk = addressRows.length - rows.length;
+  if (!rows.length) {
+    setCompletionMessage(`Všechny adresní zásilky už jsou ověřené a v pořádku (${skippedOk} přeskočeno).`, "success");
+    return;
+  }
+
   const confirmed = window.confirm(
-    `Ověřit přes Mapy.com všechny objednávky s doručením na adresu?\n\nPočet volání: ${rows.length}. Po kontrole automaticky zobrazím chybné adresy.`
+    `Ověřit přes Mapy.com objednávky s doručením na adresu?\n\nNových dotazů: ${rows.length}\nJiž ověřené OK přeskočím: ${skippedOk}\n\nPo kontrole automaticky zobrazím chybné adresy.`
   );
   if (!confirmed) return;
 
@@ -1769,7 +1776,7 @@ async function validateAddressDeliveriesBulk() {
     els.completionFilterStatus.value = "address_error";
     renderCompletion();
     setCompletionMessage(
-      `Kontrola adres hotová: ${checked} ověřeno, ${addressErrors} problematických adres${failed ? `, ${failed} technických chyb` : ""}.`,
+      `Kontrola adres hotová: ${checked} ověřeno, ${skippedOk} OK přeskočeno, ${addressErrors} problematických adres${failed ? `, ${failed} technických chyb` : ""}.`,
       addressErrors || failed ? "warning" : "success"
     );
   } finally {
@@ -2044,6 +2051,11 @@ function completionAddressStatus(row) {
 function completionAddressHasError(row) {
   const status = completionAddressStatus(row);
   return status === "suggestion" || status === "not_found" || status === "error";
+}
+
+function completionAddressIsResolvedOk(row) {
+  const result = row.addressValidationResult || {};
+  return completionAddressStatus(row) === "verified" || result.valid === true;
 }
 
 function completionRequiresAddressValidation(row) {
