@@ -733,10 +733,16 @@ select:focus {
 
 .completion-toolbar {
   display: grid;
-  grid-template-columns: minmax(280px, 520px) repeat(6, auto) minmax(260px, 1fr);
+  grid-template-columns: minmax(280px, 520px) repeat(7, auto) minmax(260px, 1fr);
   gap: 10px;
   align-items: end;
   padding: 12px;
+}
+
+#completion-validate-addresses {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  border-color: #bddbce;
 }
 
 .completion-filter-panel {

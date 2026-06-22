@@ -6,7 +6,7 @@
     <title>Roztřídění zboží</title>
     <link rel="stylesheet" href="styles.css?v=issue-documents-20260619" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=completion-row-click-20260619"></script>
+    <script defer src="app.js?v=bulk-address-check-20260622"></script>
   </head>
   <body>
     <section id="auth-view" class="auth-view">
@@ -264,6 +264,7 @@
               <button id="packeta-validate" type="button" class="secondary">Test API Zásilkovna</button>
               <button id="dpd-dry-run" type="button" class="secondary">Dry run DPD</button>
               <button id="dpd-send" type="button" class="secondary">Test API DPD</button>
+              <button id="completion-validate-addresses" type="button" class="secondary">Ověřit adresy</button>
               <div id="completion-summary" class="completion-summary">Zatím není načtena žádná expediční dávka.</div>
             </section>
 
@@ -290,6 +291,7 @@
                   <option value="ok">OK / hotové</option>
                   <option value="warning">Nezaplacené</option>
                   <option value="danger">Chyby / storna</option>
+                  <option value="address_error">Chybné adresy</option>
                   <option value="label">Mají štítek</option>
                 </select>
               </label>

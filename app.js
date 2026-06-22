@@ -135,6 +135,7 @@ const els = {
   packetaValidate: document.getElementById("packeta-validate"),
   dpdDryRun: document.getElementById("dpd-dry-run"),
   dpdSend: document.getElementById("dpd-send"),
+  completionValidateAddresses: document.getElementById("completion-validate-addresses"),
   packetaDryRunResult: document.getElementById("packeta-dry-run-result"),
   completionMessage: document.getElementById("completion-message"),
   completionSummary: document.getElementById("completion-summary"),
@@ -903,6 +904,7 @@ function renderCompletionOptions() {
     els.packetaValidate.disabled = true;
     els.dpdDryRun.disabled = true;
     els.dpdSend.disabled = true;
+    els.completionValidateAddresses.disabled = true;
     return;
   }
 
@@ -921,6 +923,7 @@ function renderCompletionOptions() {
   els.packetaValidate.disabled = !completionState.dataset;
   els.dpdDryRun.disabled = !completionState.dataset;
   els.dpdSend.disabled = !completionState.dataset;
+  els.completionValidateAddresses.disabled = !completionState.dataset;
 }
 
 async function loadCompletionDatasets() {
@@ -1664,19 +1667,32 @@ function renderAddressValidation(rowId, data) {
   `;
 }
 
+function completionAddressPayload(row, rowId) {
+  const edited = collectCompletionRowEdits(rowId);
+  return {
+    rowId,
+    firstName: row.firstName || "",
+    lastName: row.lastName || "",
+    streetWithNumber: row.streetWithNumber || "",
+    street: row.street || "",
+    houseNumber: row.houseNumber || "",
+    city: row.city || "",
+    zipCode: row.zipCode || "",
+    shippingMethod: row.shippingMethod || "",
+    currency: row.currency || "",
+    shopCode: row.shopCode || completionState.dataset?.shopCode || "",
+    ...edited,
+  };
+}
+
 async function validateCompletionAddress(rowId) {
   const row = completionState.rows.find((item) => String(item.id) === String(rowId)) || {};
-  const values = collectCompletionRowEdits(rowId);
   setCompletionMessage("Ověřuji adresu přes Mapy.com...", "neutral");
 
   try {
     const data = await fetchJson("/api/address/validate", {
       method: "POST",
-      body: JSON.stringify({
-        rowId,
-        ...values,
-        shopCode: row.shopCode || completionState.dataset?.shopCode || "",
-      }),
+      body: JSON.stringify(completionAddressPayload(row, rowId)),
     });
     row.addressValidationStatus = data.status || (data.valid ? "verified" : "suggestion");
     row.addressValidationMessage = data.message || "";
@@ -1690,6 +1706,74 @@ async function validateCompletionAddress(rowId) {
     const target = tr?.querySelector("[data-address-validation]");
     if (target) target.innerHTML = `<span class="address-badge danger">Chyba</span><small>${escapeHtml(error.message)}</small>`;
     setCompletionMessage(`Ověření adresy se nepodařilo: ${error.message}`, "error");
+  }
+}
+
+async function validateAddressRow(row) {
+  const data = await fetchJson("/api/address/validate", {
+    method: "POST",
+    body: JSON.stringify(completionAddressPayload(row, row.id)),
+  });
+  row.addressValidationStatus = data.status || (data.valid ? "verified" : "suggestion");
+  row.addressValidationMessage = data.message || "";
+  row.addressValidationQuery = data.query || "";
+  row.addressValidationCheckedAt = new Date().toISOString();
+  row.addressValidationResult = data;
+  return data;
+}
+
+async function validateAddressDeliveriesBulk() {
+  if (!completionState.rows.length) {
+    setCompletionMessage("Nejdřív načti kompletaci pro expediční den.", "warning");
+    return;
+  }
+
+  const rows = completionState.rows.filter((row) => completionRequiresAddressValidation(row));
+  if (!rows.length) {
+    setCompletionMessage("V načtené kompletaci nevidím žádné objednávky s doručením na adresu.", "warning");
+    return;
+  }
+
+  const confirmed = window.confirm(
+    `Ověřit přes Mapy.com všechny objednávky s doručením na adresu?\n\nPočet volání: ${rows.length}. Po kontrole automaticky zobrazím chybné adresy.`
+  );
+  if (!confirmed) return;
+
+  els.completionValidateAddresses.disabled = true;
+  let checked = 0;
+  let failed = 0;
+  const queue = rows.slice();
+  const workers = Array.from({ length: Math.min(4, queue.length) }, async () => {
+    while (queue.length) {
+      const row = queue.shift();
+      try {
+        await validateAddressRow(row);
+      } catch (error) {
+        row.addressValidationStatus = "error";
+        row.addressValidationMessage = error.message || "Ověření adresy selhalo";
+        row.addressValidationCheckedAt = new Date().toISOString();
+        failed += 1;
+      } finally {
+        checked += 1;
+        if (checked === rows.length || checked % 5 === 0) {
+          setCompletionMessage(`Ověřuji adresy: ${checked}/${rows.length} hotovo...`, "neutral");
+        }
+      }
+    }
+  });
+
+  try {
+    await Promise.all(workers);
+    const addressErrors = completionState.rows.filter((row) => completionRequiresAddressValidation(row) && completionAddressHasError(row)).length;
+    completionFilters.status = "address_error";
+    els.completionFilterStatus.value = "address_error";
+    renderCompletion();
+    setCompletionMessage(
+      `Kontrola adres hotová: ${checked} ověřeno, ${addressErrors} problematických adres${failed ? `, ${failed} technických chyb` : ""}.`,
+      addressErrors || failed ? "warning" : "success"
+    );
+  } finally {
+    els.completionValidateAddresses.disabled = !completionState.dataset;
   }
 }
 
@@ -1721,6 +1805,7 @@ function renderCompletionSummary(rows) {
   const orders = new Set(rows.map((row) => row.orderNumber).filter(Boolean)).size;
   const pieces = rows.reduce((total, row) => total + Math.max(0, Math.trunc(toNumber(row.quantity, 0))), 0);
   const labels = rows.filter((row) => normalize(row.labelPrinted).includes("label printed")).length;
+  const addressErrors = rows.filter((row) => completionRequiresAddressValidation(row) && completionAddressHasError(row)).length;
   const errors = rows.filter((row) => {
     const status = completionStatus(row);
     return status.tone === "danger";
@@ -1740,6 +1825,7 @@ function renderCompletionSummary(rows) {
     <span><strong>${pieces}</strong> kusu</span>
     <span><strong>${labels}</strong> stitku</span>
     <span><strong>${errors}</strong> chyb/storen</span>
+    <span><strong>${addressErrors}</strong> chyb adres</span>
     <span>${escapeHtml(shops || "bez e-shopu")}</span>
   `;
 }
@@ -1815,6 +1901,9 @@ function completionSearchText(row) {
       row.deliveryCarrierLabel,
       row.packetaShipmentId,
       row.packetaId,
+      row.addressValidationStatus,
+      row.addressValidationMessage,
+      row.addressValidationQuery,
       row.note,
       row.shopCode,
     ].join(" ")
@@ -1834,6 +1923,9 @@ function completionMatchesFilters(row) {
   }
   if (completionFilters.status === "label") {
     return Boolean(row.packetaShipmentId || row.labelPrinted);
+  }
+  if (completionFilters.status === "address_error") {
+    return completionRequiresAddressValidation(row) && completionAddressHasError(row);
   }
   if (completionFilters.status === "open") {
     return !row.completionStatus && status.tone !== "ok" && !row.packetaShipmentId && !row.labelPrinted;
@@ -1939,6 +2031,26 @@ function addressValidationHtml(row) {
       ${message ? `<small>${escapeHtml(message)}${checked ? ` | ${escapeHtml(checked)}` : ""}</small>` : ""}
     </div>
   `;
+}
+
+function completionAddressStatus(row) {
+  return row.addressValidationStatus || "";
+}
+
+function completionAddressHasError(row) {
+  const status = completionAddressStatus(row);
+  return status === "suggestion" || status === "not_found" || status === "error";
+}
+
+function completionRequiresAddressValidation(row) {
+  if (row.deliveryIsGiftVoucher) return false;
+  if (row.deliveryRequiresAddress === true) return true;
+  const shipping = normalize(row.shippingMethod || row.deliveryServiceLabel || "");
+  if (!shipping) return false;
+  if (shipping.includes("vydej") || shipping.includes("box") || shipping.includes("poboc") || shipping.includes("odberne misto")) {
+    return false;
+  }
+  return shipping.includes("adresa") || shipping.includes("kuryr") || shipping.includes("kurier") || completionCarrierKey(row) === "dpd";
 }
 
 function deliveryCarrierHtml(row) {
@@ -3143,9 +3255,12 @@ els.completionFilterReset?.addEventListener("click", () => {
   completionFilters.status = "";
   completionFilters.shop = "";
   els.completionFilterSearch.value = "";
+  els.completionFilterCarrier.value = "";
   els.completionFilterStatus.value = "";
+  els.completionFilterShop.value = "";
   renderCompletion();
 });
+els.completionValidateAddresses?.addEventListener("click", validateAddressDeliveriesBulk);
 els.packetaDryRun.addEventListener("click", runPacketaDryRun);
 els.packetaValidate.addEventListener("click", runPacketaValidation);
 els.dpdDryRun.addEventListener("click", runDpdDryRun);
