@@ -3009,6 +3009,20 @@ def mapy_address_label(address):
     return ", ".join(part for part in [address.get("streetWithNumber"), city_line] if part)
 
 
+def mapy_address_fills_missing_input(data, address):
+    if not address:
+        return False
+    parts = address_input_parts(data)
+    field_pairs = [
+        ("streetWithNumber", "streetWithNumber"),
+        ("street", "street"),
+        ("houseNumber", "houseNumber"),
+        ("city", "city"),
+        ("zipCode", "zipCode"),
+    ]
+    return any(clean_text(address.get(address_key)) and not clean_text(parts.get(input_key)) for input_key, address_key in field_pairs)
+
+
 @app.route("/api/packeta/dry-run")
 def packeta_dry_run():
     auth_error = require_download_token_if_configured()
@@ -4230,19 +4244,27 @@ def validate_address():
                 "items": items,
                 "rawCount": len(items),
             }
-            suggested_address = mapy_address_from_item(first) if status == "suggestion" else None
+            mapy_address = mapy_address_from_item(first)
+            original_status = status
+            suggested_address = mapy_address if status == "suggestion" else None
+            if status == "verified" and mapy_address_fills_missing_input(data, mapy_address):
+                suggested_address = mapy_address
             if suggested_address:
                 valid = True
                 status = "verified"
-                message = "Adresa byla upravena podle návrhu Mapy.com: " + mapy_address_label(suggested_address)
+                if original_status == "suggestion":
+                    message = "Adresa byla upravena podle návrhu Mapy.com: " + mapy_address_label(suggested_address)
+                else:
+                    message = "Adresa byla doplněna podle přesné shody Mapy.com: " + mapy_address_label(suggested_address)
                 result_payload.update(
                     {
                         "valid": valid,
                         "status": status,
                         "message": message,
-                        "appliedSuggestion": True,
+                        "appliedSuggestion": original_status == "suggestion",
+                        "appliedAddressCompletion": original_status == "verified",
                         "appliedAddress": suggested_address,
-                        "originalStatus": "suggestion",
+                        "originalStatus": original_status,
                         "originalMessage": match_message,
                     }
                 )
