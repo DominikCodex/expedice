@@ -276,6 +276,7 @@ def ensure_schema():
                     first_name TEXT,
                     last_name TEXT,
                     note TEXT,
+                    carrier_note TEXT,
                     street_with_number TEXT,
                     city TEXT,
                     zip_code TEXT,
@@ -310,6 +311,7 @@ def ensure_schema():
                 """
             )
             cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS shop_code TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS carrier_note TEXT")
             cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS address_validation_status TEXT")
             cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS address_validation_message TEXT")
             cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS address_validation_query TEXT")
@@ -1569,6 +1571,7 @@ def completion_row_to_api(row):
         "firstName": row["first_name"],
         "lastName": row["last_name"],
         "note": row["note"],
+        "carrierNote": row.get("carrier_note") or "",
         "streetWithNumber": row["street_with_number"],
         "city": row["city"],
         "zipCode": row["zip_code"],
@@ -1621,6 +1624,32 @@ def completion_row_to_api(row):
 
 def packeta_text(value):
     return xml_escape(clean_text(value).strip(), {'"': "&quot;", "'": "&apos;"})
+
+
+def carrier_note_raw(row):
+    return clean_text(row.get("carrierNote") or row.get("carrier_note")).strip()
+
+
+def carrier_note_clean(value, max_length):
+    text = clean_text(value).replace('"', " ").replace(";", " ")
+    text = "".join(char if ord(char) >= 32 else " " for char in text)
+    text = " ".join(text.split())
+    if max_length and len(text) > max_length:
+        return text[:max_length].rstrip()
+    return text
+
+
+def carrier_note_for_packeta(row):
+    return carrier_note_clean(carrier_note_raw(row), 128)
+
+
+def carrier_note_for_dpd_label(row):
+    return carrier_note_clean(carrier_note_raw(row), 35)
+
+
+def carrier_note_was_shortened(row, prepared):
+    original = carrier_note_clean(carrier_note_raw(row), 0)
+    return bool(original and prepared and original != prepared)
 
 
 def packeta_contains(value, *needles):
@@ -1684,6 +1713,7 @@ def packeta_dry_run_packet(row):
     currency = shipment_currency(row)
     client_settings = carrier_client_settings("packeta", row)
     value = clean_text(row.get("amount")) or ("29" if currency == "EUR" else "0")
+    carrier_note = carrier_note_for_packeta(row)
     company = ""
     note = clean_text(row.get("note"))
     if "//" in note:
@@ -1707,6 +1737,7 @@ def packeta_dry_run_packet(row):
         "eshop": packeta_eshop(row),
         "cod": clean_text(row.get("codAmount")),
         "weight": clean_text(row.get("weight")),
+        "note": carrier_note,
     }
 
     xml_parts = [
@@ -1731,6 +1762,7 @@ def packeta_dry_run_packet(row):
         "eshop",
         "cod",
         "weight",
+        "note",
     ):
         if attrs[key] or key in ("company", "cod"):
             xml_parts.append(f"<{key}>{packeta_text(attrs[key])}</{key}>")
@@ -1741,6 +1773,8 @@ def packeta_dry_run_packet(row):
         warnings.append("chybi telefon")
     if not attrs["email"]:
         warnings.append("chybi e-mail")
+    if carrier_note_was_shortened(row, carrier_note):
+        warnings.append("poznamka pro prepravce byla zkracena")
     if not attrs["street"] and route["service"] != "pickup_point":
         warnings.append("kuryr bez ulice")
     if not attrs["weight"]:
@@ -2365,7 +2399,7 @@ def insert_completion_row(cur, dataset_id, item, shop_code=""):
     cur.execute(
         """
         INSERT INTO completion_rows (
-            dataset_id, shop_code, row_number, first_name, last_name, note, street_with_number,
+            dataset_id, shop_code, row_number, first_name, last_name, note, carrier_note, street_with_number,
             city, zip_code, phone, email, weight, cod_amount, payment_method,
             order_number, shipping_method, amount, quantity_text, paid_status,
             expedition_number, expedition_order_code, packeta_id, completion_status,
@@ -2375,7 +2409,7 @@ def insert_completion_row(cur, dataset_id, item, shop_code=""):
         )
         VALUES (
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
         """,
         (
@@ -2385,6 +2419,7 @@ def insert_completion_row(cur, dataset_id, item, shop_code=""):
             clean_text(item.get("firstName")),
             clean_text(item.get("lastName")),
             clean_text(item.get("note")),
+            clean_text(item.get("carrierNote") or item.get("carrier_note") or item.get("transportNote")),
             clean_text(item.get("streetWithNumber")),
             clean_text(item.get("city")),
             clean_text(item.get("zipCode")),
@@ -2603,6 +2638,7 @@ def dpd_skip_reason(row):
 def dpd_payload(row):
     delivery = delivery_info_from_row(row)
     client_settings = carrier_client_settings("dpd", row)
+    carrier_note = carrier_note_for_dpd_label(row)
     shipment = {
         "reference": clean_text(row.get("orderNumber")),
         "orderId": clean_text(row.get("orderId")),
@@ -2634,18 +2670,23 @@ def dpd_payload(row):
             "weight": clean_text(row.get("weight")) or "1",
             "pieces": int_from_text(row.get("quantity")) or 1,
         },
-        "note": clean_text(row.get("note")),
+        "carrierNote": carrier_note,
+        "note": carrier_note,
         "source": {
             "rowNumber": row.get("rowNumber"),
             "shippingMethod": clean_text(row.get("shippingMethod")),
             "datasetRowId": row.get("id"),
         },
     }
+    if carrier_note:
+        shipment["parcel"]["references"] = {"ref1": carrier_note}
     warnings = []
     if not shipment["address"]["validated"] and delivery["service"] == "dpd_courier":
         warnings.append("Adresa neni oznacena jako overena.")
     if not shipment["cashOnDelivery"]["amount"]:
         warnings.append("Bez dobirky.")
+    if carrier_note_was_shortened(row, carrier_note):
+        warnings.append("Poznamka pro prepravce byla zkracena.")
     return {
         "rowNumber": row.get("rowNumber"),
         "orderNumber": row.get("orderNumber"),
@@ -4495,6 +4536,7 @@ def update_completion_row(row_id):
         "houseNumber": "house_number",
         "city": "city",
         "zipCode": "zip_code",
+        "carrierNote": "carrier_note",
     }
     updates = []
     params = []

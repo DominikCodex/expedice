@@ -1535,7 +1535,7 @@ function replaceCompletionRow(row) {
 
 async function saveCompletionRow(rowId) {
   const values = collectCompletionRowEdits(rowId);
-  setCompletionMessage("Ukládám upravený kontakt a adresu...", "neutral");
+  setCompletionMessage("Ukládám kontakt, adresu a poznámku pro přepravce...", "neutral");
 
   try {
     const data = await fetchJson(`/api/completion/rows/${encodeURIComponent(rowId)}`, {
@@ -1546,7 +1546,7 @@ async function saveCompletionRow(rowId) {
       replaceCompletionRow(data.row);
       renderCompletion();
     }
-    setCompletionMessage("Kontakt a adresa jsou uložené.", "success");
+    setCompletionMessage("Kontakt, adresa a poznámka pro přepravce jsou uložené.", "success");
   } catch (error) {
     setCompletionMessage(`Uložení adresy se nepodařilo: ${error.message}`, "error");
   }
@@ -1927,6 +1927,7 @@ function completionSearchText(row) {
       row.addressValidationStatus,
       row.addressValidationMessage,
       row.addressValidationQuery,
+      row.carrierNote,
       row.note,
       row.shopCode,
     ].join(" ")
@@ -2015,6 +2016,7 @@ function completionDetailHtml(row) {
         ${completionMetaLine("Stav Zásilkovna", row.packetaStatus)}
         ${completionMetaLine("Štítek", row.labelPrinted)}
         ${completionMetaLine("DPD", row.dpdFlag)}
+        ${completionMetaLine("Poznámka pro přepravce", row.carrierNote)}
       </section>
       <section>
         <h3>Objednávka</h3>
@@ -2028,6 +2030,8 @@ function completionDetailHtml(row) {
       </section>
       <section>
         <h3>Poznámky</h3>
+        ${completionInput(row, "carrierNote", row.carrierNote || "", "carrier-note-input")}
+        ${completionMetaLine("Poznámka pro přepravce", row.carrierNote)}
         <p>${escapeHtml(row.note || "Bez poznámky.")}</p>
         ${completionMetaLine("Status kompletace", row.completionStatus)}
         ${completionMetaLine("Platba", row.paymentMethod || row.paidStatus)}
@@ -2432,7 +2436,7 @@ function renderCompletion() {
   els.completionDelete.disabled = !completionState.dataset || completionState.dataset.status !== "active";
 
   if (!rows.length) {
-    els.completionBody.innerHTML = `<tr><td colspan="13" class="empty">Zadna kompletace k zobrazeni.</td></tr>`;
+    els.completionBody.innerHTML = `<tr><td colspan="14" class="empty">Zadna kompletace k zobrazeni.</td></tr>`;
     return;
   }
 
@@ -2481,6 +2485,7 @@ function renderCompletion() {
         ${deliveryCarrierHtml(row)}
         ${labelOrShipment ? `<small class="code">${escapeHtml(labelOrShipment)}</small>` : ""}
       </td>
+      <td class="completion-carrier-note">${completionInput(row, "carrierNote", row.carrierNote || "", "carrier-note-input")}</td>
       <td class="completion-payment-cell">
         <span class="currency-chip ${escapeHtml((row.currency || "").toLowerCase())}">${escapeHtml(row.currency || "")}</span>
         ${completionMetaLine("Dobírka", row.codAmount)}
@@ -2499,7 +2504,7 @@ function renderCompletion() {
     const detailRow = document.createElement("tr");
     detailRow.className = `completion-detail-row ${expanded ? "" : "hidden"}`;
     detailRow.dataset.detailFor = row.id;
-    detailRow.innerHTML = `<td colspan="13">${completionDetailHtml(row)}</td>`;
+    detailRow.innerHTML = `<td colspan="14">${completionDetailHtml(row)}</td>`;
     els.completionBody.appendChild(detailRow);
   });
 }

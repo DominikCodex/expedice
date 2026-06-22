@@ -920,7 +920,7 @@ select:focus {
 }
 
 .completion-table {
-  min-width: 1720px;
+  min-width: 1840px;
   font-size: 12px;
 }
 
@@ -1044,6 +1044,10 @@ select:focus {
   min-width: 76px;
 }
 
+.table-input.carrier-note-input {
+  min-width: 170px;
+}
+
 .completion-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(58px, 1fr));
@@ -1099,6 +1103,7 @@ select:focus {
 }
 
 .completion-carrier-cell,
+.completion-carrier-note,
 .completion-payment-cell,
 .completion-tech-cell {
   display: grid;
@@ -1564,6 +1569,11 @@ select:focus {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: normal;
+}
+
+.completion-carrier-note {
+  min-width: 185px;
+  max-width: 230px;
 }
 
 .shop-chip,
