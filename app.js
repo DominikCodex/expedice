@@ -2018,6 +2018,7 @@ function addressValidationHtml(row) {
   const status = row.addressValidationStatus || "";
   const message = row.addressValidationMessage || "";
   const checked = row.addressValidationCheckedAt ? formatTime(row.addressValidationCheckedAt) : "";
+  const mapyUrl = mapyAddressUrl(row);
   const labels = {
     verified: ["Ověřeno", "ok"],
     suggestion: ["Návrh", "warning"],
@@ -2027,7 +2028,10 @@ function addressValidationHtml(row) {
   const [label, tone] = labels[status] || ["Neověřeno", "neutral"];
   return `
     <div class="address-validation" data-address-validation="${escapeHtml(row.id)}">
-      <span class="address-badge ${escapeHtml(tone)}">${escapeHtml(label)}</span>
+      <div class="address-validation-top">
+        <span class="address-badge ${escapeHtml(tone)}">${escapeHtml(label)}</span>
+        <a class="mapy-link" href="${escapeHtml(mapyUrl)}" target="_blank" rel="noopener">Mapy</a>
+      </div>
       ${message ? `<small>${escapeHtml(message)}${checked ? ` | ${escapeHtml(checked)}` : ""}</small>` : ""}
     </div>
   `;
@@ -2051,6 +2055,54 @@ function completionRequiresAddressValidation(row) {
     return false;
   }
   return shipping.includes("adresa") || shipping.includes("kuryr") || shipping.includes("kurier") || completionCarrierKey(row) === "dpd";
+}
+
+function rowAddressQuery(row) {
+  const street = row.streetWithNumber || [row.street, row.houseNumber].filter(Boolean).join(" ");
+  return [street, row.zipCode, row.city].filter(Boolean).join(", ");
+}
+
+function firstMapyResult(row) {
+  const result = row.addressValidationResult || {};
+  const items = Array.isArray(result.items) ? result.items : [];
+  return items[0] || null;
+}
+
+function mapyCoordinate(result, keys) {
+  if (!result) return "";
+  for (const key of keys) {
+    if (result[key] !== undefined && result[key] !== null && result[key] !== "") return result[key];
+  }
+  const position = result.position || result.coords || result.coordinates || {};
+  for (const key of keys) {
+    if (position[key] !== undefined && position[key] !== null && position[key] !== "") return position[key];
+  }
+  return "";
+}
+
+function mapyAddressUrl(row) {
+  const result = firstMapyResult(row);
+  const query = result
+    ? [result.name, result.location, result.zip].filter(Boolean).join(", ") || rowAddressQuery(row)
+    : rowAddressQuery(row);
+  const params = new URLSearchParams();
+  params.set("q", query || row.orderNumber || "adresa");
+
+  const source = result?.source || result?.sourceType || result?.type || "";
+  const id = result?.id || result?.sourceId || result?.addrId || "";
+  const x = mapyCoordinate(result, ["x", "lon", "lng", "longitude"]);
+  const y = mapyCoordinate(result, ["y", "lat", "latitude"]);
+  if (source && id) {
+    params.set("source", source);
+    params.set("id", id);
+    params.set("ds", "1");
+  }
+  if (x && y) {
+    params.set("x", x);
+    params.set("y", y);
+    params.set("z", "17");
+  }
+  return `https://mapy.com/sk/zakladni?${params.toString()}`;
 }
 
 function deliveryCarrierHtml(row) {
