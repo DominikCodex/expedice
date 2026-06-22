@@ -2854,8 +2854,6 @@ def address_precheck_error(data):
         missing.append("číslo domu")
     if not parts["city"]:
         missing.append("město")
-    if not parts["zipCode"]:
-        missing.append("PSČ")
 
     if missing:
         return f"Chybí {', '.join(missing)}. Adresa musí být vyřešena se zákazníkem."
