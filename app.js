@@ -37,6 +37,7 @@ const completionState = {
   rows: [],
   loaded: false,
   paymentUpdatesSince: null,
+  paymentPollInFlight: false,
 };
 
 const completionFilters = {
@@ -967,6 +968,7 @@ function applyCompletionDataset(dataset, rows) {
   renderCompletion();
   loadAddressValidationLog();
   setCompletionMessage(`Načteno: ${datasetLabel(completionState.dataset)}.`, "success");
+  window.setTimeout(() => pollPaymentFeedUpdates(), 200);
 }
 
 function hidePacketaDryRunResult() {
@@ -1568,6 +1570,13 @@ function paymentCheckHtml(row) {
   return `<span class="payment-check-badge ${tone}" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
 }
 
+function paymentCheckIsPending(row) {
+  if (!row) return false;
+  if (paymentCheckKind(row)) return false;
+  const paymentText = normalize([row.paymentMethod, row.shippingMethod, row.paidStatus].filter(Boolean).join(" "));
+  return !paymentText.includes("dobirk") && !paymentText.includes("dobierk");
+}
+
 function renderSettings(settings) {
   const mapy = settings.mapy || {};
   const paymentFeeds = settings.paymentFeeds || {};
@@ -1809,6 +1818,8 @@ function replaceCompletionRow(row) {
 
 async function pollPaymentFeedUpdates() {
   if (!completionState.dataset?.id || els.completionView.classList.contains("hidden")) return;
+  if (completionState.paymentPollInFlight) return;
+  completionState.paymentPollInFlight = true;
   const params = new URLSearchParams({ datasetId: completionState.dataset.id });
   if (completionState.paymentUpdatesSince) {
     params.set("since", completionState.paymentUpdatesSince);
@@ -1833,6 +1844,8 @@ async function pollPaymentFeedUpdates() {
     }
   } catch (error) {
     console.warn("Payment feed update polling failed", error);
+  } finally {
+    completionState.paymentPollInFlight = false;
   }
 }
 
@@ -2776,6 +2789,7 @@ function workflowStatusTone(row) {
   const paymentStatus = paymentCheckKind(row);
   if (!row) return "neutral";
   if (paymentStatus === "storno") return "danger";
+  if (paymentCheckIsPending(row)) return "warning";
   if (["unpaid", "missing", "unknown"].includes(paymentStatus)) return "warning";
   if (status.includes("error")) return "danger";
   if (status.includes("nezaplac")) return "warning";
@@ -2790,6 +2804,7 @@ function workflowPaymentText(row) {
   const paymentLabel = paymentCheckLabel(row);
   const payment = row.paymentMethod || row.paidStatus || "";
   if (paymentLabel) return `Kontrola platby: ${paymentLabel}`;
+  if (paymentCheckIsPending(row)) return "Kontrola platby: čekám na feed";
   if (toNumber(cod, 0) > 0) return `Dobírka: ${cod} ${currency}`.trim();
   return `Platba: ${payment || "bez dobírky"}`;
 }
@@ -2822,6 +2837,18 @@ async function autoPrintWorkflowDocuments(row, boxNumber) {
   const key = workflowAutoPrintKey(row);
   if (workflowAutoPrintedRows.has(key)) {
     setWorkflowMessage(`Načten box X${boxNumber}S: objednávka ${row.orderNumber || "-"}. Automatický tisk už v této relaci proběhl.`, "warning");
+    return;
+  }
+
+  if (paymentCheckIsPending(row)) {
+    setWorkflowMessage(
+      `Načten box X${boxNumber}S: objednávka ${row.orderNumber || "-"}. Automatický tisk čeká, protože platba ještě není ověřená živým feedem.`,
+      "warning"
+    );
+    return;
+  }
+  if (paymentCheckKind(row) === "storno") {
+    setWorkflowMessage(`Načten box X${boxNumber}S: objednávka ${row.orderNumber || "-"} je STORNO. Netisknu štítek.`, "error");
     return;
   }
 
@@ -2879,6 +2906,7 @@ function renderWorkflow() {
   const statusText = row?.completionStatus || (row ? "Rozpracováno" : "Čekám na sken boxu");
   const isDpd = row && (row.delivery?.isDpd || normalize(row.shippingMethod || "").includes("dpd"));
   const paymentWarning = row && ["storno", "unpaid", "missing", "unknown"].includes(paymentCheckKind(row));
+  const paymentPending = row && paymentCheckIsPending(row);
 
   els.workflowExpeditionNumber.textContent = expeditionNumber;
   els.workflowCustomerName.textContent = fullName || "-";
@@ -2897,6 +2925,7 @@ function renderWorkflow() {
     .join(" | ");
   const warnings = [];
   if (paymentWarning) warnings.push(`${paymentCheckLabel(row)}: ${row.paymentCheckMessage || "zkontroluj objednávku před odesláním"}`);
+  if (paymentPending) warnings.push("Platba zatím nebyla ověřena živým feedem. Chvilku počkej nebo objednávku zkontroluj ručně.");
   if (isDpd) warnings.push("Pozor: Doručení přes DPD = jiný svoz");
   els.workflowWarning.classList.toggle("hidden", !warnings.length);
   els.workflowWarning.textContent = warnings.join(" | ");
