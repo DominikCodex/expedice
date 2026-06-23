@@ -39,10 +39,8 @@ SESSION_SECONDS = 12 * 60 * 60
 INITIAL_ADMIN_USERNAME = "d.najman@centrum.cz"
 INITIAL_ADMIN_PASSWORD = "1234"
 PASSWORD_HASH_METHOD = "pbkdf2:sha256:260000"
-PAYMENT_SYNC_STARTED = False
-PAYMENT_SYNC_THREAD = None
 PAYMENT_SYNC_LOCK = threading.Lock()
-PAYMENT_SYNC_SECONDS = 180
+PAYMENT_SYNC_ACTIVE_SECONDS = 20 * 60
 
 DEFAULT_SHOPS = [
     {
@@ -1793,21 +1791,42 @@ def latest_payment_sync():
             return payment_sync_to_api(cur.fetchone())
 
 
-def payment_sync_loop():
-    time.sleep(8)
-    while True:
-        sync_payment_feeds("background")
-        time.sleep(PAYMENT_SYNC_SECONDS)
+def payment_sync_active_seconds():
+    return max(300, env_int("PAYMENT_FEED_ACTIVE_SYNC_SECONDS", PAYMENT_SYNC_ACTIVE_SECONDS))
 
 
-def start_payment_sync_thread():
-    global PAYMENT_SYNC_STARTED, PAYMENT_SYNC_THREAD, PAYMENT_SYNC_SECONDS
-    if PAYMENT_SYNC_STARTED or os.environ.get("PAYMENT_FEED_SYNC_DISABLED") == "1":
-        return
-    PAYMENT_SYNC_SECONDS = max(30, env_int("PAYMENT_FEED_SYNC_SECONDS", 180))
-    PAYMENT_SYNC_STARTED = True
-    PAYMENT_SYNC_THREAD = threading.Thread(target=payment_sync_loop, name="payment-feed-sync", daemon=True)
-    PAYMENT_SYNC_THREAD.start()
+def maybe_sync_payment_feeds(trigger_source="active_completion"):
+    if os.environ.get("PAYMENT_FEED_SYNC_DISABLED") == "1":
+        return {"ok": True, "skipped": True, "reason": "Synchronizace plateb je vypnutá.", "latestSync": latest_payment_sync()}
+
+    ensure_schema()
+    interval = payment_sync_active_seconds()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT finished_at
+                FROM payment_feed_syncs
+                WHERE finished_at IS NOT NULL
+                ORDER BY finished_at DESC
+                LIMIT 1
+                """
+            )
+            row = cur.fetchone()
+
+    finished_at = row.get("finished_at") if row else None
+    if finished_at:
+        now = datetime.now(finished_at.tzinfo)
+        if now - finished_at < timedelta(seconds=interval):
+            return {
+                "ok": True,
+                "skipped": True,
+                "reason": "Poslední synchronizace plateb je ještě čerstvá.",
+                "latestSync": latest_payment_sync(),
+                "nextSyncAfterSeconds": interval - int((now - finished_at).total_seconds()),
+            }
+
+    return sync_payment_feeds(trigger_source)
 
 
 def default_settings():
@@ -5029,7 +5048,7 @@ def completion_issue_document(row_id):
 
 @app.before_request
 def ensure_payment_sync_started():
-    start_payment_sync_thread()
+    return None
 
 
 @app.route("/api/settings")
@@ -5072,6 +5091,7 @@ def payment_feed_updates():
     ensure_schema()
     dataset_id = clean_text(request.args.get("datasetId"))
     since = clean_text(request.args.get("since"))
+    sync_attempt = maybe_sync_payment_feeds("active_completion") if dataset_id else {"ok": True, "skipped": True}
     params = []
     filters = ["cr.payment_check_status IS NOT NULL"]
     if dataset_id:
@@ -5094,7 +5114,7 @@ def payment_feed_updates():
                 params,
             )
             rows = [completion_row_to_api(row) for row in cur.fetchall()]
-    return jsonify({"rows": rows, "latestSync": latest_payment_sync(), "serverTime": datetime.utcnow().isoformat() + "Z"})
+    return jsonify({"rows": rows, "latestSync": latest_payment_sync(), "syncAttempt": sync_attempt, "serverTime": datetime.utcnow().isoformat() + "Z"})
 
 
 @app.route("/api/completion/datasets")
