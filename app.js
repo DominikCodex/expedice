@@ -51,6 +51,7 @@ const completionWorkflowState = {
   row: null,
   index: -1,
 };
+const workflowAutoPrintedRows = new Set();
 
 const settingsState = {
   loaded: false,
@@ -1640,17 +1641,17 @@ async function sendCompletionCarrier(rowId) {
   }
 }
 
-async function printCompletionCarrierLabel(rowId) {
+async function printCompletionCarrierLabel(rowId, setStatus = setCompletionMessage) {
   const row = completionState.rows.find((item) => String(item.id) === String(rowId));
   const labelNumber = row?.packetaShipmentId || "";
   if (!labelNumber) {
-    setCompletionMessage("Řádek zatím nemá číslo zásilky/štítku.", "warning");
+    setStatus("Řádek zatím nemá číslo zásilky/štítku.", "warning");
     return;
   }
 
   const url = `/api/completion/rows/${encodeURIComponent(rowId)}/label?markPrinted=1`;
   const carrier = row.deliveryCarrier || (String(labelNumber).length === 14 ? "dpd" : "packeta");
-  setCompletionMessage(`Posílám štítek ${labelNumber} do lokálního tiskového agenta...`, "neutral");
+  setStatus(`Posílám štítek ${labelNumber} do lokálního tiskového agenta...`, "neutral");
 
   try {
     const result = await printPdfViaAgent({
@@ -1662,17 +1663,19 @@ async function printCompletionCarrierLabel(rowId) {
     row.labelPrinted = "Label printed";
     replaceCompletionRow(row);
     renderCompletion();
-    setCompletionMessage(`Štítek ${labelNumber} odeslán na tiskárnu: ${result.printer}.`, "success");
+    renderWorkflow();
+    setStatus(`Štítek ${labelNumber} odeslán na tiskárnu: ${result.printer}.`, "success");
   } catch (error) {
     const printWindow = window.open(url, "_blank", "noopener");
     if (!printWindow) {
-      setCompletionMessage(`Tiskový agent neběží a prohlížeč zablokoval otevření PDF: ${error.message}`, "error");
+      setStatus(`Tiskový agent neběží a prohlížeč zablokoval otevření PDF: ${error.message}`, "error");
       return;
     }
     row.labelPrinted = "Label printed";
     replaceCompletionRow(row);
     renderCompletion();
-    setCompletionMessage(`Agent neběží (${error.message}). Štítek ${labelNumber} jsem otevřel jako PDF pro ruční tisk.`, "warning");
+    renderWorkflow();
+    setStatus(`Agent neběží (${error.message}). Štítek ${labelNumber} jsem otevřel jako PDF pro ruční tisk.`, "warning");
   }
 }
 
@@ -2500,6 +2503,56 @@ function workflowPaymentText(row) {
   return `Platba: ${payment || "bez dobírky"}`;
 }
 
+function workflowAutoPrintKey(row) {
+  return `${completionState.dataset?.id || "dataset"}:${row?.id || row?.orderNumber || ""}`;
+}
+
+function workflowIsUnpaid(row) {
+  const text = normalize(
+    [
+      row?.paidStatus,
+      row?.paymentStatus,
+      row?.paymentMethod,
+      row?.completionStatus,
+      row?.packetaStatus,
+      row?.note,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+  return text.includes("nezaplac") || text.includes("neuhrazen");
+}
+
+async function autoPrintWorkflowDocuments(row, boxNumber) {
+  if (!row?.id) return;
+  const key = workflowAutoPrintKey(row);
+  if (workflowAutoPrintedRows.has(key)) {
+    setWorkflowMessage(`Načten box X${boxNumber}S: objednávka ${row.orderNumber || "-"}. Automatický tisk už v této relaci proběhl.`, "warning");
+    return;
+  }
+
+  const hasCarrierLabel = Boolean(row.packetaShipmentId);
+  const needsUnpaidDocument = workflowIsUnpaid(row);
+  if (!hasCarrierLabel && !needsUnpaidDocument) return;
+
+  workflowAutoPrintedRows.add(key);
+  const printed = [];
+  if (hasCarrierLabel) {
+    await printCompletionCarrierLabel(row.id, setWorkflowMessage);
+    printed.push("štítek dopravce");
+  }
+  if (needsUnpaidDocument) {
+    await printCompletionIssueDocument(row.id, "unpaid", setWorkflowMessage);
+    printed.push("nezaplacenka");
+  }
+  if (printed.length) {
+    setWorkflowMessage(
+      `Načten box X${boxNumber}S: objednávka ${row.orderNumber || "-"}. Automaticky odesláno k tisku: ${printed.join(" + ")}.`,
+      "success"
+    );
+  }
+}
+
 function workflowCountryText(row) {
   if (!row) return "-";
   const currency = row?.currency || "";
@@ -2571,7 +2624,7 @@ function selectWorkflowRow(row, message = "") {
   if (message) setWorkflowMessage(message, "success");
 }
 
-function scanWorkflowBox() {
+async function scanWorkflowBox() {
   const number = parseWorkflowBoxCode(els.workflowBoxCode.value);
   if (!number) {
     setWorkflowMessage("Box musí být ve tvaru X16S, případně jen číslo 16.", "warning");
@@ -2588,6 +2641,7 @@ function scanWorkflowBox() {
   }
   selectWorkflowRow(row, `Načten box X${number}S: objednávka ${row.orderNumber || "-"}.`);
   els.workflowBoxCode.value = "";
+  await autoPrintWorkflowDocuments(row, number);
 }
 
 function moveWorkflow(delta) {
@@ -3481,13 +3535,13 @@ els.completionDataset.addEventListener("change", () => {
 els.workflowBoxCode.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
-    scanWorkflowBox();
+    scanWorkflowBox().catch((error) => setWorkflowMessage(`Načtení boxu selhalo: ${error.message}`, "error"));
   }
 });
 els.workflowBoxCode.addEventListener("input", () => {
   const code = els.workflowBoxCode.value.trim();
   if (/^x\s*\d+\s*s$/i.test(code)) {
-    scanWorkflowBox();
+    scanWorkflowBox().catch((error) => setWorkflowMessage(`Načtení boxu selhalo: ${error.message}`, "error"));
   }
 });
 els.workflowPrev.addEventListener("click", () => moveWorkflow(-1));
