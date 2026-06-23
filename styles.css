@@ -938,6 +938,11 @@ select:focus {
   padding: 8px 10px;
 }
 
+.address-log-item.reverted {
+  opacity: 0.72;
+  background: #f6f7f5;
+}
+
 .address-log-item.verified {
   border-left-color: var(--green);
 }
@@ -960,6 +965,12 @@ select:focus {
 .address-log-item p {
   margin: 5px 0;
   font-size: 12px;
+}
+
+.address-log-revert {
+  margin-top: 7px;
+  padding: 6px 8px;
+  font-size: 11px;
 }
 
 .empty-log {

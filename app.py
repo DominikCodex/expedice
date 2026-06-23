@@ -337,12 +337,24 @@ def ensure_schema():
                     action TEXT,
                     message TEXT,
                     details JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    original_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    updated_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    reverted_at TIMESTAMPTZ,
+                    reverted_by TEXT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
                 """
             )
             cur.execute("ALTER TABLE address_validation_logs ADD COLUMN IF NOT EXISTS actor_user_id BIGINT")
             cur.execute("ALTER TABLE address_validation_logs ADD COLUMN IF NOT EXISTS actor_name TEXT")
+            cur.execute(
+                "ALTER TABLE address_validation_logs ADD COLUMN IF NOT EXISTS original_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb"
+            )
+            cur.execute(
+                "ALTER TABLE address_validation_logs ADD COLUMN IF NOT EXISTS updated_snapshot JSONB NOT NULL DEFAULT '{}'::jsonb"
+            )
+            cur.execute("ALTER TABLE address_validation_logs ADD COLUMN IF NOT EXISTS reverted_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE address_validation_logs ADD COLUMN IF NOT EXISTS reverted_by TEXT")
             cur.execute(
                 """
                 CREATE INDEX IF NOT EXISTS idx_address_validation_logs_dataset
@@ -3092,6 +3104,97 @@ def mapy_address_fills_missing_input(data, address):
     return any(clean_text(address.get(address_key)) and not clean_text(parts.get(input_key)) for input_key, address_key in field_pairs)
 
 
+def merge_carrier_note(existing, addition):
+    existing = clean_text(existing).strip()
+    addition = clean_text(addition).strip()
+    if not addition:
+        return existing
+    if not existing:
+        return addition
+    existing_parts = [part.strip().lower() for part in existing.split("|")]
+    if addition.lower() in existing_parts:
+        return existing
+    return f"{existing} | {addition}"
+
+
+def address_cleanup_candidates(data):
+    parts = address_input_parts(data)
+    original_street = clean_text(parts.get("streetWithNumber") or parts.get("combinedStreet")).strip()
+    if not original_street:
+        return []
+
+    candidates = []
+
+    def add_candidate(strategy, clean_street, carrier_note_addition):
+        clean_street = clean_text(clean_street).strip(" ,;-")
+        carrier_note_addition = clean_text(carrier_note_addition).strip(" ,;-")
+        if not clean_street or not carrier_note_addition:
+            return
+        if not any(ch.isdigit() for ch in clean_street):
+            return
+        candidate_data = dict(data)
+        candidate_data["streetWithNumber"] = clean_street
+        candidate_data["street"] = ""
+        candidate_data["houseNumber"] = ""
+        candidates.append(
+            {
+                "strategy": strategy,
+                "originalStreet": original_street,
+                "cleanStreet": clean_street,
+                "carrierNoteAddition": carrier_note_addition,
+                "data": candidate_data,
+            }
+        )
+
+    if "," in original_street:
+        before, after = original_street.split(",", 1)
+        add_candidate("prefix-company", after, before)
+
+    tokens = original_street.split()
+    last_number_index = -1
+    for index, token in enumerate(tokens):
+        if any(ch.isdigit() for ch in token):
+            last_number_index = index
+    if 0 <= last_number_index < len(tokens) - 1:
+        add_candidate(
+            "trailing-place",
+            " ".join(tokens[: last_number_index + 1]),
+            " ".join(tokens[last_number_index + 1 :]),
+        )
+
+    unique = []
+    seen = set()
+    for candidate in candidates:
+        key = candidate["cleanStreet"].lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(candidate)
+    return unique
+
+
+def mapy_geocode_items(api_key, data, query, timeout):
+    api_key_param = os.environ.get("MAPY_API_KEY_PARAM", "apikey")
+    params = {
+        "query": query,
+        "lang": os.environ.get("MAPY_API_LANG", "cs"),
+        "limit": int_from_text(os.environ.get("MAPY_API_LIMIT")) or 5,
+        "type": os.environ.get("MAPY_API_TYPE", "regional.address"),
+        "locality": mapy_country(data),
+        api_key_param: api_key,
+    }
+    url = f"{mapy_geocode_url()}?{urllib.parse.urlencode(params)}"
+    geocode_request = urllib.request.Request(
+        url,
+        headers={"Accept": "application/json", "X-Mapy-Api-Key": api_key},
+        method="GET",
+    )
+    with urllib.request.urlopen(geocode_request, timeout=timeout) as response:
+        response_text = response.read().decode("utf-8", "replace")
+        payload = json.loads(response_text)
+    return mapy_normalize_items(payload)
+
+
 def address_log_address(row):
     if not row:
         return ""
@@ -3117,6 +3220,8 @@ def address_log_address(row):
 
 
 def address_validation_action(result_payload):
+    if result_payload.get("appliedAddressCleanup"):
+        return "address-cleaned"
     if result_payload.get("appliedCarrierNote"):
         return "carrier-note"
     if result_payload.get("appliedSuggestion"):
@@ -3128,6 +3233,27 @@ def address_validation_action(result_payload):
     return clean_text(result_payload.get("status")) or "error"
 
 
+def address_validation_row_snapshot(row):
+    if not row:
+        return {}
+    checked_at = row_value(row, "addressValidationCheckedAt", "address_validation_checked_at")
+    if hasattr(checked_at, "isoformat"):
+        checked_at = checked_at.isoformat()
+    return {
+        "streetWithNumber": clean_text(row_value(row, "streetWithNumber", "street_with_number")),
+        "street": clean_text(row_value(row, "street", "street")),
+        "houseNumber": clean_text(row_value(row, "houseNumber", "house_number")),
+        "city": clean_text(row_value(row, "city", "city")),
+        "zipCode": clean_text(row_value(row, "zipCode", "zip_code")),
+        "carrierNote": clean_text(row_value(row, "carrierNote", "carrier_note")),
+        "addressValidationStatus": clean_text(row_value(row, "addressValidationStatus", "address_validation_status")),
+        "addressValidationMessage": clean_text(row_value(row, "addressValidationMessage", "address_validation_message")),
+        "addressValidationQuery": clean_text(row_value(row, "addressValidationQuery", "address_validation_query")),
+        "addressValidationCheckedAt": checked_at or None,
+        "addressValidationResult": row_value(row, "addressValidationResult", "address_validation_result") or {},
+    }
+
+
 def insert_address_validation_log(cur, original_row, updated_row, result_payload):
     row = updated_row or original_row or {}
     actor = current_user() or {}
@@ -3136,9 +3262,9 @@ def insert_address_validation_log(cur, original_row, updated_row, result_payload
         INSERT INTO address_validation_logs (
             dataset_id, row_id, actor_user_id, actor_name, order_number, customer_name, original_address,
             resolved_address, carrier_note_before, carrier_note_after,
-            status, action, message, details
+            status, action, message, details, original_snapshot, updated_snapshot
         )
-        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """,
         (
             row_value(row, "datasetId", "dataset_id"),
@@ -3162,6 +3288,8 @@ def insert_address_validation_log(cur, original_row, updated_row, result_payload
             address_validation_action(result_payload),
             result_payload.get("message"),
             Json(result_payload),
+            Json(address_validation_row_snapshot(original_row)),
+            Json(address_validation_row_snapshot(updated_row or original_row)),
         ),
     )
 
@@ -3182,6 +3310,11 @@ def address_validation_log_to_api(row):
         "action": row.get("action") or "",
         "message": row.get("message") or "",
         "details": row.get("details") or {},
+        "originalSnapshot": row.get("original_snapshot") or {},
+        "updatedSnapshot": row.get("updated_snapshot") or {},
+        "revertedAt": row["reverted_at"].isoformat() if row.get("reverted_at") else None,
+        "revertedBy": row.get("reverted_by") or "",
+        "canRevert": bool(row.get("row_id") and row.get("original_snapshot") and not row.get("reverted_at")),
         "createdAt": row["created_at"].isoformat() if row.get("created_at") else None,
     }
 
@@ -4412,15 +4545,61 @@ def validate_address():
                 "items": items,
                 "rawCount": len(items),
             }
+            validation_data = data
+            cleanup_candidate = None
+            if not valid:
+                for candidate in address_cleanup_candidates(data):
+                    cleanup_query = mapy_address_query(candidate["data"])
+                    if not cleanup_query or cleanup_query == query:
+                        continue
+                    cleanup_items = mapy_geocode_items(api_key, candidate["data"], cleanup_query, timeout)
+                    cleanup_first = cleanup_items[0] if cleanup_items else {}
+                    cleanup_valid, cleanup_message = address_matches_mapy_result(candidate["data"], cleanup_first)
+                    if not cleanup_valid:
+                        continue
+                    validation_data = candidate["data"]
+                    cleanup_candidate = candidate
+                    query = cleanup_query
+                    items = cleanup_items
+                    first = cleanup_first
+                    valid = True
+                    status = "verified"
+                    cleaned_address = mapy_address_from_item(first)
+                    message = "Adresa byla ocistena a overena pres Mapy.com: " + mapy_address_label(cleaned_address)
+                    if candidate.get("carrierNoteAddition"):
+                        message += ". Do poznamky pro prepravce presunuto: " + candidate["carrierNoteAddition"]
+                    result_payload.update(
+                        {
+                            "valid": True,
+                            "status": "verified",
+                            "message": message,
+                            "query": cleanup_query,
+                            "originalQuery": result_payload.get("query"),
+                            "items": cleanup_items,
+                            "rawCount": len(cleanup_items),
+                            "appliedAddressCleanup": True,
+                            "appliedCarrierNote": bool(candidate.get("carrierNoteAddition")),
+                            "carrierNoteAdded": candidate.get("carrierNoteAddition") or "",
+                            "cleanupStrategy": candidate.get("strategy"),
+                            "cleanupOriginalStreet": candidate.get("originalStreet"),
+                            "cleanupStreet": candidate.get("cleanStreet"),
+                            "originalStatus": result_payload.get("status"),
+                            "originalMessage": cleanup_message or match_message,
+                            "appliedAddress": cleaned_address,
+                        }
+                    )
+                    break
             mapy_address = mapy_address_from_item(first)
             original_status = status
             suggested_address = mapy_address if status == "suggestion" else None
-            if status == "verified" and mapy_address_fills_missing_input(data, mapy_address):
+            if status == "verified" and (cleanup_candidate or mapy_address_fills_missing_input(validation_data, mapy_address)):
                 suggested_address = mapy_address
             if suggested_address:
                 valid = True
                 status = "verified"
-                if original_status == "suggestion":
+                if cleanup_candidate:
+                    message = result_payload.get("message") or "Adresa byla ocistena podle Mapy.com: " + mapy_address_label(suggested_address)
+                elif original_status == "suggestion":
                     message = "Adresa byla upravena podle návrhu Mapy.com: " + mapy_address_label(suggested_address)
                 else:
                     message = "Adresa byla doplněna podle přesné shody Mapy.com: " + mapy_address_label(suggested_address)
@@ -4429,14 +4608,15 @@ def validate_address():
                         "valid": valid,
                         "status": status,
                         "message": message,
-                        "appliedSuggestion": original_status == "suggestion",
-                        "appliedAddressCompletion": original_status == "verified",
+                        "appliedSuggestion": original_status == "suggestion" and not cleanup_candidate,
+                        "appliedAddressCompletion": original_status == "verified" and not cleanup_candidate,
                         "appliedAddress": suggested_address,
-                        "originalStatus": original_status,
-                        "originalMessage": match_message,
+                        "originalStatus": result_payload.get("originalStatus") or original_status,
+                        "originalMessage": result_payload.get("originalMessage") or match_message,
                     }
                 )
             row_id = int_from_text(data.get("rowId"))
+            carrier_note_addition = cleanup_candidate.get("carrierNoteAddition") if cleanup_candidate else ""
             updated_row = None
             if row_id:
                 ensure_schema()
@@ -4444,6 +4624,12 @@ def validate_address():
                     with conn.cursor(cursor_factory=RealDictCursor) as cur:
                         cur.execute("SELECT * FROM completion_rows WHERE id = %s", (row_id,))
                         original_row = cur.fetchone()
+                        carrier_note_after = merge_carrier_note(
+                            row_value(original_row or {}, "carrierNote", "carrier_note"),
+                            carrier_note_addition,
+                        )
+                        if carrier_note_addition:
+                            result_payload["carrierNoteAfter"] = carrier_note_after
                         if suggested_address:
                             cur.execute(
                                 """
@@ -4453,6 +4639,7 @@ def validate_address():
                                     house_number = %s,
                                     city = %s,
                                     zip_code = %s,
+                                    carrier_note = CASE WHEN %s THEN %s ELSE carrier_note END,
                                     address_validation_status = %s,
                                     address_validation_message = %s,
                                     address_validation_query = %s,
@@ -4467,6 +4654,8 @@ def validate_address():
                                     suggested_address.get("houseNumber"),
                                     suggested_address.get("city"),
                                     suggested_address.get("zipCode"),
+                                    bool(carrier_note_addition),
+                                    carrier_note_after,
                                     status,
                                     message,
                                     query,
@@ -4482,11 +4671,20 @@ def validate_address():
                                     address_validation_message = %s,
                                     address_validation_query = %s,
                                     address_validation_checked_at = NOW(),
-                                    address_validation_result = %s
+                                    address_validation_result = %s,
+                                    carrier_note = CASE WHEN %s THEN %s ELSE carrier_note END
                                 WHERE id = %s
                                 RETURNING *
                                 """,
-                                (status, message, query, Json(result_payload), row_id),
+                                (
+                                    status,
+                                    message,
+                                    query,
+                                    Json(result_payload),
+                                    bool(carrier_note_addition),
+                                    carrier_note_after,
+                                    row_id,
+                                ),
                             )
                         updated_row = cur.fetchone()
                         insert_address_validation_log(cur, original_row, updated_row, result_payload)
@@ -4538,6 +4736,87 @@ def address_validation_logs():
             logs = [address_validation_log_to_api(row) for row in cur.fetchall()]
 
     return jsonify({"logs": logs})
+
+
+@app.route("/api/address-validation-logs/<int:log_id>/revert", methods=["POST"])
+def revert_address_validation_log(log_id):
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    actor = current_user() or {}
+    actor_name = actor.get("displayName") or actor.get("display_name") or actor.get("username") or actor.get("email") or ""
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM address_validation_logs WHERE id = %s FOR UPDATE", (log_id,))
+            log_row = cur.fetchone()
+            if not log_row:
+                return jsonify({"error": "Zaznam logu nebyl nalezen."}), 404
+            if log_row.get("reverted_at"):
+                return jsonify({"error": "Tato zmena uz byla vracena."}), 400
+
+            snapshot = log_row.get("original_snapshot") or {}
+            row_id = log_row.get("row_id")
+            if not row_id or not snapshot:
+                return jsonify({"error": "Log nema ulozeny puvodni stav pro vraceni."}), 400
+
+            checked_at = snapshot.get("addressValidationCheckedAt") or None
+            cur.execute(
+                """
+                UPDATE completion_rows
+                SET street_with_number = %s,
+                    street = %s,
+                    house_number = %s,
+                    city = %s,
+                    zip_code = %s,
+                    carrier_note = %s,
+                    address_validation_status = NULLIF(%s, ''),
+                    address_validation_message = NULLIF(%s, ''),
+                    address_validation_query = NULLIF(%s, ''),
+                    address_validation_checked_at = %s,
+                    address_validation_result = %s
+                WHERE id = %s
+                RETURNING *
+                """,
+                (
+                    snapshot.get("streetWithNumber") or "",
+                    snapshot.get("street") or "",
+                    snapshot.get("houseNumber") or "",
+                    snapshot.get("city") or "",
+                    snapshot.get("zipCode") or "",
+                    snapshot.get("carrierNote") or "",
+                    snapshot.get("addressValidationStatus") or "",
+                    snapshot.get("addressValidationMessage") or "",
+                    snapshot.get("addressValidationQuery") or "",
+                    checked_at,
+                    Json(snapshot.get("addressValidationResult") or {}),
+                    row_id,
+                ),
+            )
+            updated_row = cur.fetchone()
+            if not updated_row:
+                return jsonify({"error": "Radek kompletace uz neexistuje."}), 404
+
+            cur.execute(
+                """
+                UPDATE address_validation_logs
+                SET reverted_at = NOW(),
+                    reverted_by = %s
+                WHERE id = %s
+                RETURNING *
+                """,
+                (actor_name, log_id),
+            )
+            updated_log = cur.fetchone()
+
+    return jsonify(
+        {
+            "ok": True,
+            "row": completion_row_to_api(updated_row),
+            "log": address_validation_log_to_api(updated_log),
+        }
+    )
 
 
 @app.route("/api/sorting/rows/<int:row_id>/adjust", methods=["POST"])

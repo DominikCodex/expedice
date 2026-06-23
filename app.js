@@ -1863,6 +1863,7 @@ function renderCompletionSummary(rows) {
 
 function addressValidationActionLabel(action) {
   const labels = {
+    "address-cleaned": "Očištěná adresa",
     "address-replaced": "Přepsaná adresa",
     "address-completed": "Doplněná adresa",
     "carrier-note": "Pozn. přepravce",
@@ -1883,7 +1884,7 @@ function renderAddressValidationLog(logs = []) {
   els.addressValidationLog.innerHTML = logs
     .map(
       (item) => `
-        <article class="address-log-item ${escapeHtml(item.status || "")}">
+        <article class="address-log-item ${escapeHtml(item.status || "")} ${item.revertedAt ? "reverted" : ""}">
           <strong>${escapeHtml(addressValidationActionLabel(item.action))}</strong>
           <span>${escapeHtml(formatTime(item.createdAt) || "")}</span>
           ${item.actorName ? `<small>Uživatel: ${escapeHtml(item.actorName)}</small>` : ""}
@@ -1891,8 +1892,23 @@ function renderAddressValidationLog(logs = []) {
           <p>${escapeHtml(item.message || "")}</p>
           <small>${escapeHtml(item.originalAddress || "-")} → ${escapeHtml(item.resolvedAddress || "-")}</small>
           ${
+            item.details?.cleanupOriginalStreet
+              ? `<small>Očištěno: ${escapeHtml(item.details.cleanupOriginalStreet)} → ${escapeHtml(
+                  item.details.cleanupStreet || "-"
+                )}</small>`
+              : ""
+          }
+          ${
             item.carrierNoteAfter
               ? `<small>Pozn. přepravce: ${escapeHtml(item.carrierNoteAfter)}</small>`
+              : ""
+          }
+          ${item.revertedAt ? `<small>Vráceno: ${escapeHtml(formatTime(item.revertedAt) || "")} ${escapeHtml(item.revertedBy || "")}</small>` : ""}
+          ${
+            item.canRevert
+              ? `<button type="button" class="secondary address-log-revert" data-action="revert-address-log" data-log-id="${escapeHtml(
+                  item.id
+                )}">Vrátit změnu</button>`
               : ""
           }
         </article>
@@ -1918,10 +1934,29 @@ async function loadAddressValidationLog() {
   }
 }
 
+async function revertAddressValidationLog(logId) {
+  if (!logId) return;
+  if (!confirm("Vrátit adresu a poznámku pro přepravce do původního stavu podle tohoto logu?")) return;
+  try {
+    const data = await fetchJson(`/api/address-validation-logs/${encodeURIComponent(logId)}/revert`, {
+      method: "POST",
+    });
+    if (data.row) {
+      replaceCompletionRow(data.row);
+      renderCompletion();
+    }
+    await loadAddressValidationLog();
+    setCompletionMessage("Změna z logu byla vrácená.", "success");
+  } catch (error) {
+    setCompletionMessage(`Vrácení změny selhalo: ${error.message}`, "error");
+  }
+}
+
 function addressValidationPopupSummary({ checked, skippedOk, failed, addressErrors, results }) {
   const verified = results.filter((item) => item.data?.valid).length;
   const replaced = results.filter((item) => item.data?.appliedSuggestion).length;
   const completed = results.filter((item) => item.data?.appliedAddressCompletion).length;
+  const cleaned = results.filter((item) => item.data?.appliedAddressCleanup).length;
   const carrierNotes = results.filter((item) => item.data?.appliedCarrierNote).length;
   const notFound = results.filter((item) => item.data?.status === "not_found").length;
   return [
@@ -1932,6 +1967,7 @@ function addressValidationPopupSummary({ checked, skippedOk, failed, addressErro
     `Ověřeno jako v pořádku: ${verified}`,
     `Přepsané návrhy adres: ${replaced}`,
     `Doplněné chybějící údaje: ${completed}`,
+    `Očištěné adresy: ${cleaned}`,
     `Doplněné poznámky pro přepravce: ${carrierNotes}`,
     `Nenalezeno: ${notFound}`,
     `Chyby volání: ${failed}`,
@@ -3435,6 +3471,11 @@ els.completionFilterReset?.addEventListener("click", () => {
 });
 els.completionValidateAddresses?.addEventListener("click", validateAddressDeliveriesBulk);
 els.addressValidationLogRefresh?.addEventListener("click", loadAddressValidationLog);
+els.addressValidationLog?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-action='revert-address-log']");
+  if (!button) return;
+  revertAddressValidationLog(button.dataset.logId);
+});
 els.packetaDryRun.addEventListener("click", runPacketaDryRun);
 els.packetaValidate.addEventListener("click", runPacketaValidation);
 els.dpdDryRun.addEventListener("click", runDpdDryRun);
