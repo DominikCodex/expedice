@@ -1726,6 +1726,41 @@ def packeta_route(row):
     return {"addressId": clean_text(row.get("packetaId")), "service": "pickup_point"}
 
 
+def amount_is_positive(value):
+    text = clean_text(value).replace(",", ".")
+    number_text = "".join(char for char in text if char.isdigit() or char in ".-")
+    if not number_text or number_text in (".", "-", "-."):
+        return False
+    try:
+        return float(number_text) > 0
+    except ValueError:
+        return False
+
+
+def packeta_requires_cod(row):
+    text = " ".join(
+        clean_text(row.get(key))
+        for key in (
+            "paymentMethod",
+            "paymentStatus",
+            "paidStatus",
+            "shippingMethod",
+            "note",
+            "completionStatus",
+            "packetaStatus",
+        )
+    )
+    return packeta_contains(text, "dobirk", "dobierk", "dobírk", "cash on delivery")
+
+
+def packeta_requires_verified_address(row):
+    return packeta_route(row).get("service") != "pickup_point"
+
+
+def packeta_address_is_verified(row):
+    return clean_text(row.get("addressValidationStatus") or row.get("address_validation_status")).lower() == "verified"
+
+
 def packeta_skip_reason(row):
     delivery = delivery_info_from_row(row)
     status_text = " ".join(
@@ -1747,6 +1782,10 @@ def packeta_skip_reason(row):
     route = packeta_route(row)
     if not route["addressId"]:
         return "chybi Zasilkovna ID / addressId"
+    if packeta_requires_cod(row) and not amount_is_positive(row.get("codAmount")):
+        return "dobirka nema vyplnenou castku"
+    if packeta_requires_verified_address(row) and not packeta_address_is_verified(row):
+        return "doruceni na adresu neni overene pres Mapy.com"
     return ""
 
 
@@ -1823,6 +1862,7 @@ def packeta_dry_run_packet(row):
         warnings.append("chybi vaha")
 
     return {
+        "rowId": row.get("id"),
         "rowNumber": row.get("rowNumber"),
         "orderNumber": attrs["number"],
         "customer": " ".join(part for part in (attrs["name"], attrs["surname"]) if part),
@@ -3522,6 +3562,167 @@ def packeta_validate():
             "notValidatedCount": max(0, len(packets) - len(results)),
             "results": results,
             "skipped": skipped,
+        }
+    )
+
+
+@app.route("/api/packeta/send", methods=["POST"])
+def packeta_send():
+    auth_error = require_upload_token()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    data = request.get_json(silent=True) or {}
+    dataset_id = data.get("datasetId") or request.args.get("datasetId") or request.args.get("id")
+    client_filter = normalize_carrier_client_code(
+        data.get("clientCode")
+        or data.get("client")
+        or data.get("shopCode")
+        or request.args.get("clientCode")
+        or request.args.get("client")
+        or request.args.get("shopCode")
+    )
+
+    if not dataset_id:
+        return jsonify({"error": "datasetId is required"}), 400
+
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM datasets WHERE id = %s AND dataset_kind = 'completion'",
+                (dataset_id,),
+            )
+            dataset = cur.fetchone()
+            if not dataset:
+                return jsonify({"error": "Completion dataset not found"}), 404
+
+            cur.execute(
+                "SELECT * FROM completion_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
+                (dataset["id"],),
+            )
+            rows = [completion_row_to_api(row) for row in cur.fetchall()]
+
+    packets = []
+    skipped = []
+    for row in rows:
+        reason = packeta_skip_reason(row)
+        if reason:
+            skipped.append(
+                {
+                    "rowId": row.get("id"),
+                    "rowNumber": row.get("rowNumber"),
+                    "orderNumber": row.get("orderNumber"),
+                    "customer": " ".join(part for part in [row.get("firstName"), row.get("lastName")] if part),
+                    "shippingMethod": row.get("shippingMethod"),
+                    "reason": reason,
+                }
+            )
+            continue
+        packet = packeta_dry_run_packet(row)
+        if client_filter and packet.get("clientCode") != client_filter:
+            skipped.append(
+                {
+                    "rowId": row.get("id"),
+                    "rowNumber": row.get("rowNumber"),
+                    "orderNumber": row.get("orderNumber"),
+                    "customer": " ".join(part for part in [row.get("firstName"), row.get("lastName")] if part),
+                    "shippingMethod": row.get("shippingMethod"),
+                    "reason": "jiny klient dopravce",
+                }
+            )
+            continue
+        packets.append(packet)
+
+    results = []
+    updated_rows = []
+    for packet in packets:
+        client_settings = carrier_client_settings("packeta", packet.get("clientCode") or packet.get("shopCode"))
+        password = client_settings.get("apiPassword", "")
+        if not password:
+            results.append(
+                {
+                    "rowId": packet.get("rowId"),
+                    "rowNumber": packet.get("rowNumber"),
+                    "orderNumber": packet.get("orderNumber"),
+                    "customer": packet.get("customer"),
+                    "shippingMethod": packet.get("shippingMethod"),
+                    "service": packet.get("service"),
+                    "addressId": packet.get("addressId"),
+                    "eshop": packet.get("eshop"),
+                    "clientCode": client_settings.get("clientCode"),
+                    "clientName": client_settings.get("clientName"),
+                    "valid": False,
+                    "created": False,
+                    "shipmentId": "",
+                    "status": "configuration_error",
+                    "httpStatus": 0,
+                    "responseText": "",
+                    "error": f"Packeta API heslo neni nastavene pro klienta {client_settings.get('clientName')}.",
+                }
+            )
+            continue
+
+        create_xml = packeta_create_xml(packet["requestXml"], password)
+        api_result = packeta_post_validation_xml(create_xml, client_settings)
+        shipment_id = xml_tag_text(api_result.get("responseText", ""), "id")
+        created = bool(api_result.get("valid") and shipment_id)
+        updated_row = None
+        if created and packet.get("rowId"):
+            updated_row = update_completion_carrier_result(
+                packet["rowId"],
+                "packeta",
+                True,
+                api_result.get("status") or "ok",
+                shipment_id,
+                api_result.get("responseText", ""),
+            )
+            if updated_row:
+                updated_rows.append(updated_row)
+
+        results.append(
+            {
+                "rowId": packet.get("rowId"),
+                "rowNumber": packet.get("rowNumber"),
+                "orderNumber": packet.get("orderNumber"),
+                "customer": packet.get("customer"),
+                "shippingMethod": packet.get("shippingMethod"),
+                "service": packet.get("service"),
+                "addressId": packet.get("addressId"),
+                "eshop": packet.get("eshop"),
+                "clientCode": client_settings.get("clientCode"),
+                "clientName": client_settings.get("clientName"),
+                "valid": api_result.get("valid"),
+                "created": created,
+                "shipmentId": shipment_id,
+                "status": api_result.get("status"),
+                "httpStatus": api_result.get("httpStatus"),
+                "responseText": api_result.get("responseText"),
+                "error": "" if created else api_result.get("error") or "Packeta nevratila ID zasilky.",
+            }
+        )
+
+    created_count = len([item for item in results if item.get("created")])
+    error_count = len([item for item in results if not item.get("created")])
+    return jsonify(
+        {
+            "ok": error_count == 0,
+            "dryRun": False,
+            "validationOnly": False,
+            "createShipments": True,
+            "endpoint": packeta_api_url(),
+            "method": "POST",
+            "apiPasswordIncluded": False,
+            "note": "Ostre odeslani vybrane konkretni davky do Zasilkovny/Packety.",
+            "dataset": dataset_summary(dataset),
+            "rowsCount": len(rows),
+            "packetsCount": len(packets),
+            "createdCount": created_count,
+            "errorCount": error_count,
+            "skippedCount": len(skipped),
+            "results": results,
+            "skipped": skipped,
+            "rows": updated_rows,
         }
     )
 

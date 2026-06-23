@@ -133,6 +133,7 @@ const els = {
   completionDelete: document.getElementById("completion-delete"),
   packetaDryRun: document.getElementById("packeta-dry-run"),
   packetaValidate: document.getElementById("packeta-validate"),
+  packetaSend: document.getElementById("packeta-send"),
   dpdDryRun: document.getElementById("dpd-dry-run"),
   dpdSend: document.getElementById("dpd-send"),
   completionValidateAddresses: document.getElementById("completion-validate-addresses"),
@@ -439,6 +440,7 @@ function applyRoleVisibility() {
   els.sortingDelete.classList.toggle("hidden", !admin);
   els.completionDelete.classList.toggle("hidden", !admin);
   els.packetaValidate.classList.toggle("hidden", !admin);
+  els.packetaSend?.classList.toggle("hidden", !admin);
   els.dpdSend.classList.toggle("hidden", !admin);
   if (!admin && !els.settingsView.classList.contains("hidden")) {
     switchView("sorting");
@@ -904,6 +906,7 @@ function renderCompletionOptions() {
     els.completionDelete.disabled = true;
     els.packetaDryRun.disabled = true;
     els.packetaValidate.disabled = true;
+    if (els.packetaSend) els.packetaSend.disabled = true;
     els.dpdDryRun.disabled = true;
     els.dpdSend.disabled = true;
     els.completionValidateAddresses.disabled = true;
@@ -923,6 +926,7 @@ function renderCompletionOptions() {
   els.completionDelete.disabled = !completionState.dataset || completionState.dataset.status !== "active";
   els.packetaDryRun.disabled = !completionState.dataset;
   els.packetaValidate.disabled = !completionState.dataset;
+  if (els.packetaSend) els.packetaSend.disabled = !completionState.dataset;
   els.dpdDryRun.disabled = !completionState.dataset;
   els.dpdSend.disabled = !completionState.dataset;
   els.completionValidateAddresses.disabled = !completionState.dataset;
@@ -1068,15 +1072,17 @@ async function runPacketaDryRun() {
 function renderPacketaValidation(data) {
   const results = data.results || [];
   const skipped = data.skipped || [];
-  const okCount = results.filter((item) => item.valid).length;
+  const sendMode = data.createShipments === true || data.validationOnly === false;
+  const okCount = results.filter((item) => (sendMode ? item.created : item.valid)).length;
   const errorCount = results.length - okCount;
 
   const resultCards = results
     .map((item, index) => {
-      const tone = item.valid ? "ok" : "danger";
-      const status = item.valid ? "OK" : item.status || "chyba";
+      const success = sendMode ? item.created : item.valid;
+      const tone = success ? "ok" : "danger";
+      const status = success ? (sendMode ? `Vytvořeno ${item.shipmentId || ""}`.trim() : "OK") : item.status || "chyba";
       return `
-        <details class="dry-run-item validation-item ${tone}" ${index === 0 || !item.valid ? "open" : ""}>
+        <details class="dry-run-item validation-item ${tone}" ${index === 0 || !success ? "open" : ""}>
           <summary>
             <strong>${escapeHtml(item.orderNumber || "-")}</strong>
             <span>${escapeHtml(item.customer || "-")}</span>
@@ -1086,6 +1092,7 @@ function renderPacketaValidation(data) {
           </summary>
           <div class="dry-run-meta">
             <span>Adresa ID: ${escapeHtml(item.addressId || "-")}</span>
+            ${item.shipmentId ? `<span>Zásilka ID: ${escapeHtml(item.shipmentId)}</span>` : ""}
             <span>E-shop: ${escapeHtml(item.eshop || "-")}</span>
             <span>Doprava: ${escapeHtml(item.shippingMethod || "-")}</span>
           </div>
@@ -1126,16 +1133,21 @@ function renderPacketaValidation(data) {
     <div class="section-head compact">
       <div>
         <p class="eyebrow">Zasilkovna / Packeta</p>
-        <h2>Test API validace</h2>
+        <h2>${sendMode ? "Ostré odeslání zásilek" : "Test API validace"}</h2>
       </div>
       <div class="dry-run-counts">
-        <span>${escapeHtml(okCount)} OK</span>
+        <span>${escapeHtml(okCount)} ${sendMode ? "vytvořeno" : "OK"}</span>
         <span>${escapeHtml(errorCount)} chyb</span>
         <span>${escapeHtml(data.notValidatedCount || 0)} neověřeno</span>
+        ${sendMode ? `<span>${escapeHtml(data.skippedCount || skipped.length)} přeskočeno</span>` : ""}
       </div>
     </div>
     <div class="dry-run-note">
-      Tohle volalo validacni funkci Packety. Stitky se nevytvorily, ale data byla odeslana do API kvuli kontrole chyb.
+      ${
+        sendMode
+          ? "Tohle bylo ostré vytvoření zásilek z konkrétní vybrané dávky. Vytvořená ID se uložila zpět do řádků."
+          : "Tohle volalo validacni funkci Packety. Stitky se nevytvorily, ale data byla odeslana do API kvuli kontrole chyb."
+      }
     </div>
     <div class="dry-run-list">
       ${resultCards || `<div class="empty">Není co validovat.</div>`}
@@ -1180,6 +1192,49 @@ async function runPacketaValidation() {
     setCompletionMessage(`Test API Zásilkovny se nepodařil: ${error.message}`, "error");
   } finally {
     els.packetaValidate.disabled = !completionState.dataset;
+  }
+}
+
+async function runPacketaSend() {
+  if (!completionState.dataset?.id) {
+    setCompletionMessage("Nejdřív načti konkrétní expediční dávku kompletace.", "warning");
+    return;
+  }
+
+  const datasetLabelText = datasetLabel(completionState.dataset);
+  if (
+    !confirm(
+      `Opravdu ostře odeslat všechny vhodné zásilky z této konkrétní dávky do Zásilkovny/Packety?\n\n${datasetLabelText}\n\nPojistky: zásilky s existujícím ID se přeskočí, dobírka se pošle podle uložené částky a doručení na adresu bez ověření Mapy.com se neodešle.`
+    )
+  ) {
+    return;
+  }
+
+  els.packetaSend.disabled = true;
+  hidePacketaDryRunResult();
+  setCompletionMessage("Odesílám vybranou dávku do Zásilkovny/Packety...", "neutral");
+
+  try {
+    const data = await fetchJson("/api/packeta/send", {
+      method: "POST",
+      body: JSON.stringify({
+        datasetId: completionState.dataset.id,
+      }),
+    });
+    (data.rows || []).forEach((row) => replaceCompletionRow(row));
+    renderCompletion();
+    renderPacketaValidation(data);
+    const errors = data.errorCount || 0;
+    setCompletionMessage(
+      `Odeslání Zásilkovny hotové: ${data.createdCount || 0} vytvořeno, ${errors} chyb, ${
+        data.skippedCount || 0
+      } přeskočeno.`,
+      errors ? "warning" : "success"
+    );
+  } catch (error) {
+    setCompletionMessage(`Odeslání do Zásilkovny se nepodařilo: ${error.message}`, "error");
+  } finally {
+    els.packetaSend.disabled = !completionState.dataset;
   }
 }
 
@@ -3519,6 +3574,7 @@ els.addressValidationLog?.addEventListener("click", (event) => {
 });
 els.packetaDryRun.addEventListener("click", runPacketaDryRun);
 els.packetaValidate.addEventListener("click", runPacketaValidation);
+els.packetaSend?.addEventListener("click", runPacketaSend);
 els.dpdDryRun.addEventListener("click", runDpdDryRun);
 els.dpdSend.addEventListener("click", runDpdSend);
 els.printAgentTest?.addEventListener("click", testPrintAgent);
