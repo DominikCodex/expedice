@@ -1309,6 +1309,44 @@ select:focus {
   border: 1px solid #a9d4bf;
 }
 
+.payment-check-badge {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  padding: 2px 7px;
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.payment-check-badge.ok {
+  background: #e7f8ef;
+  border-color: #b8e6ce;
+  color: #14613f;
+}
+
+.payment-check-badge.warning {
+  background: var(--warning-soft);
+  border-color: #edcf98;
+  color: var(--warning);
+}
+
+.payment-check-badge.danger {
+  background: #ffe1df;
+  border-color: #ef9a96;
+  color: #a51e17;
+}
+
+.completion-main-row.payment-warning {
+  box-shadow: inset 4px 0 0 #d99616;
+}
+
+.completion-main-row.payment-danger {
+  box-shadow: inset 4px 0 0 #c9322d;
+}
+
 .completion-detail-row.hidden {
   display: none;
 }

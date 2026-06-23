@@ -4,13 +4,12 @@ import hashlib
 import io
 import json
 import os
-import unicodedata
 import secrets
+import threading
 import time
 import unicodedata
 import urllib.error
 import datetime as dt
-import urllib.parse
 import urllib.parse
 import urllib.request
 from contextlib import contextmanager
@@ -40,6 +39,10 @@ SESSION_SECONDS = 12 * 60 * 60
 INITIAL_ADMIN_USERNAME = "d.najman@centrum.cz"
 INITIAL_ADMIN_PASSWORD = "1234"
 PASSWORD_HASH_METHOD = "pbkdf2:sha256:260000"
+PAYMENT_SYNC_STARTED = False
+PAYMENT_SYNC_THREAD = None
+PAYMENT_SYNC_LOCK = threading.Lock()
+PAYMENT_SYNC_SECONDS = 180
 
 DEFAULT_SHOPS = [
     {
@@ -329,6 +332,32 @@ def ensure_schema():
             cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS label_cache_error TEXT")
             cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS label_cache_fetched_at TIMESTAMPTZ")
             cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS label_cache_size INTEGER NOT NULL DEFAULT 0")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS payment_check_status TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS payment_check_message TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS payment_check_source_status TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS payment_check_paid TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS payment_check_order_date TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS payment_check_package_number TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS payment_check_feed_shop TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS payment_check_checked_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS payment_check_changed_at TIMESTAMPTZ")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS payment_feed_syncs (
+                    id SERIAL PRIMARY KEY,
+                    started_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    finished_at TIMESTAMPTZ,
+                    status TEXT NOT NULL DEFAULT 'running',
+                    trigger_source TEXT,
+                    date_from DATE,
+                    date_until DATE,
+                    rows_seen INTEGER NOT NULL DEFAULT 0,
+                    rows_checked INTEGER NOT NULL DEFAULT 0,
+                    rows_changed INTEGER NOT NULL DEFAULT 0,
+                    errors JSONB NOT NULL DEFAULT '[]'::jsonb
+                )
+                """
+            )
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS label_cache (
@@ -1468,6 +1497,319 @@ def resolve_payment_feed_url(feed_url, date_range=None):
     )
 
 
+def payment_status_norm(value):
+    text = clean_text(value).lower()
+    text = unicodedata.normalize("NFKD", text)
+    return "".join(char for char in text if not unicodedata.combining(char))
+
+
+def payment_method_is_cod(value):
+    text = payment_status_norm(value)
+    return any(marker in text for marker in ("dobirk", "dobierk", "cash on delivery"))
+
+
+def classify_feed_payment_status(status_name, paid):
+    status = payment_status_norm(status_name)
+    paid_text = clean_text(paid).strip().lower()
+    if "storno" in status or "zrus" in status:
+        return "storno", "Objednávka je ve feedu stornovaná."
+    if paid_text in {"1", "true", "ano", "yes"}:
+        return "paid", "Platba je podle feedu uhrazená."
+    if "platba pripsana" in status or "zaplac" in status:
+        return "paid", "Platba je podle statusu uhrazená."
+    if "vyrizena" in status and "nevyrizena" not in status:
+        return "paid", "Objednávka je podle feedu vyřízená."
+    if "pripominka platby" in status or "nevyrizena" in status or paid_text in {"0", "false", "ne", "no"}:
+        return "unpaid", "Platba není podle feedu uhrazená."
+    return "unknown", "Stav platby se z feedu nepodařilo spolehlivě určit."
+
+
+def payment_check_message(status, record=None, row=None, lookback_days=10):
+    if status == "cod":
+        return "Dobírka - platba se řeší u dopravce."
+    if status == "missing":
+        return f"Objednávka nebyla nalezena v platebním feedu za posledních {lookback_days} dní."
+    if record:
+        return record.get("message") or ""
+    return "Platba nebyla zjištěna."
+
+
+def parse_payment_feed_csv(text, delimiter):
+    reader = csv.DictReader(io.StringIO(text), delimiter=delimiter or ";")
+    rows = []
+    for row in reader:
+        if not isinstance(row, dict):
+            continue
+        code = clean_text(row.get("code") or row.get("Code") or row.get("objednavka") or row.get("order"))
+        if not code:
+            continue
+        rows.append(
+            {
+                "code": code,
+                "date": clean_text(row.get("date") or row.get("Date")),
+                "statusName": clean_text(row.get("statusName") or row.get("status") or row.get("Status")),
+                "paid": clean_text(row.get("paid") or row.get("Paid")),
+                "packageNumber": clean_text(row.get("packageNumber") or row.get("package") or row.get("trackingNumber")),
+            }
+        )
+    return rows
+
+
+def fetch_payment_feed_records(feed_settings):
+    settings = feed_settings if isinstance(feed_settings, dict) else {}
+    date_range = payment_feed_date_range(settings)
+    delimiter = settings.get("delimiter") or ";"
+    encoding = settings.get("encoding") or "windows-1250"
+    records = {}
+    rows_seen = 0
+    errors = []
+    shops = settings.get("shops") or {}
+
+    for shop_code, shop in shops.items():
+        if not isinstance(shop, dict):
+            continue
+        feed_url = clean_text(shop.get("url"))
+        if not feed_url:
+            errors.append({"shopCode": shop_code, "error": "CSV feed není nastavený."})
+            continue
+        resolved_url = resolve_payment_feed_url(feed_url, date_range)
+        try:
+            request_obj = urllib.request.Request(
+                resolved_url,
+                headers={"User-Agent": "ExpedicePaymentSync/1.0"},
+            )
+            with urllib.request.urlopen(request_obj, timeout=30) as response:
+                raw = response.read()
+            text = raw.decode(encoding, errors="replace")
+            feed_rows = parse_payment_feed_csv(text, delimiter)
+            rows_seen += len(feed_rows)
+            for feed_row in feed_rows:
+                status, message = classify_feed_payment_status(feed_row.get("statusName"), feed_row.get("paid"))
+                feed_row["paymentStatus"] = status
+                feed_row["message"] = message
+                feed_row["shopCode"] = shop_code
+                records[(shop_code, feed_row["code"])] = feed_row
+        except Exception as exc:
+            errors.append({"shopCode": shop_code, "error": str(exc)})
+    return records, rows_seen, errors, date_range
+
+
+def update_completion_payment_checks(records, date_range, errors=None):
+    ensure_schema()
+    lookback_days = date_range.get("lookbackDays", 10)
+    configured_shops = sorted({shop_code for shop_code, _order in records.keys()})
+    settings = read_settings(include_secrets=True).get("paymentFeeds", {})
+    configured_shops.extend(
+        code
+        for code, shop in (settings.get("shops") or {}).items()
+        if isinstance(shop, dict) and clean_text(shop.get("url")) and code not in configured_shops
+    )
+    if not configured_shops:
+        return {"checked": 0, "changed": 0}
+
+    changed = 0
+    checked = 0
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT cr.id, cr.shop_code, cr.order_number, cr.payment_method,
+                       cr.payment_check_status, cr.payment_check_message,
+                       cr.payment_check_source_status, cr.payment_check_paid,
+                       cr.payment_check_order_date, cr.payment_check_package_number
+                FROM completion_rows cr
+                JOIN datasets d ON d.id = cr.dataset_id
+                WHERE d.dataset_kind = 'completion'
+                  AND d.deleted_at IS NULL
+                  AND d.status = 'active'
+                  AND cr.shop_code = ANY(%s)
+                """,
+                (configured_shops,),
+            )
+            rows = cur.fetchall()
+            for row in rows:
+                checked += 1
+                key = (row["shop_code"], clean_text(row["order_number"]))
+                record = records.get(key)
+                if record:
+                    status = record.get("paymentStatus") or "unknown"
+                    message = payment_check_message(status, record=record, lookback_days=lookback_days)
+                    source_status = record.get("statusName", "")
+                    paid = record.get("paid", "")
+                    order_date = record.get("date", "")
+                    package_number = record.get("packageNumber", "")
+                elif payment_method_is_cod(row.get("payment_method")):
+                    status = "cod"
+                    message = payment_check_message(status, lookback_days=lookback_days)
+                    source_status = ""
+                    paid = ""
+                    order_date = ""
+                    package_number = ""
+                else:
+                    status = "missing"
+                    message = payment_check_message(status, lookback_days=lookback_days)
+                    source_status = ""
+                    paid = ""
+                    order_date = ""
+                    package_number = ""
+
+                row_changed = any(
+                    clean_text(row.get(field)) != clean_text(value)
+                    for field, value in (
+                        ("payment_check_status", status),
+                        ("payment_check_message", message),
+                        ("payment_check_source_status", source_status),
+                        ("payment_check_paid", paid),
+                        ("payment_check_order_date", order_date),
+                        ("payment_check_package_number", package_number),
+                    )
+                )
+                if row_changed:
+                    changed += 1
+                cur.execute(
+                    """
+                    UPDATE completion_rows
+                    SET payment_check_status = %s,
+                        payment_check_message = %s,
+                        payment_check_source_status = %s,
+                        payment_check_paid = %s,
+                        payment_check_order_date = %s,
+                        payment_check_package_number = %s,
+                        payment_check_feed_shop = %s,
+                        payment_check_checked_at = NOW(),
+                        payment_check_changed_at = CASE WHEN %s THEN NOW() ELSE payment_check_changed_at END
+                    WHERE id = %s
+                    """,
+                    (
+                        status,
+                        message,
+                        source_status,
+                        paid,
+                        order_date,
+                        package_number,
+                        row["shop_code"],
+                        row_changed,
+                        row["id"],
+                    ),
+                )
+    return {"checked": checked, "changed": changed}
+
+
+def sync_payment_feeds(trigger_source="background"):
+    if not PAYMENT_SYNC_LOCK.acquire(blocking=False):
+        return {"ok": False, "skipped": True, "reason": "Synchronizace plateb už běží."}
+    sync_id = None
+    try:
+        ensure_schema()
+        settings = read_settings(include_secrets=True).get("paymentFeeds", {})
+        date_range = payment_feed_date_range(settings)
+        with db_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    INSERT INTO payment_feed_syncs (trigger_source, date_from, date_until)
+                    VALUES (%s, %s, %s)
+                    RETURNING id
+                    """,
+                    (trigger_source, date_range["dateFrom"], date_range["dateUntil"]),
+                )
+                sync_id = cur.fetchone()["id"]
+
+        records, rows_seen, errors, date_range = fetch_payment_feed_records(settings)
+        update_result = update_completion_payment_checks(records, date_range, errors)
+        status = "ok" if not errors else "warning"
+        with db_conn() as conn:
+            with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    """
+                    UPDATE payment_feed_syncs
+                    SET finished_at = NOW(),
+                        status = %s,
+                        rows_seen = %s,
+                        rows_checked = %s,
+                        rows_changed = %s,
+                        errors = %s
+                    WHERE id = %s
+                    RETURNING *
+                    """,
+                    (
+                        status,
+                        rows_seen,
+                        update_result["checked"],
+                        update_result["changed"],
+                        Json(errors),
+                        sync_id,
+                    ),
+                )
+                sync_row = cur.fetchone()
+        return {
+            "ok": True,
+            "sync": payment_sync_to_api(sync_row),
+            "rowsSeen": rows_seen,
+            "rowsChecked": update_result["checked"],
+            "rowsChanged": update_result["changed"],
+            "errors": errors,
+        }
+    except Exception as exc:
+        if sync_id:
+            with db_conn() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE payment_feed_syncs
+                        SET finished_at = NOW(), status = 'error', errors = %s
+                        WHERE id = %s
+                        """,
+                        (Json([{"error": str(exc)}]), sync_id),
+                    )
+        return {"ok": False, "error": str(exc)}
+    finally:
+        PAYMENT_SYNC_LOCK.release()
+
+
+def payment_sync_to_api(row):
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "startedAt": row["started_at"].isoformat() if row.get("started_at") else None,
+        "finishedAt": row["finished_at"].isoformat() if row.get("finished_at") else None,
+        "status": row["status"],
+        "trigger": row.get("trigger_source"),
+        "dateFrom": row["date_from"].isoformat() if row.get("date_from") else None,
+        "dateUntil": row["date_until"].isoformat() if row.get("date_until") else None,
+        "rowsSeen": row.get("rows_seen", 0),
+        "rowsChecked": row.get("rows_checked", 0),
+        "rowsChanged": row.get("rows_changed", 0),
+        "errors": row.get("errors") or [],
+    }
+
+
+def latest_payment_sync():
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM payment_feed_syncs ORDER BY id DESC LIMIT 1")
+            return payment_sync_to_api(cur.fetchone())
+
+
+def payment_sync_loop():
+    time.sleep(8)
+    while True:
+        sync_payment_feeds("background")
+        time.sleep(PAYMENT_SYNC_SECONDS)
+
+
+def start_payment_sync_thread():
+    global PAYMENT_SYNC_STARTED, PAYMENT_SYNC_THREAD, PAYMENT_SYNC_SECONDS
+    if PAYMENT_SYNC_STARTED or os.environ.get("PAYMENT_FEED_SYNC_DISABLED") == "1":
+        return
+    PAYMENT_SYNC_SECONDS = max(30, env_int("PAYMENT_FEED_SYNC_SECONDS", 180))
+    PAYMENT_SYNC_STARTED = True
+    PAYMENT_SYNC_THREAD = threading.Thread(target=payment_sync_loop, name="payment-feed-sync", daemon=True)
+    PAYMENT_SYNC_THREAD.start()
+
+
 def default_settings():
     return {
         "mapy": {
@@ -1767,6 +2109,15 @@ def completion_row_to_api(row):
         "amount": row["amount"],
         "quantity": row["quantity_text"],
         "paidStatus": row["paid_status"],
+        "paymentCheckStatus": row.get("payment_check_status"),
+        "paymentCheckMessage": row.get("payment_check_message"),
+        "paymentCheckSourceStatus": row.get("payment_check_source_status"),
+        "paymentCheckPaid": row.get("payment_check_paid"),
+        "paymentCheckOrderDate": row.get("payment_check_order_date"),
+        "paymentCheckPackageNumber": row.get("payment_check_package_number"),
+        "paymentCheckFeedShop": row.get("payment_check_feed_shop"),
+        "paymentCheckCheckedAt": row["payment_check_checked_at"].isoformat() if row.get("payment_check_checked_at") else None,
+        "paymentCheckChangedAt": row["payment_check_changed_at"].isoformat() if row.get("payment_check_changed_at") else None,
         "expeditionNumber": row["expedition_number"],
         "expeditionOrderCode": row["expedition_order_code"],
         "packetaId": row["packeta_id"],
@@ -4676,6 +5027,11 @@ def completion_issue_document(row_id):
     )
 
 
+@app.before_request
+def ensure_payment_sync_started():
+    start_payment_sync_thread()
+
+
 @app.route("/api/settings")
 def get_settings():
     auth_error = require_download_token_if_configured()
@@ -4694,6 +5050,51 @@ def update_settings():
     payload = request.get_json(silent=True) or {}
     save_settings_payload(payload.get("settings") or payload)
     return jsonify({"ok": True, "settings": read_settings(include_secrets=False)})
+
+
+@app.route("/api/payment-feeds/sync", methods=["POST"])
+def run_payment_feed_sync():
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+
+    result = sync_payment_feeds("manual")
+    status_code = 200 if result.get("ok") or result.get("skipped") else 500
+    return jsonify(result), status_code
+
+
+@app.route("/api/payment-feeds/updates")
+def payment_feed_updates():
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    dataset_id = clean_text(request.args.get("datasetId"))
+    since = clean_text(request.args.get("since"))
+    params = []
+    filters = ["cr.payment_check_status IS NOT NULL"]
+    if dataset_id:
+        filters.append("cr.dataset_id = %s")
+        params.append(dataset_id)
+    if since:
+        filters.append("cr.payment_check_changed_at > %s")
+        params.append(since)
+
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT cr.*
+                FROM completion_rows cr
+                WHERE {' AND '.join(filters)}
+                ORDER BY cr.payment_check_changed_at DESC NULLS LAST, cr.id
+                LIMIT 300
+                """,
+                params,
+            )
+            rows = [completion_row_to_api(row) for row in cur.fetchall()]
+    return jsonify({"rows": rows, "latestSync": latest_payment_sync(), "serverTime": datetime.utcnow().isoformat() + "Z"})
 
 
 @app.route("/api/completion/datasets")

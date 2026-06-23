@@ -36,6 +36,7 @@ const completionState = {
   dataset: null,
   rows: [],
   loaded: false,
+  paymentUpdatesSince: null,
 };
 
 const completionFilters = {
@@ -956,6 +957,7 @@ async function loadCompletionDatasets() {
 function applyCompletionDataset(dataset, rows) {
   completionState.dataset = dataset || null;
   completionState.rows = rows || [];
+  completionState.paymentUpdatesSince = null;
   completionWorkflowState.row = null;
   completionWorkflowState.index = -1;
   expandedCompletionRows.clear();
@@ -1535,6 +1537,37 @@ function renderSecretInput(input, status, saved, savedText, emptyText) {
   }
 }
 
+function paymentCheckKind(row) {
+  return normalize(row?.paymentCheckStatus || "");
+}
+
+function paymentCheckLabel(row) {
+  const status = paymentCheckKind(row);
+  if (status === "paid") return "Zaplaceno";
+  if (status === "cod") return "Dobírka";
+  if (status === "unpaid") return "Nezaplaceno";
+  if (status === "storno") return "STORNO";
+  if (status === "missing") return "Platba nezjištěna";
+  if (status === "unknown") return "Platba nejasná";
+  return "";
+}
+
+function paymentCheckTone(row) {
+  const status = paymentCheckKind(row);
+  if (status === "paid" || status === "cod") return "ok";
+  if (status === "unpaid" || status === "missing" || status === "unknown") return "warning";
+  if (status === "storno") return "danger";
+  return "neutral";
+}
+
+function paymentCheckHtml(row) {
+  const label = paymentCheckLabel(row);
+  if (!label) return "";
+  const tone = paymentCheckTone(row);
+  const title = row?.paymentCheckMessage || row?.paymentCheckSourceStatus || "";
+  return `<span class="payment-check-badge ${tone}" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
+}
+
 function renderSettings(settings) {
   const mapy = settings.mapy || {};
   const paymentFeeds = settings.paymentFeeds || {};
@@ -1772,6 +1805,35 @@ function collectCompletionRowEdits(rowId) {
 function replaceCompletionRow(row) {
   const index = completionState.rows.findIndex((item) => String(item.id) === String(row.id));
   if (index >= 0) completionState.rows[index] = row;
+}
+
+async function pollPaymentFeedUpdates() {
+  if (!completionState.dataset?.id || els.completionView.classList.contains("hidden")) return;
+  const params = new URLSearchParams({ datasetId: completionState.dataset.id });
+  if (completionState.paymentUpdatesSince) {
+    params.set("since", completionState.paymentUpdatesSince);
+  }
+  try {
+    const data = await fetchJson(`/api/payment-feeds/updates?${params.toString()}`);
+    completionState.paymentUpdatesSince = data.serverTime || new Date().toISOString();
+    const rows = data.rows || [];
+    if (!rows.length) return;
+    let visibleChanged = false;
+    rows.forEach((row) => {
+      replaceCompletionRow(row);
+      if (completionMatchesFilters(row)) visibleChanged = true;
+      if (completionWorkflowState.row && String(completionWorkflowState.row.id) === String(row.id)) {
+        completionWorkflowState.row = row;
+        renderWorkflowRow(row);
+      }
+    });
+    if (visibleChanged) {
+      renderCompletionRows();
+      setCompletionMessage(`Platební stavy aktualizovány: ${rows.length} změn.`, "warning");
+    }
+  } catch (error) {
+    console.warn("Payment feed update polling failed", error);
+  }
 }
 
 async function saveCompletionRow(rowId) {
@@ -2302,6 +2364,8 @@ function completionCarrierTone(row) {
 function completionRowTone(row, status) {
   const tones = [completionCarrierTone(row)];
   if (status?.tone) tones.push(`status-${status.tone}`);
+  const paymentTone = paymentCheckTone(row);
+  if (paymentTone === "warning" || paymentTone === "danger") tones.push(`payment-${paymentTone}`);
   if (row.packetaShipmentId || row.labelPrinted) tones.push("has-label");
   return tones.join(" ");
 }
@@ -2316,6 +2380,8 @@ function completionMainBadges(row, status) {
   if (row.packetaShipmentId || row.labelPrinted) {
     badges.push(`<span class="completion-type-badge has-label">štítek</span>`);
   }
+  const paymentBadge = paymentCheckHtml(row);
+  if (paymentBadge) badges.push(paymentBadge);
   if (normalize(row.paidStatus).includes("nezaplaceno") || normalize(row.completionStatus).includes("nezaplaceno")) {
     badges.push(`<span class="completion-type-badge payment-warning">nezapl.</span>`);
   }
@@ -2453,6 +2519,8 @@ function completionDetailHtml(row) {
         <p>${escapeHtml(row.note || "Bez poznámky.")}</p>
         ${completionMetaLine("Status kompletace", row.completionStatus)}
         ${completionMetaLine("Platba", row.paymentMethod || row.paidStatus)}
+        ${completionMetaLine("Kontrola platby", [paymentCheckLabel(row), row.paymentCheckMessage].filter(Boolean).join(" - "))}
+        ${completionMetaLine("Status z feedu", row.paymentCheckSourceStatus)}
         ${completionMetaLine("Zrušená záloha", row.canceledOrderBackup)}
       </section>
     </div>
@@ -2705,7 +2773,10 @@ function findWorkflowRowByNumber(number) {
 
 function workflowStatusTone(row) {
   const status = normalize(row?.completionStatus || "");
+  const paymentStatus = paymentCheckKind(row);
   if (!row) return "neutral";
+  if (paymentStatus === "storno") return "danger";
+  if (["unpaid", "missing", "unknown"].includes(paymentStatus)) return "warning";
   if (status.includes("error")) return "danger";
   if (status.includes("nezaplac")) return "warning";
   if (status.includes("ok")) return "ok";
@@ -2716,7 +2787,9 @@ function workflowPaymentText(row) {
   if (!row) return "Platba: -";
   const cod = String(row.codAmount || "").trim();
   const currency = row.currency || "";
+  const paymentLabel = paymentCheckLabel(row);
   const payment = row.paymentMethod || row.paidStatus || "";
+  if (paymentLabel) return `Kontrola platby: ${paymentLabel}`;
   if (toNumber(cod, 0) > 0) return `Dobírka: ${cod} ${currency}`.trim();
   return `Platba: ${payment || "bez dobírky"}`;
 }
@@ -2726,6 +2799,9 @@ function workflowAutoPrintKey(row) {
 }
 
 function workflowIsUnpaid(row) {
+  const paymentStatus = paymentCheckKind(row);
+  if (paymentStatus === "unpaid" || paymentStatus === "missing" || paymentStatus === "unknown") return true;
+  if (paymentStatus === "paid" || paymentStatus === "cod" || paymentStatus === "storno") return false;
   const text = normalize(
     [
       row?.paidStatus,
@@ -2802,6 +2878,7 @@ function renderWorkflow() {
   const tone = workflowStatusTone(row);
   const statusText = row?.completionStatus || (row ? "Rozpracováno" : "Čekám na sken boxu");
   const isDpd = row && (row.delivery?.isDpd || normalize(row.shippingMethod || "").includes("dpd"));
+  const paymentWarning = row && ["storno", "unpaid", "missing", "unknown"].includes(paymentCheckKind(row));
 
   els.workflowExpeditionNumber.textContent = expeditionNumber;
   els.workflowCustomerName.textContent = fullName || "-";
@@ -2815,9 +2892,14 @@ function renderWorkflow() {
   els.workflowStatus.className = `workflow-status ${tone}`;
   els.workflowStatus.textContent = statusText;
   els.workflowItems.innerHTML = workflowItemsHtml(row);
-  els.workflowNote.textContent = row?.completionStatus ? `Stav kompletace: ${row.completionStatus}` : "";
-  els.workflowWarning.classList.toggle("hidden", !isDpd);
-  els.workflowWarning.textContent = isDpd ? "Pozor: Doručení přes DPD = jiný svoz" : "";
+  els.workflowNote.textContent = [row?.completionStatus ? `Stav kompletace: ${row.completionStatus}` : "", row?.paymentCheckSourceStatus ? `Feed: ${row.paymentCheckSourceStatus}` : ""]
+    .filter(Boolean)
+    .join(" | ");
+  const warnings = [];
+  if (paymentWarning) warnings.push(`${paymentCheckLabel(row)}: ${row.paymentCheckMessage || "zkontroluj objednávku před odesláním"}`);
+  if (isDpd) warnings.push("Pozor: Doručení přes DPD = jiný svoz");
+  els.workflowWarning.classList.toggle("hidden", !warnings.length);
+  els.workflowWarning.textContent = warnings.join(" | ");
 
   const disabled = !row;
   [
@@ -2979,6 +3061,7 @@ function renderCompletion() {
         <span class="currency-chip ${escapeHtml((row.currency || "").toLowerCase())}">${escapeHtml(row.currency || "")}</span>
         ${completionMetaLine("Dobírka", row.codAmount)}
         ${completionMetaLine("Platba", row.paymentMethod || row.paidStatus)}
+        ${completionMetaLine("Kontrola", paymentCheckLabel(row))}
       </td>
       <td><span class="qty">${escapeHtml(row.quantity || "")}</span></td>
       <td><span class="status-chip ${status.tone}">${escapeHtml(status.label)}</span></td>
@@ -3771,6 +3854,7 @@ els.workflowUnpaidError.addEventListener("click", () => saveWorkflowActionAndPri
 els.workflowClearError.addEventListener("click", () => saveWorkflowAction("clear_error"));
 els.workflowManualReprint.addEventListener("click", () => saveWorkflowAction("manual_reprint"));
 els.workflowOpenOrder.addEventListener("click", openWorkflowOrder);
+setInterval(pollPaymentFeedUpdates, 30000);
 els.completionDelete.addEventListener("click", async () => {
   try {
     const deleted = await deleteDataset(completionState.dataset, () =>
