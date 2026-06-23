@@ -1188,14 +1188,9 @@ def delivery_info_from_row(row):
     shipping = clean_text(row_value(row, "shippingMethod", "shipping_method"))
     dpd_flag = clean_text(row_value(row, "dpdFlag", "dpd_flag"))
     shop_code = clean_text(row_value(row, "shopCode", "shop_code")).lower()
+    order_shop_code = shop_code_from_order_number(row)
     text = searchable_text(" ".join([shipping, dpd_flag, shop_code]))
-    is_sk_order = (
-        shop_code.endswith("_sk")
-        or "packeta.sk" in text
-        or "odberne miesto" in text
-        or "kuri" in text
-        or "slovensk" in text
-    )
+    is_sk_order = order_shop_code == "iveronika_sk" or (not order_shop_code and shop_code.endswith("_sk"))
 
     if "poukaz" in text and ("email" in text or "emailem" in text):
         return {
@@ -1257,7 +1252,7 @@ def delivery_info_from_row(row):
         token in text
         for token in ["zasilkovna", "packeta", "odberne miesto", "odberne misto", "osobni odber", "osobni odber na pobocce"]
     )
-    is_packeta_courier = "kuri" in text and "adres" in text
+    is_packeta_courier = is_sk_order and "kuri" in text and "adres" in text
 
     if is_packeta_courier:
         return {
@@ -1299,6 +1294,33 @@ def delivery_info_from_row(row):
         "isGiftVoucher": False,
         "isSk": is_sk_order,
     }
+
+
+def order_number_prefix4(row):
+    order_number = clean_text(row_value(row, "orderNumber", "order_number", "orderId", "order_id"))
+    digits = "".join(char for char in order_number if char.isdigit())
+    return digits[:4]
+
+
+def shop_code_from_order_number(row):
+    prefix = order_number_prefix4(row)
+    if prefix == "2018":
+        return "iveronika_sk"
+    if prefix == "4200":
+        return "galantra_cz"
+    if prefix == "1700":
+        return "iveronika_cz"
+    return ""
+
+
+def country_from_order_number(row):
+    shop_code = shop_code_from_order_number(row)
+    if shop_code == "iveronika_sk":
+        return "SK"
+    if shop_code in {"iveronika_cz", "galantra_cz"}:
+        return "CZ"
+    fallback_shop_code = clean_text(row_value(row, "shopCode", "shop_code")).lower()
+    return "SK" if fallback_shop_code.endswith("_sk") else "CZ"
 
 
 def display_date_label(value):
@@ -3193,18 +3215,11 @@ def dpd_api_token(settings=None):
 
 
 def dpd_country(row):
-    shop_code = clean_text(row.get("shopCode") or row.get("shop_code")).lower()
-    if shop_code.endswith("_sk") or delivery_info_from_row(row).get("isSk"):
-        return "SK"
-    return "CZ"
+    return country_from_order_number(row)
 
 
 def shipment_currency(row):
-    shop_code = clean_text(row.get("shopCode") or row.get("shop_code")).lower()
-    delivery = delivery_info_from_row(row)
-    if shop_code.endswith("_sk") or delivery.get("isSk") or dpd_country(row) == "SK":
-        return "EUR"
-    return "CZK"
+    return "EUR" if country_from_order_number(row) == "SK" else "CZK"
 
 
 def dpd_recipient_name(row):
