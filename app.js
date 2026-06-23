@@ -134,6 +134,7 @@ const els = {
   completionView: document.getElementById("completion-view"),
   completionDataset: document.getElementById("completion-dataset"),
   completionRefresh: document.getElementById("completion-refresh"),
+  paymentFeedSync: document.getElementById("payment-feed-sync"),
   completionDelete: document.getElementById("completion-delete"),
   packetaDryRun: document.getElementById("packeta-dry-run"),
   packetaValidate: document.getElementById("packeta-validate"),
@@ -961,6 +962,7 @@ function renderCompletionOptions() {
   if (!completionState.datasets.length) {
     els.completionDataset.innerHTML = `<option value="">Žádná dávka</option>`;
     els.completionDelete.disabled = true;
+    els.paymentFeedSync.disabled = true;
     els.packetaDryRun.disabled = true;
     els.packetaValidate.disabled = true;
     if (els.packetaSend) els.packetaSend.disabled = true;
@@ -982,6 +984,7 @@ function renderCompletionOptions() {
     els.completionDataset.value = String(completionState.dataset.id);
   }
   els.completionDelete.disabled = !completionState.dataset || completionState.dataset.status !== "active";
+  els.paymentFeedSync.disabled = !completionState.dataset;
   els.packetaDryRun.disabled = !completionState.dataset;
   els.packetaValidate.disabled = !completionState.dataset;
   if (els.packetaSend) els.packetaSend.disabled = !completionState.dataset;
@@ -1883,6 +1886,33 @@ async function pollPaymentFeedUpdates() {
     console.warn("Payment feed update polling failed", error);
   } finally {
     completionState.paymentPollInFlight = false;
+  }
+}
+
+async function syncPaymentFeedsManually() {
+  if (!completionState.dataset?.id) {
+    setCompletionMessage("Nejdřív načti expediční dávku kompletace.", "warning");
+    return;
+  }
+
+  els.paymentFeedSync.disabled = true;
+  setCompletionMessage("Páruji platby z e-shopových feedů...", "neutral");
+  try {
+    const data = await fetchJson("/api/payment-feeds/sync", {
+      method: "POST",
+      body: JSON.stringify({ source: "manual-completion" }),
+    });
+    completionState.paymentUpdatesSince = null;
+    await pollPaymentFeedUpdates();
+    const sync = data.sync || {};
+    setCompletionMessage(
+      `Platby spárovány: feed řádků ${data.rowsSeen ?? sync.rowsSeen ?? 0}, zkontrolováno ${data.rowsChecked ?? sync.rowsChecked ?? 0}, změněno ${data.rowsChanged ?? sync.rowsChanged ?? 0}.`,
+      data.errors?.length ? "warning" : "success"
+    );
+  } catch (error) {
+    setCompletionMessage(`Platby se nepodařilo spárovat: ${error.message}`, "error");
+  } finally {
+    els.paymentFeedSync.disabled = !completionState.dataset;
   }
 }
 
@@ -3893,6 +3923,7 @@ els.sortingDelete.addEventListener("click", async () => {
   }
 });
 els.completionRefresh.addEventListener("click", () => loadCompletionDatasets());
+els.paymentFeedSync.addEventListener("click", syncPaymentFeedsManually);
 els.completionDataset.addEventListener("change", () => {
   loadCompletionDataset(els.completionDataset.value);
 });
