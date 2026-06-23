@@ -1306,7 +1306,7 @@ def shop_code_from_order_number(row):
     prefix = order_number_prefix4(row)
     if prefix == "2018":
         return "iveronika_sk"
-    if prefix == "4200":
+    if prefix.startswith("42"):
         return "galantra_cz"
     if prefix == "1700":
         return "iveronika_cz"
