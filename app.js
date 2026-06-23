@@ -120,6 +120,7 @@ const els = {
   metricDone: document.getElementById("metric-done"),
   expeditionDayList: document.getElementById("expedition-day-list"),
   expeditionRefresh: document.getElementById("expedition-refresh"),
+  expeditionDeleteDay: document.getElementById("expedition-delete-day"),
   expeditionShowInactive: document.getElementById("show-inactive-datasets"),
   expeditionDaySummary: document.getElementById("expedition-day-summary"),
   tabSorting: document.getElementById("tab-sorting"),
@@ -449,6 +450,7 @@ function showPasswordChange(user) {
 function applyRoleVisibility() {
   const admin = isAdmin();
   els.tabSettings.classList.toggle("hidden", !admin);
+  els.expeditionDeleteDay?.classList.toggle("hidden", !admin);
   els.sortingDelete.classList.toggle("hidden", !admin);
   els.completionDelete.classList.toggle("hidden", !admin);
   els.packetaValidate.classList.toggle("hidden", !admin);
@@ -909,6 +911,48 @@ async function deleteDataset(dataset, afterDelete) {
 
   await afterDelete();
   return true;
+}
+
+async function deleteCurrentExpeditionDay() {
+  if (!isAdmin()) {
+    setMessage("Smazání expedičního dne je dostupné jen adminovi.", "warning");
+    return;
+  }
+  const day = expeditionState.day;
+  if (!day?.date) {
+    setMessage("Není vybraný žádný expediční den ke smazání.", "warning");
+    return;
+  }
+
+  const label = day.label || day.date;
+  const confirmed = confirm(
+    `Smazat celý expediční den?\n\n${label}\n\nSmažou se všechny dávky roztřídění i kompletace v tomto dni. Data zůstanou v historii jako smazaná.`
+  );
+  if (!confirmed) return;
+
+  els.expeditionDeleteDay.disabled = true;
+  try {
+    const data = await fetchJson(`/api/expedition-days/${encodeURIComponent(day.date)}`, {
+      method: "DELETE",
+      body: JSON.stringify({
+        deletedBy: "web",
+        reason: "Smazán celý expediční den ve webovém rozhraní",
+      }),
+    });
+    sortingState.dataset = null;
+    sortingState.datasets = [];
+    completionState.dataset = null;
+    completionState.datasets = [];
+    completionState.rows = [];
+    expeditionState.day = null;
+    setMessage(`Expediční den ${label} je smazaný. Smazáno dávek: ${data.deletedDatasets || 0}.`, "success");
+    setCompletionMessage(`Expediční den ${label} je smazaný.`, "success");
+    await loadExpeditionDays();
+  } catch (error) {
+    setMessage(`Expediční den se nepodařilo smazat: ${error.message}`, "error");
+  } finally {
+    els.expeditionDeleteDay.disabled = false;
+  }
 }
 
 function renderCompletionOptions() {
@@ -3794,6 +3838,7 @@ els.historyList.addEventListener("click", (event) => {
 });
 
 els.expeditionRefresh.addEventListener("click", () => loadExpeditionDays(expeditionState.day?.date || ""));
+els.expeditionDeleteDay?.addEventListener("click", deleteCurrentExpeditionDay);
 els.expeditionShowInactive.addEventListener("change", () => loadExpeditionDays(expeditionState.day?.date || ""));
 els.expeditionDayList.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-date]");

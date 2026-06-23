@@ -5128,6 +5128,72 @@ def payment_feed_updates():
     return jsonify({"rows": rows, "latestSync": latest_payment_sync(), "syncAttempt": sync_attempt, "serverTime": datetime.utcnow().isoformat() + "Z"})
 
 
+@app.route("/api/expedition-days/<day_date>", methods=["DELETE"])
+def delete_expedition_day(day_date):
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+
+    try:
+        parsed_day = datetime.strptime(day_date, "%Y-%m-%d").date()
+    except ValueError:
+        return jsonify({"error": "Neplatné datum expedičního dne."}), 400
+
+    data = request.get_json(silent=True) or {}
+    user = current_user() or {}
+    actor = clean_text(data.get("deletedBy")) or user.get("username") or "admin"
+    reason = clean_text(data.get("reason")) or "Smazán celý expediční den ve webovém rozhraní"
+
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM expedition_days WHERE day_date = %s", (parsed_day,))
+            day = cur.fetchone()
+            if not day:
+                return jsonify({"error": "Expediční den nebyl nalezen."}), 404
+
+            cur.execute(
+                """
+                UPDATE datasets
+                SET status = 'deleted',
+                    deleted_at = COALESCE(deleted_at, NOW()),
+                    deleted_by = %s,
+                    delete_reason = %s
+                WHERE expedition_day_id = %s
+                  AND deleted_at IS NULL
+                RETURNING id
+                """,
+                (actor, reason, day["id"]),
+            )
+            deleted_dataset_ids = [row["id"] for row in cur.fetchall()]
+
+            cur.execute(
+                """
+                UPDATE expedition_days
+                SET status = 'deleted',
+                    updated_at = NOW()
+                WHERE id = %s
+                RETURNING *
+                """,
+                (day["id"],),
+            )
+            updated_day = cur.fetchone()
+
+    return jsonify(
+        {
+            "ok": True,
+            "expeditionDay": {
+                "id": updated_day["id"],
+                "date": updated_day["day_date"].isoformat(),
+                "label": updated_day["label"],
+                "status": updated_day["status"],
+            },
+            "deletedDatasets": len(deleted_dataset_ids),
+            "deletedDatasetIds": deleted_dataset_ids,
+        }
+    )
+
+
 @app.route("/api/completion/datasets")
 def list_completion_datasets():
     auth_error = require_download_token_if_configured()
