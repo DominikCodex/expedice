@@ -1570,13 +1570,6 @@ function paymentCheckHtml(row) {
   return `<span class="payment-check-badge ${tone}" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
 }
 
-function paymentCheckIsPending(row) {
-  if (!row) return false;
-  if (paymentCheckKind(row)) return false;
-  const paymentText = normalize([row.paymentMethod, row.shippingMethod, row.paidStatus].filter(Boolean).join(" "));
-  return !paymentText.includes("dobirk") && !paymentText.includes("dobierk");
-}
-
 function renderSettings(settings) {
   const mapy = settings.mapy || {};
   const paymentFeeds = settings.paymentFeeds || {};
@@ -2789,7 +2782,6 @@ function workflowStatusTone(row) {
   const paymentStatus = paymentCheckKind(row);
   if (!row) return "neutral";
   if (paymentStatus === "storno") return "danger";
-  if (paymentCheckIsPending(row)) return "warning";
   if (["unpaid", "missing", "unknown"].includes(paymentStatus)) return "warning";
   if (status.includes("error")) return "danger";
   if (status.includes("nezaplac")) return "warning";
@@ -2804,7 +2796,6 @@ function workflowPaymentText(row) {
   const paymentLabel = paymentCheckLabel(row);
   const payment = row.paymentMethod || row.paidStatus || "";
   if (paymentLabel) return `Kontrola platby: ${paymentLabel}`;
-  if (paymentCheckIsPending(row)) return "Kontrola platby: čekám na feed";
   if (toNumber(cod, 0) > 0) return `Dobírka: ${cod} ${currency}`.trim();
   return `Platba: ${payment || "bez dobírky"}`;
 }
@@ -2829,7 +2820,14 @@ function workflowIsUnpaid(row) {
       .filter(Boolean)
       .join(" ")
   );
-  return text.includes("nezaplac") || text.includes("neuhrazen");
+  return (
+    text.includes("nezaplac") ||
+    text.includes("neuhrazen") ||
+    text.includes("neuhraden") ||
+    text.includes("caka na platbu") ||
+    text.includes("ceka na platbu") ||
+    text.includes("pripominka platby")
+  );
 }
 
 async function autoPrintWorkflowDocuments(row, boxNumber) {
@@ -2840,13 +2838,6 @@ async function autoPrintWorkflowDocuments(row, boxNumber) {
     return;
   }
 
-  if (paymentCheckIsPending(row)) {
-    setWorkflowMessage(
-      `Načten box X${boxNumber}S: objednávka ${row.orderNumber || "-"}. Automatický tisk čeká, protože platba ještě není ověřená živým feedem.`,
-      "warning"
-    );
-    return;
-  }
   if (paymentCheckKind(row) === "storno") {
     setWorkflowMessage(`Načten box X${boxNumber}S: objednávka ${row.orderNumber || "-"} je STORNO. Netisknu štítek.`, "error");
     return;
@@ -2906,7 +2897,6 @@ function renderWorkflow() {
   const statusText = row?.completionStatus || (row ? "Rozpracováno" : "Čekám na sken boxu");
   const isDpd = row && (row.delivery?.isDpd || normalize(row.shippingMethod || "").includes("dpd"));
   const paymentWarning = row && ["storno", "unpaid", "missing", "unknown"].includes(paymentCheckKind(row));
-  const paymentPending = row && paymentCheckIsPending(row);
 
   els.workflowExpeditionNumber.textContent = expeditionNumber;
   els.workflowCustomerName.textContent = fullName || "-";
@@ -2925,7 +2915,6 @@ function renderWorkflow() {
     .join(" | ");
   const warnings = [];
   if (paymentWarning) warnings.push(`${paymentCheckLabel(row)}: ${row.paymentCheckMessage || "zkontroluj objednávku před odesláním"}`);
-  if (paymentPending) warnings.push("Platba zatím nebyla ověřena živým feedem. Chvilku počkej nebo objednávku zkontroluj ručně.");
   if (isDpd) warnings.push("Pozor: Doručení přes DPD = jiný svoz");
   els.workflowWarning.classList.toggle("hidden", !warnings.length);
   els.workflowWarning.textContent = warnings.join(" | ");

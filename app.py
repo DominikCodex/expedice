@@ -1503,7 +1503,18 @@ def payment_status_norm(value):
 
 def payment_method_is_cod(value):
     text = payment_status_norm(value)
-    return any(marker in text for marker in ("dobirk", "dobierk", "cash on delivery"))
+    return any(
+        marker in text
+        for marker in (
+            "dobirk",
+            "dobierk",
+            "na dobierku",
+            "pri prevzati",
+            "platba pri prevzati",
+            "cash on delivery",
+            "cod",
+        )
+    )
 
 
 def classify_feed_payment_status(status_name, paid):
@@ -2266,7 +2277,7 @@ def packeta_requires_cod(row):
             "packetaStatus",
         )
     )
-    return packeta_contains(text, "dobirk", "dobierk", "dobírk", "cash on delivery")
+    return packeta_contains(text, "dobirk", "dobierk", "dobírk", "na dobierku", "pri prevzati", "platba pri prevzati", "cash on delivery", "cod")
 
 
 def packeta_requires_verified_address(row):
