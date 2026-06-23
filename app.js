@@ -1621,6 +1621,37 @@ async function printCompletionCarrierLabel(rowId) {
   }
 }
 
+async function downloadCompletionCarrierLabel(rowId) {
+  const row = completionState.rows.find((item) => String(item.id) === String(rowId));
+  const labelNumber = row?.packetaShipmentId || "";
+  if (!labelNumber) {
+    setCompletionMessage("Řádek zatím nemá číslo zásilky/štítku.", "warning");
+    return;
+  }
+
+  const url = `/api/completion/rows/${encodeURIComponent(rowId)}/label?download=1`;
+  setCompletionMessage(`Stahuji testovací PDF štítku ${labelNumber}...`, "neutral");
+  try {
+    const response = await fetch(url, { cache: "no-store", credentials: "same-origin" });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      throw new Error(errorText || "PDF štítek se nepodařilo stáhnout.");
+    }
+    const blob = await response.blob();
+    const objectUrl = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = objectUrl;
+    link.download = `${labelNumber}.pdf`;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    URL.revokeObjectURL(objectUrl);
+    setCompletionMessage(`Testovací PDF štítku ${labelNumber} staženo. Stav vytištění se nezměnil.`, "success");
+  } catch (error) {
+    setCompletionMessage(`Stažení testovacího PDF selhalo: ${error.message}`, "error");
+  }
+}
+
 async function printCompletionIssueDocument(rowId, kind, setStatus = setCompletionMessage) {
   const row = completionState.rows.find((item) => String(item.id) === String(rowId));
   const labels = {
@@ -2277,9 +2308,16 @@ function carrierSendActionHtml(row) {
   const carrier = row.deliveryCarrier || "manual";
   const labelNumber = row.packetaShipmentId || "";
   if ((carrier === "dpd" || carrier === "packeta") && labelNumber) {
-    return `<button type="button" class="label-print ${escapeHtml(carrier)}" data-action="print-carrier-label" data-row-id="${escapeHtml(
+    return `
+      <div class="carrier-actions">
+        <button type="button" class="label-print ${escapeHtml(carrier)}" data-action="print-carrier-label" data-row-id="${escapeHtml(
       row.id
-    )}">Tisk štítku</button>`;
+    )}">Tisk štítku</button>
+        <button type="button" class="secondary label-download" data-action="download-carrier-label" data-row-id="${escapeHtml(
+      row.id
+    )}">Test PDF</button>
+      </div>
+    `;
   }
   if (authState.user?.role !== "admin") return "";
   if (carrier !== "dpd" && carrier !== "packeta") {
@@ -3440,6 +3478,9 @@ els.completionBody.addEventListener("click", (event) => {
   }
   if (button.dataset.action === "print-carrier-label") {
     printCompletionCarrierLabel(button.dataset.rowId);
+  }
+  if (button.dataset.action === "download-carrier-label") {
+    downloadCompletionCarrierLabel(button.dataset.rowId);
   }
 });
 els.completionFilterSearch?.addEventListener("input", () => {

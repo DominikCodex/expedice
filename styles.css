@@ -80,6 +80,16 @@ button:disabled {
   border-color: var(--strong-line);
 }
 
+.carrier-actions {
+  display: grid;
+  gap: 5px;
+}
+
+.label-download {
+  font-size: 11px;
+  padding: 6px 8px;
+}
+
 .danger {
   background: var(--danger-soft);
   color: var(--danger);

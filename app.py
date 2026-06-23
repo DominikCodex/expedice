@@ -3880,11 +3880,12 @@ def completion_row_label(row_id):
                 )
 
     filename = f"{label_number}.pdf"
+    disposition = "attachment" if request.args.get("download") == "1" else "inline"
     return Response(
         pdf_bytes,
         mimetype="application/pdf",
         headers={
-            "Content-Disposition": f'inline; filename="{filename}"',
+            "Content-Disposition": f'{disposition}; filename="{filename}"',
             "Cache-Control": "no-store",
             "X-Carrier": carrier,
             "X-Label-Number": label_number,
