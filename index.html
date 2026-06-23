@@ -378,13 +378,14 @@
                 <fieldset class="settings-card settings-card-wide">
                   <legend>Kontrola plateb z CSV</legend>
                   <p class="settings-description">
-                    Feed URL se ukládá pro každý e-shop zvlášť. Použij proměnné <code>{dateFrom}</code> a <code>{dateUntil}</code>,
-                    systém je při kontrole nahradí aktuálním obdobím.
+                    Feed URL se ukládá pro každý e-shop zvlášť. Datumy do adresy nedávej ručně: systém při kontrole automaticky
+                    přidá nebo přepíše <code>dateFrom</code> a <code>dateUntil</code>.
                   </p>
                   <label class="field">
                     <span>Načítat zpětně dnů</span>
                     <input id="settings-payment-lookback" type="number" min="1" max="31" step="1" autocomplete="off" />
                   </label>
+                  <div id="settings-payment-status" class="settings-hint"></div>
                   <div class="carrier-client-grid">
                     <div class="carrier-client-card">
                       <strong>iVeronika.cz</strong>

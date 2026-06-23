@@ -9,6 +9,8 @@ import secrets
 import time
 import unicodedata
 import urllib.error
+import datetime as dt
+import urllib.parse
 import urllib.parse
 import urllib.request
 from contextlib import contextmanager
@@ -1415,6 +1417,57 @@ def env_int(name, default):
         return default
 
 
+def payment_feed_date_label(day):
+    return f"{day.year}-{day.month}-{day.day}"
+
+
+def payment_feed_date_range(feed_settings=None):
+    settings = feed_settings if isinstance(feed_settings, dict) else {}
+    try:
+        lookback_days = int(settings.get("lookbackDays") or 10)
+    except (TypeError, ValueError):
+        lookback_days = 10
+    lookback_days = max(1, min(31, lookback_days))
+    date_until = dt.datetime.now().date()
+    date_from = date_until - dt.timedelta(days=lookback_days)
+    return {
+        "dateFrom": payment_feed_date_label(date_from),
+        "dateUntil": payment_feed_date_label(date_until),
+        "lookbackDays": lookback_days,
+    }
+
+
+def resolve_payment_feed_url(feed_url, date_range=None):
+    url = clean_text(feed_url)
+    if not url:
+        return ""
+    dates = date_range or payment_feed_date_range()
+    replacements = {
+        "{dateFrom}": dates["dateFrom"],
+        "{dateUntil}": dates["dateUntil"],
+        "{date_from}": dates["dateFrom"],
+        "{date_until}": dates["dateUntil"],
+        "{DATE_FROM}": dates["dateFrom"],
+        "{DATE_UNTIL}": dates["dateUntil"],
+    }
+    for needle, value in replacements.items():
+        url = url.replace(needle, value)
+
+    parts = urllib.parse.urlsplit(url)
+    query = dict(urllib.parse.parse_qsl(parts.query, keep_blank_values=True))
+    query["dateFrom"] = dates["dateFrom"]
+    query["dateUntil"] = dates["dateUntil"]
+    return urllib.parse.urlunsplit(
+        (
+            parts.scheme,
+            parts.netloc,
+            parts.path,
+            urllib.parse.urlencode(query, doseq=True),
+            parts.fragment,
+        )
+    )
+
+
 def default_settings():
     return {
         "mapy": {
@@ -1604,6 +1657,7 @@ def read_settings(include_secrets=False):
         value = shop.get("url", "")
         shop["hasUrl"] = bool(value)
         shop["url"] = ""
+    public_settings["paymentFeeds"]["dateRange"] = payment_feed_date_range(public_settings.get("paymentFeeds", {}))
     return public_settings
 
 

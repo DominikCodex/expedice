@@ -181,6 +181,7 @@ const els = {
   settingsMapyKey: document.getElementById("settings-mapy-key"),
   settingsMapyStatus: document.getElementById("settings-mapy-status"),
   settingsPaymentLookback: document.getElementById("settings-payment-lookback"),
+  settingsPaymentStatus: document.getElementById("settings-payment-status"),
   settingsPaymentIveronikaUrl: document.getElementById("settings-payment-iveronika-url"),
   settingsPaymentIveronikaStatus: document.getElementById("settings-payment-iveronika-status"),
   settingsPaymentIveronikaSkUrl: document.getElementById("settings-payment-iveronika-sk-url"),
@@ -1553,6 +1554,13 @@ function renderSettings(settings) {
   els.settingsMapyKey.value = "";
   els.settingsMapyStatus.textContent = mapy.hasApiKey ? "API key je uložený." : "API key zatím není uložený.";
   els.settingsPaymentLookback.value = paymentFeeds.lookbackDays || 10;
+  if (els.settingsPaymentStatus) {
+    const dateRange = paymentFeeds.dateRange || {};
+    els.settingsPaymentStatus.textContent =
+      dateRange.dateFrom && dateRange.dateUntil
+        ? `Datumy se doplní automaticky: ${dateRange.dateFrom} až ${dateRange.dateUntil}.`
+        : "Datumy se při kontrole plateb doplní automaticky.";
+  }
   renderSecretInput(
     els.settingsPaymentIveronikaUrl,
     els.settingsPaymentIveronikaStatus,
