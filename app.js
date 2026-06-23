@@ -1895,6 +1895,7 @@ async function syncPaymentFeedsManually() {
     return;
   }
 
+  const datasetId = completionState.dataset.id;
   els.paymentFeedSync.disabled = true;
   setCompletionMessage("Páruji platby z e-shopových feedů...", "neutral");
   try {
@@ -1915,6 +1916,8 @@ async function syncPaymentFeedsManually() {
     const errorText = errors.length
       ? ` Chyby feedů: ${errors.map((item) => `${item.shopCode || "feed"}: ${item.error || "neznámá chyba"}`).join(" | ")}`
       : "";
+    const refreshed = await fetchJson(`/api/datasets/${encodeURIComponent(datasetId)}`);
+    applyCompletionDataset(refreshed.dataset || null, refreshed.rows || []);
     setCompletionMessage(
       `Platby spárovány: feed řádků ${data.rowsSeen ?? sync.rowsSeen ?? 0}, zkontrolováno ${data.rowsChecked ?? sync.rowsChecked ?? 0}, změněno ${data.rowsChanged ?? sync.rowsChanged ?? 0}.${shopText}${errorText}`,
       errors.length ? "warning" : "success"
