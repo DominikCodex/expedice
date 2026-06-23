@@ -180,6 +180,13 @@ const els = {
   settingsMessage: document.getElementById("settings-message"),
   settingsMapyKey: document.getElementById("settings-mapy-key"),
   settingsMapyStatus: document.getElementById("settings-mapy-status"),
+  settingsPaymentLookback: document.getElementById("settings-payment-lookback"),
+  settingsPaymentIveronikaUrl: document.getElementById("settings-payment-iveronika-url"),
+  settingsPaymentIveronikaStatus: document.getElementById("settings-payment-iveronika-status"),
+  settingsPaymentIveronikaSkUrl: document.getElementById("settings-payment-iveronika-sk-url"),
+  settingsPaymentIveronikaSkStatus: document.getElementById("settings-payment-iveronika-sk-status"),
+  settingsPaymentGalantraUrl: document.getElementById("settings-payment-galantra-url"),
+  settingsPaymentGalantraStatus: document.getElementById("settings-payment-galantra-status"),
   settingsPacketaUrl: document.getElementById("settings-packeta-url"),
   settingsPacketaPassword: document.getElementById("settings-packeta-password"),
   settingsPacketaStatus: document.getElementById("settings-packeta-status"),
@@ -1529,6 +1536,11 @@ function renderSecretInput(input, status, saved, savedText, emptyText) {
 
 function renderSettings(settings) {
   const mapy = settings.mapy || {};
+  const paymentFeeds = settings.paymentFeeds || {};
+  const paymentFeedShops = paymentFeeds.shops || {};
+  const paymentIveronika = paymentFeedShops.iveronika_cz || {};
+  const paymentIveronikaSk = paymentFeedShops.iveronika_sk || {};
+  const paymentGalantra = paymentFeedShops.galantra_cz || {};
   const packeta = settings.packeta || {};
   const dpd = settings.dpd || {};
   const packetaClients = packeta.clients || {};
@@ -1540,6 +1552,28 @@ function renderSettings(settings) {
 
   els.settingsMapyKey.value = "";
   els.settingsMapyStatus.textContent = mapy.hasApiKey ? "API key je uložený." : "API key zatím není uložený.";
+  els.settingsPaymentLookback.value = paymentFeeds.lookbackDays || 10;
+  renderSecretInput(
+    els.settingsPaymentIveronikaUrl,
+    els.settingsPaymentIveronikaStatus,
+    paymentIveronika.hasUrl,
+    "CSV feed je uložený.",
+    "CSV feed zatím není uložený."
+  );
+  renderSecretInput(
+    els.settingsPaymentIveronikaSkUrl,
+    els.settingsPaymentIveronikaSkStatus,
+    paymentIveronikaSk.hasUrl,
+    "CSV feed je uložený.",
+    "CSV feed zatím není uložený."
+  );
+  renderSecretInput(
+    els.settingsPaymentGalantraUrl,
+    els.settingsPaymentGalantraStatus,
+    paymentGalantra.hasUrl,
+    "CSV feed je uložený.",
+    "CSV feed zatím není uložený."
+  );
 
   els.settingsPacketaUrl.value = packeta.apiUrl || "";
   els.settingsPacketaPassword.value = "";
@@ -1623,6 +1657,25 @@ function collectSettings() {
   return {
     mapy: {
       apiKey: els.settingsMapyKey.value.trim(),
+    },
+    paymentFeeds: {
+      lookbackDays: Number(els.settingsPaymentLookback.value) || 10,
+      encoding: "windows-1250",
+      delimiter: ";",
+      shops: {
+        iveronika_cz: {
+          name: "iVeronika.cz",
+          url: els.settingsPaymentIveronikaUrl.value.trim(),
+        },
+        iveronika_sk: {
+          name: "iVeronika.sk",
+          url: els.settingsPaymentIveronikaSkUrl.value.trim(),
+        },
+        galantra_cz: {
+          name: "Galantra.cz",
+          url: els.settingsPaymentGalantraUrl.value.trim(),
+        },
+      },
     },
     packeta: {
       apiUrl: els.settingsPacketaUrl.value.trim(),

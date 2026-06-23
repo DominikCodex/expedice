@@ -1408,10 +1408,39 @@ def dataset_summary(row):
     }
 
 
+def env_int(name, default):
+    try:
+        return int(os.environ.get(name, str(default)) or default)
+    except (TypeError, ValueError):
+        return default
+
+
 def default_settings():
     return {
         "mapy": {
             "apiKey": os.environ.get("MAPY_API_KEY", ""),
+        },
+        "paymentFeeds": {
+            "lookbackDays": env_int("PAYMENT_FEED_LOOKBACK_DAYS", 10),
+            "encoding": os.environ.get("PAYMENT_FEED_ENCODING", "windows-1250"),
+            "delimiter": os.environ.get("PAYMENT_FEED_DELIMITER", ";"),
+            "shops": {
+                "iveronika_cz": {
+                    "name": "iVeronika.cz",
+                    "url": os.environ.get("PAYMENT_FEED_URL_IVERONIKA_CZ")
+                    or os.environ.get("ORDER_STATUS_CSV_URL_IVERONIKA_CZ", ""),
+                },
+                "iveronika_sk": {
+                    "name": "iVeronika.sk",
+                    "url": os.environ.get("PAYMENT_FEED_URL_IVERONIKA_SK")
+                    or os.environ.get("ORDER_STATUS_CSV_URL_IVERONIKA_SK", ""),
+                },
+                "galantra_cz": {
+                    "name": "Galantra.cz",
+                    "url": os.environ.get("PAYMENT_FEED_URL_GALANTRA_CZ")
+                    or os.environ.get("ORDER_STATUS_CSV_URL_GALANTRA_CZ", ""),
+                },
+            },
         },
         "packeta": {
             "apiUrl": os.environ.get("PACKETA_API_URL", "https://www.zasilkovna.cz/api/rest"),
@@ -1571,6 +1600,10 @@ def read_settings(include_secrets=False):
         value = client.get("apiKey", "")
         client["hasApiKey"] = bool(value)
         client["apiKey"] = ""
+    for code, shop in (public_settings.get("paymentFeeds", {}).get("shops") or {}).items():
+        value = shop.get("url", "")
+        shop["hasUrl"] = bool(value)
+        shop["url"] = ""
     return public_settings
 
 
@@ -1590,6 +1623,15 @@ def merge_client_secret_fields(next_section, current_section, field):
         merge_secret_field(next_client, current_clients.get(code, {}), field)
 
 
+def merge_shop_secret_fields(next_section, current_section, field):
+    next_shops = next_section.get("shops") or {}
+    current_shops = current_section.get("shops") or {}
+    for code, next_shop in next_shops.items():
+        if not isinstance(next_shop, dict):
+            continue
+        merge_secret_field(next_shop, current_shops.get(code, {}), field)
+
+
 def save_settings_payload(payload):
     current = read_settings(include_secrets=True)
     incoming = payload if isinstance(payload, dict) else {}
@@ -1599,7 +1641,13 @@ def save_settings_payload(payload):
     merge_secret_field(next_settings["dpd"], current["dpd"], "apiKey")
     merge_client_secret_fields(next_settings["packeta"], current["packeta"], "apiPassword")
     merge_client_secret_fields(next_settings["dpd"], current["dpd"], "apiKey")
+    merge_shop_secret_fields(next_settings["paymentFeeds"], current["paymentFeeds"], "url")
     next_settings["dpd"]["apiBaseUrl"] = clean_text(next_settings["dpd"].get("apiBaseUrl")).rstrip("/")
+    try:
+        lookback_days = int(next_settings["paymentFeeds"].get("lookbackDays") or 10)
+    except (TypeError, ValueError):
+        lookback_days = 10
+    next_settings["paymentFeeds"]["lookbackDays"] = max(1, min(31, lookback_days))
 
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
