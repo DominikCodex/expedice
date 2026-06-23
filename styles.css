@@ -90,6 +90,53 @@ button:disabled {
   padding: 6px 8px;
 }
 
+.label-cache-chip {
+  display: inline-flex;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 4px 7px;
+  font-size: 10px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.label-cache-chip.ready {
+  color: #126243;
+  background: #dff7ea;
+}
+
+.label-cache-chip.missing {
+  color: #7b5a10;
+  background: #fff0c9;
+}
+
+.label-cache-chip.error {
+  color: #8f2424;
+  background: #ffdede;
+}
+
+.cache-result-list {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+}
+
+.cache-result-row {
+  display: grid;
+  grid-template-columns: 140px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--green);
+  border-radius: 9px;
+  background: #fff;
+  padding: 8px 10px;
+}
+
+.cache-result-row.error {
+  border-left-color: #c94444;
+}
+
 .danger {
   background: var(--danger-soft);
   color: var(--danger);

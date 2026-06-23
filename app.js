@@ -135,6 +135,7 @@ const els = {
   packetaDryRun: document.getElementById("packeta-dry-run"),
   packetaValidate: document.getElementById("packeta-validate"),
   packetaSend: document.getElementById("packeta-send"),
+  labelCacheBatch: document.getElementById("label-cache-batch"),
   dpdDryRun: document.getElementById("dpd-dry-run"),
   dpdSend: document.getElementById("dpd-send"),
   completionValidateAddresses: document.getElementById("completion-validate-addresses"),
@@ -442,6 +443,7 @@ function applyRoleVisibility() {
   els.completionDelete.classList.toggle("hidden", !admin);
   els.packetaValidate.classList.toggle("hidden", !admin);
   els.packetaSend?.classList.toggle("hidden", !admin);
+  els.labelCacheBatch?.classList.toggle("hidden", !admin);
   els.dpdSend.classList.toggle("hidden", !admin);
   if (!admin && !els.settingsView.classList.contains("hidden")) {
     switchView("sorting");
@@ -908,6 +910,7 @@ function renderCompletionOptions() {
     els.packetaDryRun.disabled = true;
     els.packetaValidate.disabled = true;
     if (els.packetaSend) els.packetaSend.disabled = true;
+    if (els.labelCacheBatch) els.labelCacheBatch.disabled = true;
     els.dpdDryRun.disabled = true;
     els.dpdSend.disabled = true;
     els.completionValidateAddresses.disabled = true;
@@ -928,6 +931,7 @@ function renderCompletionOptions() {
   els.packetaDryRun.disabled = !completionState.dataset;
   els.packetaValidate.disabled = !completionState.dataset;
   if (els.packetaSend) els.packetaSend.disabled = !completionState.dataset;
+  if (els.labelCacheBatch) els.labelCacheBatch.disabled = !completionState.dataset;
   els.dpdDryRun.disabled = !completionState.dataset;
   els.dpdSend.disabled = !completionState.dataset;
   els.completionValidateAddresses.disabled = !completionState.dataset;
@@ -1222,7 +1226,7 @@ async function runPacketaSend() {
         datasetId: completionState.dataset.id,
       }),
     });
-    (data.rows || []).forEach((row) => replaceCompletionRow(row));
+    (data.rows || []).forEach((row) => updateCompletionRowInState(row));
     renderCompletion();
     renderPacketaValidation(data);
     const errors = data.errorCount || 0;
@@ -1236,6 +1240,123 @@ async function runPacketaSend() {
     setCompletionMessage(`Odeslání do Zásilkovny se nepodařilo: ${error.message}`, "error");
   } finally {
     els.packetaSend.disabled = !completionState.dataset;
+  }
+}
+
+function renderLabelCacheResult(data) {
+  const ready = data.ready || [];
+  const skipped = data.skipped || [];
+  const errors = data.errors || [];
+  const readyHtml = ready
+    .slice(0, 80)
+    .map(
+      (item) => `
+        <div class="cache-result-row ok">
+          <strong>${escapeHtml(item.orderNumber || "-")}</strong>
+          <span>${escapeHtml(item.carrier || "-")} | ${escapeHtml(item.labelNumber || "-")}</span>
+          <small>${escapeHtml(item.size || 0)} B</small>
+        </div>
+      `
+    )
+    .join("");
+  const errorHtml = errors
+    .slice(0, 80)
+    .map(
+      (item) => `
+        <div class="cache-result-row error">
+          <strong>${escapeHtml(item.orderNumber || "-")}</strong>
+          <span>${escapeHtml(item.carrier || "-")} | ${escapeHtml(item.labelNumber || "-")}</span>
+          <small>${escapeHtml(item.error || "")}</small>
+        </div>
+      `
+    )
+    .join("");
+  const skippedHtml = skipped.length
+    ? `
+      <details class="dry-run-item dry-run-skipped">
+        <summary>
+          <strong>Přeskočeno</strong>
+          <span>${escapeHtml(skipped.length)} ks</span>
+        </summary>
+        <div class="skipped-list">
+          ${skipped
+            .slice(0, 80)
+            .map(
+              (item) => `
+                <div>
+                  <strong>${escapeHtml(item.orderNumber || "-")}</strong>
+                  <span>${escapeHtml(item.labelNumber || "")}</span>
+                  <small>${escapeHtml(item.reason || "")}</small>
+                </div>
+              `
+            )
+            .join("")}
+        </div>
+      </details>
+    `
+    : "";
+
+  els.packetaDryRunResult.classList.remove("hidden");
+  els.packetaDryRunResult.innerHTML = `
+    <div class="section-head compact">
+      <div>
+        <p class="eyebrow">Serverová cache štítků</p>
+        <h2>Příprava štítků dávky</h2>
+      </div>
+      <div class="dry-run-counts">
+        <span>${escapeHtml(data.readyCount || 0)} připraveno</span>
+        <span>${escapeHtml(data.skippedCount || 0)} přeskočeno</span>
+        <span>${escapeHtml(data.errorCount || 0)} chyb</span>
+      </div>
+    </div>
+    <div class="dry-run-note">
+      Hotové štítky se uložily na server. Sken expedičního boxu už bude tisknout z cache bez volání API dopravce.
+    </div>
+    <div class="cache-result-list">
+      ${errorHtml}
+      ${readyHtml || (!errorHtml ? `<div class="empty">Žádný nový štítek nebylo potřeba připravit.</div>` : "")}
+      ${skippedHtml}
+    </div>
+  `;
+}
+
+async function runLabelCacheBatch() {
+  if (!completionState.dataset?.id) {
+    setCompletionMessage("Nejdřív načti konkrétní expediční dávku kompletace.", "warning");
+    return;
+  }
+  if (
+    !confirm(
+      `Připravit PDF štítky na server pro tuto konkrétní dávku?\n\n${datasetLabel(
+        completionState.dataset
+      )}\n\nSystém stáhne jen chybějící štítky. Už připravené štítky nepřepíše.`
+    )
+  ) {
+    return;
+  }
+
+  els.labelCacheBatch.disabled = true;
+  hidePacketaDryRunResult();
+  setCompletionMessage("Připravuji štítky dávky na server...", "neutral");
+  try {
+    const data = await fetchJson("/api/labels/cache-batch", {
+      method: "POST",
+      body: JSON.stringify({ datasetId: completionState.dataset.id }),
+    });
+    (data.rows || []).forEach((row) => replaceCompletionRow(row));
+    renderWorkflow();
+    renderCompletion();
+    renderLabelCacheResult(data);
+    setCompletionMessage(
+      `Příprava štítků hotová: ${data.readyCount || 0} připraveno, ${data.skippedCount || 0} přeskočeno, ${
+        data.errorCount || 0
+      } chyb.`,
+      data.errorCount ? "warning" : "success"
+    );
+  } catch (error) {
+    setCompletionMessage(`Příprava štítků selhala: ${error.message}`, "error");
+  } finally {
+    els.labelCacheBatch.disabled = !completionState.dataset;
   }
 }
 
@@ -1646,7 +1767,7 @@ async function printCompletionCarrierLabel(rowId, setStatus = setCompletionMessa
   const labelNumber = row?.packetaShipmentId || "";
   if (!labelNumber) {
     setStatus("Řádek zatím nemá číslo zásilky/štítku.", "warning");
-    return;
+    return false;
   }
 
   const url = `/api/completion/rows/${encodeURIComponent(rowId)}/label?markPrinted=1`;
@@ -1665,17 +1786,40 @@ async function printCompletionCarrierLabel(rowId, setStatus = setCompletionMessa
     renderCompletion();
     renderWorkflow();
     setStatus(`Štítek ${labelNumber} odeslán na tiskárnu: ${result.printer}.`, "success");
+    return true;
   } catch (error) {
-    const printWindow = window.open(url, "_blank", "noopener");
+    if (String(error.message || "").includes("cache") || String(error.message || "").includes("Stitek neni pripraveny")) {
+      setStatus(`Štítek ${labelNumber} není připravený v serverové cache. Nejdřív spusť Připravit štítky dávky.`, "warning");
+      return false;
+    }
+    let manualObjectUrl = "";
+    try {
+      const manualResponse = await fetch(url, { cache: "no-store", credentials: "same-origin" });
+      if (!manualResponse.ok) {
+        const errorText = await manualResponse.text().catch(() => "");
+        if (errorText.includes("cache") || errorText.includes("Stitek neni pripraveny")) {
+          setStatus(`Štítek ${labelNumber} není připravený v serverové cache. Nejdřív spusť Připravit štítky dávky.`, "warning");
+          return false;
+        }
+        throw new Error(errorText || "PDF štítek se nepodařilo otevřít.");
+      }
+      manualObjectUrl = URL.createObjectURL(await manualResponse.blob());
+    } catch (manualError) {
+      setStatus(`Tiskový agent neběží a PDF se nepodařilo načíst z cache: ${manualError.message}`, "error");
+      return false;
+    }
+    const printWindow = window.open(manualObjectUrl, "_blank", "noopener");
     if (!printWindow) {
+      URL.revokeObjectURL(manualObjectUrl);
       setStatus(`Tiskový agent neběží a prohlížeč zablokoval otevření PDF: ${error.message}`, "error");
-      return;
+      return false;
     }
     row.labelPrinted = "Label printed";
     replaceCompletionRow(row);
     renderCompletion();
     renderWorkflow();
     setStatus(`Agent neběží (${error.message}). Štítek ${labelNumber} jsem otevřel jako PDF pro ruční tisk.`, "warning");
+    return true;
   }
 }
 
@@ -2362,6 +2506,18 @@ function deliveryCarrierHtml(row) {
   `;
 }
 
+function labelCacheStatusHtml(row) {
+  if (!row.packetaShipmentId) return "";
+  const status = row.labelCacheStatus || "";
+  if (status === "ready") {
+    return `<span class="label-cache-chip ready" title="PDF štítek je připravený na serveru">v cache</span>`;
+  }
+  if (status === "error") {
+    return `<span class="label-cache-chip error" title="${escapeHtml(row.labelCacheError || "Stažení štítku selhalo")}">chyba cache</span>`;
+  }
+  return `<span class="label-cache-chip missing" title="PDF štítek zatím není připravený na serveru">chybí cache</span>`;
+}
+
 function carrierSendActionHtml(row) {
   const carrier = row.deliveryCarrier || "manual";
   const labelNumber = row.packetaShipmentId || "";
@@ -2374,6 +2530,7 @@ function carrierSendActionHtml(row) {
         <button type="button" class="secondary label-download" data-action="download-carrier-label" data-row-id="${escapeHtml(
       row.id
     )}">Test PDF</button>
+        ${labelCacheStatusHtml(row)}
       </div>
     `;
   }
@@ -2538,8 +2695,8 @@ async function autoPrintWorkflowDocuments(row, boxNumber) {
   workflowAutoPrintedRows.add(key);
   const printed = [];
   if (hasCarrierLabel) {
-    await printCompletionCarrierLabel(row.id, setWorkflowMessage);
-    printed.push("štítek dopravce");
+    const labelPrinted = await printCompletionCarrierLabel(row.id, setWorkflowMessage);
+    if (labelPrinted) printed.push("štítek dopravce");
   }
   if (needsUnpaidDocument) {
     await printCompletionIssueDocument(row.id, "unpaid", setWorkflowMessage);
@@ -3629,6 +3786,7 @@ els.addressValidationLog?.addEventListener("click", (event) => {
 els.packetaDryRun.addEventListener("click", runPacketaDryRun);
 els.packetaValidate.addEventListener("click", runPacketaValidation);
 els.packetaSend?.addEventListener("click", runPacketaSend);
+els.labelCacheBatch?.addEventListener("click", runLabelCacheBatch);
 els.dpdDryRun.addEventListener("click", runDpdDryRun);
 els.dpdSend.addEventListener("click", runDpdSend);
 els.printAgentTest?.addEventListener("click", testPrintAgent);

@@ -1,4 +1,4 @@
-import csv
+﻿import csv
 import base64
 import hashlib
 import io
@@ -305,6 +305,10 @@ def ensure_schema():
                     dpd_order_and_pieces TEXT,
                     canceled_order_backup TEXT,
                     label_printed TEXT,
+                    label_cache_status TEXT,
+                    label_cache_error TEXT,
+                    label_cache_fetched_at TIMESTAMPTZ,
+                    label_cache_size INTEGER NOT NULL DEFAULT 0,
                     cells JSONB NOT NULL DEFAULT '[]'::jsonb,
                     raw_row JSONB NOT NULL DEFAULT '{}'::jsonb
                 )
@@ -318,6 +322,39 @@ def ensure_schema():
             cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS address_validation_checked_at TIMESTAMPTZ")
             cur.execute(
                 "ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS address_validation_result JSONB NOT NULL DEFAULT '{}'::jsonb"
+            )
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS label_cache_status TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS label_cache_error TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS label_cache_fetched_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS label_cache_size INTEGER NOT NULL DEFAULT 0")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS label_cache (
+                    id BIGSERIAL PRIMARY KEY,
+                    dataset_id BIGINT NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+                    completion_row_id BIGINT NOT NULL REFERENCES completion_rows(id) ON DELETE CASCADE,
+                    carrier TEXT NOT NULL,
+                    label_number TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'ready',
+                    pdf_content BYTEA,
+                    error TEXT,
+                    fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    pdf_size INTEGER NOT NULL DEFAULT 0,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (completion_row_id, carrier, label_number)
+                )
+                """
+            )
+            cur.execute("ALTER TABLE label_cache ADD COLUMN IF NOT EXISTS pdf_content BYTEA")
+            cur.execute("ALTER TABLE label_cache ADD COLUMN IF NOT EXISTS error TEXT")
+            cur.execute("ALTER TABLE label_cache ADD COLUMN IF NOT EXISTS fetched_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
+            cur.execute("ALTER TABLE label_cache ADD COLUMN IF NOT EXISTS pdf_size INTEGER NOT NULL DEFAULT 0")
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_label_cache_dataset
+                ON label_cache (dataset_id, status, fetched_at DESC)
+                """
             )
             cur.execute(
                 """
@@ -1608,6 +1645,7 @@ def completion_row_to_api(row):
     delivery = delivery_info_from_row(row)
     return {
         "id": row["id"],
+        "datasetId": row["dataset_id"],
         "shopCode": row.get("shop_code"),
         "rowNumber": row["row_number"],
         "firstName": row["first_name"],
@@ -1642,6 +1680,12 @@ def completion_row_to_api(row):
         "dpdOrderAndPieces": row["dpd_order_and_pieces"],
         "canceledOrderBackup": row["canceled_order_backup"],
         "labelPrinted": row["label_printed"],
+        "labelCacheStatus": row.get("label_cache_status") or "",
+        "labelCacheError": row.get("label_cache_error") or "",
+        "labelCacheFetchedAt": row["label_cache_fetched_at"].isoformat()
+        if row.get("label_cache_fetched_at")
+        else None,
+        "labelCacheSize": row.get("label_cache_size") or 0,
         "addressValidationStatus": row.get("address_validation_status") or "",
         "addressValidationMessage": row.get("address_validation_message") or "",
         "addressValidationQuery": row.get("address_validation_query") or "",
@@ -3970,108 +4014,22 @@ def send_completion_row_carrier(row_id):
         return jsonify({"error": "Řádek kompletace nebyl nalezen."}), 404
 
     row_api = completion_row_to_api(row)
-    delivery = delivery_info_from_row(row_api)
+    carrier = label_carrier_for_row(row_api, label_number)
+    if not carrier:
+        return jsonify({"error": "Pro tento radek neumim urcit dopravce stitku."}), 400
 
-    if delivery.get("isDpd"):
-        reason = dpd_skip_reason(row_api)
-        if reason:
-            return jsonify({"error": reason, "carrier": "dpd", "row": row_api}), 400
-        client_settings = carrier_client_settings("dpd", row_api)
-        item = dpd_payload(row_api)
-        api_payload = {
-            "mode": data.get("mode") or client_settings.get("mode") or "test",
-            "source": "expedice-railway-row",
-            "clientCode": client_settings.get("clientCode"),
-            "clientName": client_settings.get("clientName"),
-            "client": {
-                "customerDsw": client_settings.get("customerDsw"),
-                "customerId": client_settings.get("customerId"),
-                "shipmentType": client_settings.get("shipmentType"),
-            },
-            "shipments": [item["payload"]],
-        }
-        api_result = dpd_post_payload(api_payload, client_settings)
-        ok = bool(api_result.get("ok"))
-        updated_row = (
-            update_completion_carrier_result(row_id, "dpd", True, "ok", "", "")
-            if ok
-            else row_api
-        )
+    cache_row = ready_label_cache(row_id, carrier, label_number, include_content=True)
+    if not cache_row:
         return jsonify(
             {
-                "ok": ok,
-                "carrier": "dpd",
-                "clientCode": client_settings.get("clientCode"),
-                "clientName": client_settings.get("clientName"),
-                "result": api_result,
-                "row": updated_row,
+                "error": "Stitek neni pripraveny v serverove cache. Spust nejdrive Pripravit stitky davky.",
+                "carrier": carrier,
+                "labelNumber": label_number,
+                "cache": "miss",
             }
-        ), 200 if ok else 400
+        ), 409
 
-    if delivery.get("isPacketa"):
-        reason = packeta_skip_reason(row_api)
-        if reason:
-            return jsonify({"error": reason, "carrier": "packeta", "row": row_api}), 400
-        packet = packeta_dry_run_packet(row_api)
-        client_settings = carrier_client_settings("packeta", packet.get("clientCode") or packet.get("shopCode"))
-        password = client_settings.get("apiPassword", "")
-        if not password:
-            return jsonify({"error": f"Packeta API heslo není nastavené pro klienta {client_settings.get('clientName')}.", "carrier": "packeta", "row": row_api}), 400
-        create_xml = packeta_create_xml(packet["requestXml"], password)
-        api_result = packeta_post_validation_xml(create_xml, client_settings)
-        ok = bool(api_result.get("valid"))
-        shipment_id = xml_tag_text(api_result.get("responseText", ""), "id")
-        updated_row = (
-            update_completion_carrier_result(row_id, "packeta", True, api_result.get("status") or "ok", shipment_id, "")
-            if ok
-            else row_api
-        )
-        return jsonify(
-            {
-                "ok": ok,
-                "carrier": "packeta",
-                "clientCode": client_settings.get("clientCode"),
-                "clientName": client_settings.get("clientName"),
-                "shipmentId": shipment_id,
-                "result": api_result,
-                "row": updated_row,
-            }
-        ), 200 if ok else 400
-
-    return jsonify({"error": "Tento řádek nemá dopravce DPD ani Zásilkovnu/Packetu.", "carrier": delivery.get("carrier"), "row": row_api}), 400
-
-
-@app.route("/api/completion/rows/<int:row_id>/label")
-def completion_row_label(row_id):
-    auth_error = require_login()
-    if auth_error:
-        return auth_error
-
-    ensure_schema()
-    with db_conn() as conn:
-        with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT * FROM completion_rows WHERE id = %s", (row_id,))
-            row = cur.fetchone()
-    if not row:
-        return jsonify({"error": "Řádek kompletace nebyl nalezen."}), 404
-
-    row_api = completion_row_to_api(row)
-    label_number = clean_text(row_api.get("packetaShipmentId"))
-    if not label_number:
-        return jsonify({"error": "Řádek zatím nemá číslo zásilky/štítku."}), 400
-
-    delivery = delivery_info_from_row(row_api)
-    carrier = "dpd" if delivery.get("isDpd") or len(label_number) == 14 else "packeta" if delivery.get("isPacketa") or len(label_number) == 10 else ""
-    if carrier == "dpd":
-        pdf_bytes, result = dpd_label_pdf(label_number, carrier_client_settings("dpd", row_api))
-    elif carrier == "packeta":
-        pdf_bytes, result = packeta_label_pdf(label_number, carrier_client_settings("packeta", row_api))
-    else:
-        return jsonify({"error": "Pro tento řádek neumím určit dopravce štítku."}), 400
-
-    if not pdf_bytes:
-        return jsonify({"error": result.get("error") or "Štítek se nepodařilo načíst.", "carrier": carrier, "result": result}), 400
-
+    pdf_bytes = bytes(cache_row["pdf_content"])
     if request.args.get("markPrinted") == "1":
         with db_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -4090,6 +4048,7 @@ def completion_row_label(row_id):
             "Cache-Control": "no-store",
             "X-Carrier": carrier,
             "X-Label-Number": label_number,
+            "X-Label-Cache": "hit",
         },
     )
 
@@ -5679,3 +5638,4 @@ def csv_response(text, filename):
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", "8000")))
+
