@@ -1565,6 +1565,66 @@ def payment_check_message(status, record=None, row=None, lookback_days=10):
     return "Platba nebyla zjištěna."
 
 
+def payment_row_value(row, key):
+    if isinstance(row, dict):
+        return row.get(key)
+    try:
+        return row[key]
+    except Exception:
+        return ""
+
+
+def classify_excel_payment_status(row):
+    payment_method = payment_row_value(row, "payment_method")
+    if payment_method_is_cod(payment_method):
+        return {
+            "status": "cod",
+            "paid": "cod",
+            "sourceStatus": "Dobírka",
+            "message": "Dobírka - platba se řeší u dopravce.",
+        }
+
+    source_status = clean_text(
+        payment_row_value(row, "paid_status")
+        or payment_row_value(row, "completion_status")
+        or payment_row_value(row, "packeta_status")
+        or ""
+    )
+    normalized_status = payment_status_norm(source_status)
+
+    if any(marker in normalized_status for marker in ("storno", "zrusen", "zruseno", "cancel")):
+        return {
+            "status": "storno",
+            "paid": "storno",
+            "sourceStatus": source_status,
+            "message": "Excel uvádí storno nebo zrušenou objednávku.",
+        }
+    if any(marker in normalized_status for marker in ("nezaplacen", "neuhrazen", "neuhraden", "ceka na platbu", "caka na platbu")):
+        return {
+            "status": "unpaid",
+            "paid": "0",
+            "sourceStatus": source_status,
+            "message": "Excel uvádí neuhrazenou objednávku.",
+        }
+    if any(marker in normalized_status for marker in ("zaplacen", "uhrazen", "uhraden", "vyrizen", "vybaven", "paid", "hotovo")):
+        return {
+            "status": "paid",
+            "paid": "1",
+            "sourceStatus": source_status,
+            "message": "Excel uvádí zaplacenou nebo vyřízenou objednávku.",
+        }
+
+    return None
+
+
+def payment_feed_missing_message(shop_result, lookback_days):
+    if shop_result and shop_result.get("error"):
+        return "Feed e-shopu se nepodařilo načíst: " + clean_text(shop_result.get("error"))
+    if shop_result and shop_result.get("rowsSeen") == 0:
+        return f"Feed e-shopu nevrátil žádné objednávky za posledních {lookback_days} dní."
+    return f"Objednávka nebyla nalezena v platebním feedu za posledních {lookback_days} dní."
+
+
 def parse_payment_feed_csv(text, delimiter):
     reader = csv.DictReader(io.StringIO(text), delimiter=delimiter or ";")
     rows = []
@@ -1594,6 +1654,7 @@ def fetch_payment_feed_records(feed_settings):
     records = {}
     rows_seen = 0
     errors = []
+    shop_results = {}
     shops = settings.get("shops") or {}
 
     for shop_code, shop in shops.items():
@@ -1601,7 +1662,9 @@ def fetch_payment_feed_records(feed_settings):
             continue
         feed_url = clean_text(shop.get("url"))
         if not feed_url:
-            errors.append({"shopCode": shop_code, "error": "CSV feed není nastavený."})
+            error = "CSV feed není nastavený."
+            errors.append({"shopCode": shop_code, "error": error})
+            shop_results[shop_code] = {"ok": False, "rowsSeen": 0, "error": error}
             continue
         resolved_url = resolve_payment_feed_url(feed_url, date_range)
         try:
@@ -1614,6 +1677,7 @@ def fetch_payment_feed_records(feed_settings):
             text = raw.decode(encoding, errors="replace")
             feed_rows = parse_payment_feed_csv(text, delimiter)
             rows_seen += len(feed_rows)
+            shop_results[shop_code] = {"ok": True, "rowsSeen": len(feed_rows), "error": ""}
             for feed_row in feed_rows:
                 status, message = classify_feed_payment_status(feed_row.get("statusName"), feed_row.get("paid"))
                 feed_row["paymentStatus"] = status
@@ -1621,11 +1685,13 @@ def fetch_payment_feed_records(feed_settings):
                 feed_row["shopCode"] = shop_code
                 records[(shop_code, feed_row["code"])] = feed_row
         except Exception as exc:
-            errors.append({"shopCode": shop_code, "error": str(exc)})
-    return records, rows_seen, errors, date_range
+            error = str(exc)
+            errors.append({"shopCode": shop_code, "error": error})
+            shop_results[shop_code] = {"ok": False, "rowsSeen": 0, "error": error}
+    return records, rows_seen, errors, date_range, shop_results
 
 
-def update_completion_payment_checks(records, date_range, errors=None):
+def update_completion_payment_checks(records, date_range, errors=None, shop_results=None):
     ensure_schema()
     lookback_days = date_range.get("lookbackDays", 10)
     configured_shops = sorted({shop_code for shop_code, _order in records.keys()})
@@ -1645,6 +1711,7 @@ def update_completion_payment_checks(records, date_range, errors=None):
             cur.execute(
                 """
                 SELECT cr.id, cr.shop_code, cr.order_number, cr.payment_method,
+                       cr.paid_status, cr.completion_status, cr.packeta_status,
                        cr.payment_check_status, cr.payment_check_message,
                        cr.payment_check_source_status, cr.payment_check_paid,
                        cr.payment_check_order_date, cr.payment_check_package_number
@@ -1669,18 +1736,20 @@ def update_completion_payment_checks(records, date_range, errors=None):
                     paid = record.get("paid", "")
                     order_date = record.get("date", "")
                     package_number = record.get("packageNumber", "")
-                elif payment_method_is_cod(row.get("payment_method")):
-                    status = "cod"
-                    message = payment_check_message(status, lookback_days=lookback_days)
-                    source_status = ""
-                    paid = ""
-                    order_date = ""
-                    package_number = ""
                 else:
-                    status = "missing"
-                    message = payment_check_message(status, lookback_days=lookback_days)
-                    source_status = ""
-                    paid = ""
+                    fallback = classify_excel_payment_status(row)
+                    shop_result = (shop_results or {}).get(row["shop_code"], {})
+                    feed_message = payment_feed_missing_message(shop_result, lookback_days)
+                    if fallback:
+                        status = fallback["status"]
+                        message = fallback["message"] + " " + feed_message
+                        source_status = fallback["sourceStatus"]
+                        paid = fallback["paid"]
+                    else:
+                        status = "missing"
+                        message = feed_message
+                        source_status = ""
+                        paid = ""
                     order_date = ""
                     package_number = ""
 
@@ -1746,8 +1815,8 @@ def sync_payment_feeds(trigger_source="background"):
                 )
                 sync_id = cur.fetchone()["id"]
 
-        records, rows_seen, errors, date_range = fetch_payment_feed_records(settings)
-        update_result = update_completion_payment_checks(records, date_range, errors)
+        records, rows_seen, errors, date_range, shop_results = fetch_payment_feed_records(settings)
+        update_result = update_completion_payment_checks(records, date_range, errors, shop_results)
         status = "ok" if not errors else "warning"
         with db_conn() as conn:
             with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -1780,6 +1849,7 @@ def sync_payment_feeds(trigger_source="background"):
             "rowsChecked": update_result["checked"],
             "rowsChanged": update_result["changed"],
             "errors": errors,
+            "shopResults": shop_results,
         }
     except Exception as exc:
         if sync_id:

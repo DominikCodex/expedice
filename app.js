@@ -1905,9 +1905,19 @@ async function syncPaymentFeedsManually() {
     completionState.paymentUpdatesSince = null;
     await pollPaymentFeedUpdates();
     const sync = data.sync || {};
+    const errors = data.errors || sync.errors || [];
+    const shopResults = data.shopResults || {};
+    const shopText = Object.keys(shopResults).length
+      ? ` Feedy: ${Object.entries(shopResults)
+          .map(([shopCode, result]) => `${shopCode}: ${result.rowsSeen ?? 0} ř.`)
+          .join(", ")}.`
+      : "";
+    const errorText = errors.length
+      ? ` Chyby feedů: ${errors.map((item) => `${item.shopCode || "feed"}: ${item.error || "neznámá chyba"}`).join(" | ")}`
+      : "";
     setCompletionMessage(
-      `Platby spárovány: feed řádků ${data.rowsSeen ?? sync.rowsSeen ?? 0}, zkontrolováno ${data.rowsChecked ?? sync.rowsChecked ?? 0}, změněno ${data.rowsChanged ?? sync.rowsChanged ?? 0}.`,
-      data.errors?.length ? "warning" : "success"
+      `Platby spárovány: feed řádků ${data.rowsSeen ?? sync.rowsSeen ?? 0}, zkontrolováno ${data.rowsChecked ?? sync.rowsChecked ?? 0}, změněno ${data.rowsChanged ?? sync.rowsChanged ?? 0}.${shopText}${errorText}`,
+      errors.length ? "warning" : "success"
     );
   } catch (error) {
     setCompletionMessage(`Platby se nepodařilo spárovat: ${error.message}`, "error");
