@@ -1550,7 +1550,15 @@ def classify_feed_payment_status(status_name, paid):
         return "paid", "Platba je podle statusu uhrazená."
     if "vyrizena" in status and "nevyrizena" not in status:
         return "paid", "Objednávka je podle feedu vyřízená."
-    if "pripominka platby" in status or "nevyrizena" in status or paid_text in {"0", "false", "ne", "no"}:
+    if (
+        "pripominka platby" in status
+        or "pripomienka platby" in status
+        or "ceka na platbu" in status
+        or "caka na platbu" in status
+        or "nevyrizena" in status
+        or "nevybavena" in status
+        or paid_text in {"0", "false", "ne", "no"}
+    ):
         return "unpaid", "Platba není podle feedu uhrazená."
     return "unknown", "Stav platby se z feedu nepodařilo spolehlivě určit."
 
