@@ -79,6 +79,13 @@ const ROUTE_VIEWS = {
   "/nastaveni": "settings",
 };
 
+const SHOP_ADMIN_DOMAINS = {
+  iveronika_cz: "www.iveronika.cz",
+  iveronika_sk: "www.iveronika.sk",
+  galantra_cz: "www.galantra.cz",
+  fidule_cz: "www.fidule.cz",
+};
+
 const usersState = {
   users: [],
   loaded: false,
@@ -2486,6 +2493,24 @@ function completionMetaLine(label, value, className = "") {
   return `<small class="${escapeHtml(className)}"><b>${escapeHtml(label)}:</b> ${escapeHtml(text)}</small>`;
 }
 
+function completionOrderAdminUrl(row) {
+  const orderId = String(row?.orderId || "").trim();
+  if (!orderId) return "";
+  const shopCode = row?.shopCode || completionState.dataset?.shopCode || "";
+  const domain = SHOP_ADMIN_DOMAINS[shopCode];
+  if (!domain) return "";
+  return `https://${domain}/admin/objednavky-detail/?id=${encodeURIComponent(orderId)}`;
+}
+
+function openCompletionOrder(row) {
+  const url = completionOrderAdminUrl(row);
+  if (!url) {
+    setCompletionMessage("Objednávku nejde otevřít: chybí ID objednávky nebo doména e-shopu.", "warning");
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 function completionCarrierKey(row) {
   if (row.deliveryCarrier) return row.deliveryCarrier;
   if (row.deliveryIsDpd) return "dpd";
@@ -3152,8 +3177,12 @@ async function saveWorkflowActionAndPrint(action, kind) {
 
 function openWorkflowOrder() {
   const row = completionWorkflowState.row;
-  if (!row?.orderId && !row?.orderNumber) return;
-  setWorkflowMessage(`V1 zatím jen označuje objednávku ${row.orderNumber || row.orderId}. Odkaz na e-shop doplníme podle URL administrací e-shopů.`, "warning");
+  const url = completionOrderAdminUrl(row);
+  if (!url) {
+    setWorkflowMessage("Objednávku nejde otevřít: chybí ID objednávky nebo doména e-shopu.", "warning");
+    return;
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
 }
 
 function renderCompletion() {
@@ -3186,6 +3215,7 @@ function renderCompletion() {
         <div class="completion-actions">
           <button type="button" data-action="save-completion-row" data-row-id="${escapeHtml(row.id)}">Uložit</button>
           <button type="button" class="secondary" data-action="validate-address" data-row-id="${escapeHtml(row.id)}">Ověřit</button>
+          <button type="button" class="secondary" data-action="open-shop-order" data-row-id="${escapeHtml(row.id)}">E-shop</button>
           ${carrierSendActionHtml(row)}
         </div>
       </td>
@@ -4044,6 +4074,10 @@ els.completionBody.addEventListener("click", (event) => {
   }
   if (button.dataset.action === "validate-address") {
     validateCompletionAddress(button.dataset.rowId);
+  }
+  if (button.dataset.action === "open-shop-order") {
+    const row = completionState.rows.find((item) => String(item.id) === String(button.dataset.rowId));
+    openCompletionOrder(row);
   }
   if (button.dataset.action === "send-carrier-row") {
     sendCompletionCarrier(button.dataset.rowId);
