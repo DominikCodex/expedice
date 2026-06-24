@@ -2380,6 +2380,26 @@ def packeta_address_is_verified(row):
     return clean_text(row.get("addressValidationStatus") or row.get("address_validation_status")).lower() == "verified"
 
 
+def completion_row_is_cancelled(row):
+    payment_status = clean_text(row.get("paymentCheckStatus") or row.get("payment_check_status")).lower()
+    if payment_status == "storno":
+        return True
+    status_text = " ".join(
+        clean_text(row.get(key))
+        for key in (
+            "completionStatus",
+            "completion_status",
+            "packetaStatus",
+            "packeta_status",
+            "paidStatus",
+            "paid_status",
+            "note",
+        )
+    )
+    normalized = payment_status_norm(status_text)
+    return "storno" in normalized or "zrus" in normalized or "cancel" in normalized
+
+
 def packeta_skip_reason(row):
     delivery = delivery_info_from_row(row)
     status_text = " ".join(
@@ -2388,6 +2408,8 @@ def packeta_skip_reason(row):
     )
     if not clean_text(row.get("orderNumber")):
         return "chybi cislo objednavky"
+    if completion_row_is_cancelled(row):
+        return "objednavka je STORNO - neposilat dopravci"
     if packeta_contains(status_text, "storno", "fault", "error", "chyba"):
         return "storno nebo chyba"
     if delivery["isGiftVoucher"]:
@@ -3308,6 +3330,8 @@ def dpd_skip_reason(row):
         return "radek nepatri do DPD"
     if not clean_text(row.get("orderNumber")):
         return "chybi cislo objednavky"
+    if completion_row_is_cancelled(row):
+        return "objednavka je STORNO - neposilat dopravci"
     if not dpd_recipient_name(row):
         return "chybi jmeno zakaznika"
     if not clean_text(row.get("phone")) and not clean_text(row.get("email")):

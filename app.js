@@ -2763,6 +2763,9 @@ function carrierSendActionHtml(row) {
     `;
   }
   if (authState.user?.role !== "admin") return "";
+  if (paymentCheckKind(row) === "storno") {
+    return `<button type="button" class="secondary" disabled>STORNO</button>`;
+  }
   if (carrier !== "dpd" && carrier !== "packeta") {
     return `<button type="button" class="secondary" disabled>Bez dopravce</button>`;
   }
