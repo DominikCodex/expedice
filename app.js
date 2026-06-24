@@ -1860,7 +1860,8 @@ async function pollPaymentFeedUpdates() {
   if (!completionState.dataset?.id || els.completionView.classList.contains("hidden")) return;
   if (completionState.paymentPollInFlight) return;
   completionState.paymentPollInFlight = true;
-  const params = new URLSearchParams({ datasetId: completionState.dataset.id });
+  const datasetId = completionState.dataset.id;
+  const params = new URLSearchParams({ datasetId });
   if (completionState.paymentUpdatesSince) {
     params.set("since", completionState.paymentUpdatesSince);
   }
@@ -1869,24 +1870,29 @@ async function pollPaymentFeedUpdates() {
     completionState.paymentUpdatesSince = data.serverTime || new Date().toISOString();
     const rows = data.rows || [];
     if (!rows.length) return;
-    let visibleChanged = false;
-    rows.forEach((row) => {
-      replaceCompletionRow(row);
-      if (completionMatchesFilters(row)) visibleChanged = true;
-      if (completionWorkflowState.row && String(completionWorkflowState.row.id) === String(row.id)) {
-        completionWorkflowState.row = row;
-        renderWorkflowRow(row);
-      }
-    });
-    if (visibleChanged) {
-      renderCompletionRows();
-      setCompletionMessage(`Platební stavy aktualizovány: ${rows.length} změn.`, "warning");
-    }
+    await refreshCompletionRowsFromServer(datasetId);
+    setCompletionMessage(`Platební stavy aktualizovány: ${rows.length} změn.`, "warning");
   } catch (error) {
     console.warn("Payment feed update polling failed", error);
   } finally {
     completionState.paymentPollInFlight = false;
   }
+}
+
+async function refreshCompletionRowsFromServer(datasetId) {
+  const data = await fetchJson(`/api/datasets/${encodeURIComponent(datasetId)}`);
+  if (!completionState.dataset || String(completionState.dataset.id) !== String(datasetId)) return;
+  completionState.dataset = data.dataset || completionState.dataset;
+  completionState.rows = data.rows || [];
+  if (completionWorkflowState.row) {
+    const currentWorkflowRow = completionState.rows.find((row) => String(row.id) === String(completionWorkflowState.row.id));
+    if (currentWorkflowRow) {
+      completionWorkflowState.row = currentWorkflowRow;
+      renderWorkflowRow(currentWorkflowRow);
+    }
+  }
+  renderCompletionOptions();
+  renderCompletion();
 }
 
 async function syncPaymentFeedsManually() {
