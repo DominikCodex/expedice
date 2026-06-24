@@ -3516,14 +3516,25 @@ function workflowSortingCheckHtml(row) {
           const hasRemaining = item.remaining !== null && item.remaining !== undefined && item.remaining !== "";
           const remaining = hasRemaining ? Math.max(0, Math.trunc(toNumber(item.remaining, 0))) : null;
           const initial = Math.max(0, Math.trunc(toNumber(item.initialQuantity, item.remaining || 0)));
+          const variantParts = String(item.variant || "")
+            .split("/")
+            .map((part) => part.trim())
+            .filter(Boolean);
+          const color = item.color || variantParts[0] || "";
+          const size = item.size || variantParts.slice(1).join(" / ") || "";
+          const meta = [
+            color ? `Barva: ${color}` : "",
+            size ? `Velikost: ${size}` : "",
+            !color && !size && item.variant ? `Varianta: ${item.variant}` : "",
+          ].filter(Boolean);
           return `
             <button type="button" class="workflow-sorting-item ${remaining > 0 ? "pending" : "done"} ${checked ? "checked" : ""}" data-action="workflow-check-item" data-check-key="${escapeHtml(checkKey)}">
               <span class="workflow-check-box" aria-hidden="true">${checked ? "OK" : ""}</span>
-              <span class="code">${escapeHtml(item.variantCode || item.productCode || "-")}</span>
-              <span>${escapeHtml(item.variant || "-")}</span>
-              <span>${escapeHtml(item.productName || item.info || "")}</span>
-              <strong>${escapeHtml(initial)} ks ke kontrole</strong>
-              <strong>${hasRemaining ? `${escapeHtml(remaining)} zbývá` : "fyzická kontrola"}</strong>
+              <span class="workflow-product-code">${escapeHtml(item.variantCode || item.productCode || "-")}</span>
+              <span class="workflow-product-name">${escapeHtml(item.productName || item.info || "Položka objednávky")}</span>
+              <span class="workflow-product-meta">${escapeHtml(meta.join(" | ") || "Bez varianty")}</span>
+              <strong class="workflow-product-qty">${escapeHtml(initial || 1)} ks</strong>
+              <strong class="workflow-product-state">${hasRemaining ? `${escapeHtml(remaining)} zbývá` : "ke kontrole"}</strong>
               <strong class="workflow-check-action">${checked ? "Zkontrolováno" : "Klik = zkontrolovat"}</strong>
             </button>
           `;

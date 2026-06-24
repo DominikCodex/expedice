@@ -836,22 +836,23 @@ select:focus {
 
 .workflow-sorting-list {
   display: grid;
-  gap: 5px;
+  gap: 8px;
 }
 
 .workflow-sorting-item {
   display: grid;
   width: 100%;
-  grid-template-columns: 38px minmax(125px, 0.9fr) minmax(95px, 0.7fr) minmax(220px, 1.4fr) auto auto minmax(120px, auto);
-  gap: 8px;
+  grid-template-columns: 42px minmax(150px, 0.9fr) minmax(280px, 1.7fr) minmax(180px, 1fr) auto auto minmax(140px, auto);
+  gap: 10px;
   align-items: center;
-  padding: 7px 8px;
+  min-height: 54px;
+  padding: 10px 12px;
   border: 1px solid #dfe8e3;
   border-left: 5px solid #3a9d67;
   border-radius: 8px;
   background: #fff;
   color: inherit;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 800;
   text-align: left;
   cursor: pointer;
@@ -878,8 +879,8 @@ select:focus {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border: 2px solid #b8c8bf;
   border-radius: 8px;
   background: #fff;
@@ -894,14 +895,43 @@ select:focus {
   color: #fff;
 }
 
-.workflow-sorting-item .code {
+.workflow-product-code {
   font-family: Consolas, "Courier New", monospace;
-  font-size: 13px;
+  font-size: 16px;
   font-weight: 950;
+}
+
+.workflow-product-name {
+  font-size: 15px;
+  font-weight: 950;
+  line-height: 1.25;
+}
+
+.workflow-product-meta {
+  color: #41554c;
+  font-size: 13px;
+  font-weight: 900;
 }
 
 .workflow-sorting-item strong {
   white-space: nowrap;
+}
+
+.workflow-product-qty {
+  display: inline-flex;
+  justify-content: center;
+  min-width: 56px;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: #e6f4ed;
+  color: #146c43;
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.workflow-product-state {
+  color: #52675d;
+  font-size: 12px;
 }
 
 .workflow-check-action {
