@@ -53,6 +53,7 @@ const expandedCompletionRows = new Set();
 const completionWorkflowState = {
   row: null,
   index: -1,
+  checkedItemKeys: new Set(),
 };
 const workflowAutoPrintedRows = new Set();
 
@@ -3262,6 +3263,24 @@ function workflowSortingCheck(row) {
   };
 }
 
+function workflowChecklistKey(item, index) {
+  const base = item.datasetRowId || item.id || item.variantCode || item.productCode || item.orderNumber || "item";
+  return `${String(base).replace(/[^a-zA-Z0-9_-]/g, "_")}-${index}`;
+}
+
+function workflowPhysicalCheck(row) {
+  const check = workflowSortingCheck(row);
+  const items = check.items || [];
+  const required = items.length > 0;
+  const checked = items.filter((item, index) => completionWorkflowState.checkedItemKeys.has(workflowChecklistKey(item, index))).length;
+  return {
+    required,
+    ok: !required || checked >= items.length,
+    checked,
+    total: items.length,
+  };
+}
+
 async function refreshWorkflowSortingCheck(row) {
   if (!row?.id || completionFlowKind(row) !== "sorting") return row;
   try {
@@ -3290,19 +3309,24 @@ async function refreshWorkflowSortingCheck(row) {
 
 function workflowSortingCheckHtml(row) {
   const check = workflowSortingCheck(row);
+  const physicalCheck = workflowPhysicalCheck(row);
   const itemRows = check.items.length
     ? check.items
-        .map((item) => {
+        .map((item, itemIndex) => {
+          const checkKey = workflowChecklistKey(item, itemIndex);
+          const checked = completionWorkflowState.checkedItemKeys.has(checkKey);
           const remaining = Math.max(0, Math.trunc(toNumber(item.remaining, 0)));
           const initial = Math.max(0, Math.trunc(toNumber(item.initialQuantity, item.remaining || 0)));
           return `
-            <div class="workflow-sorting-item ${remaining > 0 ? "pending" : "done"}">
+            <button type="button" class="workflow-sorting-item ${remaining > 0 ? "pending" : "done"} ${checked ? "checked" : ""}" data-action="workflow-check-item" data-check-key="${escapeHtml(checkKey)}">
+              <span class="workflow-check-box" aria-hidden="true">${checked ? "OK" : ""}</span>
               <span class="code">${escapeHtml(item.variantCode || item.productCode || "-")}</span>
               <span>${escapeHtml(item.variant || "-")}</span>
               <span>${escapeHtml(item.productName || item.info || "")}</span>
               <strong>${escapeHtml(initial)} ks původně</strong>
               <strong>${escapeHtml(remaining)} zbývá</strong>
-            </div>
+              <strong class="workflow-check-action">${checked ? "Zkontrolováno" : "Klik = zkontrolovat"}</strong>
+            </button>
           `;
         })
         .join("")
@@ -3320,6 +3344,14 @@ function workflowSortingCheckHtml(row) {
               <span>${escapeHtml(check.initialTotal)} ks původně</span>
               <span>${escapeHtml(check.remainingTotal)} ks zbývá</span>
               <span>${escapeHtml(check.items.length)} položek</span>
+            </div>`
+          : ""
+      }
+      ${
+        physicalCheck.required
+          ? `<div class="workflow-physical-check ${physicalCheck.ok ? "ok" : "warning"}">
+              <strong>Fyzická kontrola položek: ${escapeHtml(physicalCheck.checked)} / ${escapeHtml(physicalCheck.total)}</strong>
+              <span>${physicalCheck.ok ? "Kolegyně odkontrolovala všechny položky v boxu." : "Před uložením OK odklikni každou položku, kterou fyzicky vidíš v boxu."}</span>
             </div>`
           : ""
       }
@@ -3390,6 +3422,10 @@ function renderWorkflow() {
   ].forEach((button) => {
     button.disabled = disabled;
   });
+  const physicalCheck = workflowPhysicalCheck(row);
+  if (els.workflowSaveOk) {
+    els.workflowSaveOk.disabled = disabled || (physicalCheck.required && !physicalCheck.ok);
+  }
 }
 
 function selectWorkflowRow(row, message = "", tone = "success") {
@@ -3397,6 +3433,7 @@ function selectWorkflowRow(row, message = "", tone = "success") {
   const sorted = workflowRowsSorted();
   completionWorkflowState.row = row;
   completionWorkflowState.index = sorted.findIndex((entry) => entry.id === row.id);
+  completionWorkflowState.checkedItemKeys = new Set();
   renderWorkflow();
   if (message) setWorkflowMessage(message, tone);
 }
@@ -3452,6 +3489,14 @@ async function saveWorkflowAction(action) {
   const row = completionWorkflowState.row;
   if (!row) return null;
   const sortingCheck = workflowSortingCheck(row);
+  const physicalCheck = workflowPhysicalCheck(row);
+  if (action === "ok" && physicalCheck.required && !physicalCheck.ok) {
+    setWorkflowMessage(
+      `Nejdřív fyzicky odkontroluj položky v boxu: ${physicalCheck.checked}/${physicalCheck.total}. Teprve potom půjde uložit OK.`,
+      "warning"
+    );
+    return null;
+  }
   if (action === "ok" && sortingCheck.requiresSorting && !sortingCheck.ok) {
     const confirmed = window.confirm(
       `${sortingCheck.label}: ${sortingCheck.message}\n\nOpravdu i přesto uložit box jako OK? Obvykle se v tomhle stavu dává Error.`
@@ -4450,6 +4495,25 @@ els.labelCacheBatch?.addEventListener("click", runLabelCacheBatch);
 els.dpdDryRun.addEventListener("click", runDpdDryRun);
 els.dpdSend.addEventListener("click", runDpdSend);
 els.printAgentTest?.addEventListener("click", testPrintAgent);
+els.workflowItems?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-action='workflow-check-item']");
+  if (!button || !els.workflowItems.contains(button)) return;
+  const key = button.dataset.checkKey;
+  if (!key) return;
+  if (completionWorkflowState.checkedItemKeys.has(key)) {
+    completionWorkflowState.checkedItemKeys.delete(key);
+  } else {
+    completionWorkflowState.checkedItemKeys.add(key);
+  }
+  renderWorkflow();
+  const physicalCheck = workflowPhysicalCheck(completionWorkflowState.row);
+  setWorkflowMessage(
+    physicalCheck.ok
+      ? "Všechny položky v boxu jsou fyzicky odkontrolované. Teď můžeš uložit OK."
+      : `Odkontrolováno ${physicalCheck.checked}/${physicalCheck.total} položek v boxu.`,
+    physicalCheck.ok ? "success" : "neutral"
+  );
+});
 
 checkAuth();
 
