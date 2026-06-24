@@ -1599,12 +1599,36 @@ function paymentCheckKind(row) {
   return normalize(row?.paymentCheckStatus || "");
 }
 
+function completionRowIsCod(row) {
+  const status = paymentCheckKind(row);
+  const text = normalize(
+    [
+      row?.paymentMethod,
+      row?.paidStatus,
+      row?.completionStatus,
+      row?.shippingMethod,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  );
+  return (
+    status === "cod" ||
+    toNumber(row?.codAmount, 0) > 0 ||
+    text.includes("dobirk") ||
+    text.includes("dobierk") ||
+    text.includes("na dobierku") ||
+    text.includes("pri prevzati") ||
+    text.includes("cash on delivery") ||
+    /\bcod\b/.test(text)
+  );
+}
+
 function paymentCheckLabel(row) {
   const status = paymentCheckKind(row);
-  if (status === "paid") return "Zaplaceno";
-  if (status === "cod") return "Dobírka";
-  if (status === "unpaid") return "Nezaplaceno";
   if (status === "storno") return "STORNO";
+  if (completionRowIsCod(row)) return "Dobírka";
+  if (status === "paid") return "Zaplaceno";
+  if (status === "unpaid") return "Nezaplaceno";
   if (status === "missing") return "Platba nezjištěna";
   if (status === "unknown") return "Platba nejasná";
   return "";
@@ -1612,9 +1636,9 @@ function paymentCheckLabel(row) {
 
 function paymentCheckTone(row) {
   const status = paymentCheckKind(row);
-  if (status === "paid" || status === "cod") return "ok";
-  if (status === "unpaid" || status === "missing" || status === "unknown") return "warning";
   if (status === "storno") return "danger";
+  if (status === "paid" || completionRowIsCod(row)) return "ok";
+  if (status === "unpaid" || status === "missing" || status === "unknown") return "warning";
   return "neutral";
 }
 
@@ -2330,7 +2354,7 @@ function completionStatus(row) {
   if (text.includes("storno")) return { label: "STORNO", tone: "danger" };
   if (text.includes("error") || text.includes("chyba")) return { label: "CHYBA", tone: "danger" };
   if (text.includes("label printed") || text.includes("stit")) return { label: "STITek", tone: "ok" };
-  if (normalize(row.paidStatus).includes("nezaplaceno")) return { label: "NEZAPLACENO", tone: "warning" };
+  if (!completionRowIsCod(row) && normalize(row.paidStatus).includes("nezaplaceno")) return { label: "NEZAPLACENO", tone: "warning" };
   if (row.completionStatus) return { label: row.completionStatus, tone: "neutral" };
   return { label: "čeká", tone: "neutral" };
 }
@@ -2548,7 +2572,7 @@ function completionMainBadges(row, status) {
   }
   const paymentBadge = paymentCheckHtml(row);
   if (paymentBadge) badges.push(paymentBadge);
-  if (normalize(row.paidStatus).includes("nezaplaceno") || normalize(row.completionStatus).includes("nezaplaceno")) {
+  if (!completionRowIsCod(row) && (normalize(row.paidStatus).includes("nezaplaceno") || normalize(row.completionStatus).includes("nezaplaceno"))) {
     badges.push(`<span class="completion-type-badge payment-warning">nezapl.</span>`);
   }
   return badges.join("");
@@ -2971,6 +2995,7 @@ function workflowAutoPrintKey(row) {
 }
 
 function workflowIsUnpaid(row) {
+  if (completionRowIsCod(row)) return false;
   const paymentStatus = paymentCheckKind(row);
   if (paymentStatus === "unpaid" || paymentStatus === "missing" || paymentStatus === "unknown") return true;
   if (paymentStatus === "paid" || paymentStatus === "cod" || paymentStatus === "storno") return false;

@@ -1584,7 +1584,8 @@ def payment_row_value(row, key):
 
 def classify_excel_payment_status(row):
     payment_method = payment_row_value(row, "payment_method")
-    if payment_method_is_cod(payment_method):
+    cod_amount = payment_row_value(row, "cod_amount") or payment_row_value(row, "codAmount")
+    if payment_method_is_cod(payment_method) or amount_is_positive(cod_amount):
         return {
             "status": "cod",
             "paid": "cod",
@@ -1718,7 +1719,7 @@ def update_completion_payment_checks(records, date_range, errors=None, shop_resu
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
-                SELECT cr.id, cr.shop_code, cr.order_number, cr.payment_method,
+                SELECT cr.id, cr.shop_code, cr.order_number, cr.payment_method, cr.cod_amount,
                        cr.paid_status, cr.completion_status, cr.packeta_status,
                        cr.payment_check_status, cr.payment_check_message,
                        cr.payment_check_source_status, cr.payment_check_paid,
@@ -1739,9 +1740,15 @@ def update_completion_payment_checks(records, date_range, errors=None, shop_resu
                 record = records.get(key)
                 if record:
                     status = record.get("paymentStatus") or "unknown"
-                    message = payment_check_message(status, record=record, lookback_days=lookback_days)
+                    if status != "storno" and (
+                        payment_method_is_cod(row.get("payment_method")) or amount_is_positive(row.get("cod_amount"))
+                    ):
+                        status = "cod"
+                        message = payment_check_message(status, lookback_days=lookback_days)
+                    else:
+                        message = payment_check_message(status, record=record, lookback_days=lookback_days)
                     source_status = record.get("statusName", "")
-                    paid = record.get("paid", "")
+                    paid = "cod" if status == "cod" else record.get("paid", "")
                     order_date = record.get("date", "")
                     package_number = record.get("packageNumber", "")
                 else:
