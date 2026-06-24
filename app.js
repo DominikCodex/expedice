@@ -3164,6 +3164,170 @@ function workflowCountryText(row) {
   return "ČESKÁ REPUBLIKA";
 }
 
+function workflowSortingItems(row) {
+  if (Array.isArray(row?.workflowSortingItems)) return row.workflowSortingItems;
+  const orderNumber = normalize(row?.orderNumber || "").trim();
+  if (!orderNumber) return [];
+  return (state.items || []).filter((item) => normalize(item.orderNumber || "").trim() === orderNumber);
+}
+
+function workflowSortingCheck(row) {
+  if (!row) {
+    return {
+      requiresSorting: false,
+      ok: false,
+      tone: "neutral",
+      label: "Čekám na box",
+      message: "Po načtení boxu zkontroluji souvislost s roztříděním.",
+      items: [],
+      remainingTotal: 0,
+      initialTotal: 0,
+    };
+  }
+
+  const flowKind = completionFlowKind(row);
+  if (flowKind === "stock") {
+    return {
+      requiresSorting: false,
+      ok: true,
+      tone: "ok",
+      label: "Samostatná skladovka",
+      message: "Kód pořadí je pod 2, roztřídění z dodavatelských balíků se nevyžaduje.",
+      items: [],
+      remainingTotal: 0,
+      initialTotal: 0,
+    };
+  }
+
+  if (flowKind === "unknown") {
+    return {
+      requiresSorting: false,
+      ok: false,
+      tone: "warning",
+      label: "Neurčený typ práce",
+      message: "Kód pořadí není čitelný, ověř prosím ručně, zda má objednávka jít přes roztřídění.",
+      items: [],
+      remainingTotal: 0,
+      initialTotal: 0,
+    };
+  }
+
+  const items = workflowSortingItems(row);
+  const sortingDataset = row.workflowSortingDataset || sortingState.dataset;
+  if (row.workflowSortingError) {
+    return {
+      requiresSorting: true,
+      ok: false,
+      tone: "warning",
+      label: "Roztřídění nelze ověřit",
+      message: `Aktuální stav z databáze se nepodařilo načíst: ${row.workflowSortingError}`,
+      items,
+      remainingTotal: items.reduce((total, item) => total + Math.max(0, Math.trunc(toNumber(item.remaining, 0))), 0),
+      initialTotal: items.reduce((total, item) => total + Math.max(0, Math.trunc(toNumber(item.initialQuantity, item.remaining || 0))), 0),
+    };
+  }
+  if (!items.length) {
+    return {
+      requiresSorting: true,
+      ok: false,
+      tone: "danger",
+      label: "Roztřídění nenalezeno",
+      message: sortingDataset
+        ? "V aktivní dávce roztřídění nejsou položky pro tuto objednávku."
+        : "Pro tento expediční den není načtená aktivní dávka roztřídění.",
+      items: [],
+      remainingTotal: 0,
+      initialTotal: 0,
+    };
+  }
+
+  const remainingTotal = items.reduce((total, item) => total + Math.max(0, Math.trunc(toNumber(item.remaining, 0))), 0);
+  const initialTotal = items.reduce((total, item) => {
+    const initial = toNumber(item.initialQuantity, NaN);
+    const fallback = toNumber(item.remaining, 0);
+    return total + Math.max(0, Math.trunc(Number.isFinite(initial) ? initial : fallback));
+  }, 0);
+  const ok = remainingTotal === 0;
+  return {
+    requiresSorting: true,
+    ok,
+    tone: ok ? "ok" : "danger",
+    label: ok ? "Roztřídění OK" : "Roztřídění není hotové",
+    message: ok
+      ? "Všechny položky objednávky jsou v roztřídění odepsané."
+      : `Z roztřídění ještě zbývá odepsat ${remainingTotal} ks. Dej jako errorku a řeš individuálně.`,
+    items,
+    remainingTotal,
+    initialTotal,
+  };
+}
+
+async function refreshWorkflowSortingCheck(row) {
+  if (!row?.id || completionFlowKind(row) !== "sorting") return row;
+  try {
+    const data = await fetchJson(`/api/completion/rows/${encodeURIComponent(row.id)}/sorting-check`);
+    const updatedRow = {
+      ...row,
+      workflowSortingItems: (data.rows || []).map(sortingRowToItem),
+      workflowSortingDataset: data.dataset || null,
+      workflowSortingError: "",
+      workflowSortingCheckedAt: new Date().toISOString(),
+    };
+    updateCompletionRowInState(updatedRow);
+    return updatedRow;
+  } catch (error) {
+    const updatedRow = {
+      ...row,
+      workflowSortingItems: workflowSortingItems(row),
+      workflowSortingDataset: sortingState.dataset || null,
+      workflowSortingError: error.message,
+      workflowSortingCheckedAt: new Date().toISOString(),
+    };
+    updateCompletionRowInState(updatedRow);
+    return updatedRow;
+  }
+}
+
+function workflowSortingCheckHtml(row) {
+  const check = workflowSortingCheck(row);
+  const itemRows = check.items.length
+    ? check.items
+        .map((item) => {
+          const remaining = Math.max(0, Math.trunc(toNumber(item.remaining, 0)));
+          const initial = Math.max(0, Math.trunc(toNumber(item.initialQuantity, item.remaining || 0)));
+          return `
+            <div class="workflow-sorting-item ${remaining > 0 ? "pending" : "done"}">
+              <span class="code">${escapeHtml(item.variantCode || item.productCode || "-")}</span>
+              <span>${escapeHtml(item.variant || "-")}</span>
+              <span>${escapeHtml(item.productName || item.info || "")}</span>
+              <strong>${escapeHtml(initial)} ks původně</strong>
+              <strong>${escapeHtml(remaining)} zbývá</strong>
+            </div>
+          `;
+        })
+        .join("")
+    : `<div class="workflow-sorting-empty">Žádné položky roztřídění k zobrazení.</div>`;
+
+  return `
+    <section class="workflow-sorting-check ${check.tone}">
+      <div class="workflow-sorting-head">
+        <strong>${escapeHtml(check.label)}</strong>
+        <span>${escapeHtml(check.message)}</span>
+      </div>
+      ${
+        check.items.length
+          ? `<div class="workflow-sorting-totals">
+              <span>${escapeHtml(check.initialTotal)} ks původně</span>
+              <span>${escapeHtml(check.remainingTotal)} ks zbývá</span>
+              <span>${escapeHtml(check.items.length)} položek</span>
+            </div>`
+          : ""
+      }
+      <div class="workflow-sorting-list">${itemRows}</div>
+    </section>
+  `;
+}
+
 function workflowItemsHtml(row) {
   if (!row) return "Po načtení boxu zobrazím obsah objednávky.";
   const quantity = row.quantity || "";
@@ -3178,6 +3342,7 @@ function workflowItemsHtml(row) {
     <strong>${escapeHtml(parts.join(" | ") || "Objednávka")}</strong>
     ${note}
     <small>${escapeHtml(row.email || "")}${row.phone ? ` | ${escapeHtml(row.phone)}` : ""}</small>
+    ${workflowSortingCheckHtml(row)}
   `;
 }
 
@@ -3206,8 +3371,10 @@ function renderWorkflow() {
     .filter(Boolean)
     .join(" | ");
   const warnings = [];
+  const sortingCheck = workflowSortingCheck(row);
   if (paymentWarning) warnings.push(`${paymentCheckLabel(row)}: ${row.paymentCheckMessage || "zkontroluj objednávku před odesláním"}`);
   if (isDpd) warnings.push("Pozor: Doručení přes DPD = jiný svoz");
+  if (sortingCheck.requiresSorting && !sortingCheck.ok) warnings.push(sortingCheck.message);
   els.workflowWarning.classList.toggle("hidden", !warnings.length);
   els.workflowWarning.textContent = warnings.join(" | ");
 
@@ -3225,13 +3392,13 @@ function renderWorkflow() {
   });
 }
 
-function selectWorkflowRow(row, message = "") {
+function selectWorkflowRow(row, message = "", tone = "success") {
   if (!row) return;
   const sorted = workflowRowsSorted();
   completionWorkflowState.row = row;
   completionWorkflowState.index = sorted.findIndex((entry) => entry.id === row.id);
   renderWorkflow();
-  if (message) setWorkflowMessage(message, "success");
+  if (message) setWorkflowMessage(message, tone);
 }
 
 async function scanWorkflowBox() {
@@ -3244,12 +3411,23 @@ async function scanWorkflowBox() {
     setWorkflowMessage("Nejdřív načti kompletaci pro expediční den.", "warning");
     return;
   }
-  const row = findWorkflowRowByNumber(number);
+  let row = findWorkflowRowByNumber(number);
   if (!row) {
     setWorkflowMessage(`Expediční číslo ${number} v načtené kompletaci nevidím.`, "error");
     return;
   }
-  selectWorkflowRow(row, `Načten box X${number}S: objednávka ${row.orderNumber || "-"}.`);
+  if (completionFlowKind(row) === "sorting") {
+    setWorkflowMessage("Ověřuji aktuální stav roztřídění pro tento box...", "neutral");
+    row = await refreshWorkflowSortingCheck(row);
+  }
+  const sortingCheck = workflowSortingCheck(row);
+  const sortingSuffix =
+    sortingCheck.requiresSorting && !sortingCheck.ok ? ` ${sortingCheck.label}: ${sortingCheck.remainingTotal} ks zbývá.` : "";
+  selectWorkflowRow(
+    row,
+    `Načten box X${number}S: objednávka ${row.orderNumber || "-"}.${sortingSuffix}`,
+    sortingCheck.requiresSorting && !sortingCheck.ok ? "warning" : "success"
+  );
   els.workflowBoxCode.value = "";
   await autoPrintWorkflowDocuments(row, number);
 }
@@ -3273,6 +3451,16 @@ function updateCompletionRowInState(row) {
 async function saveWorkflowAction(action) {
   const row = completionWorkflowState.row;
   if (!row) return null;
+  const sortingCheck = workflowSortingCheck(row);
+  if (action === "ok" && sortingCheck.requiresSorting && !sortingCheck.ok) {
+    const confirmed = window.confirm(
+      `${sortingCheck.label}: ${sortingCheck.message}\n\nOpravdu i přesto uložit box jako OK? Obvykle se v tomhle stavu dává Error.`
+    );
+    if (!confirmed) {
+      setWorkflowMessage("Uložení OK zrušeno. Pokud položky nesedí, použij tlačítko Error.", "warning");
+      return null;
+    }
+  }
   try {
     const data = await fetchJson(`/api/completion/rows/${row.id}/workflow`, {
       method: "POST",

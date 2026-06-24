@@ -4790,6 +4790,72 @@ def labels_cache_batch():
     )
 
 
+@app.route("/api/completion/rows/<int:row_id>/sorting-check")
+def completion_row_sorting_check(row_id):
+    auth_error = require_upload_token()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT cr.*, d.expedition_day_id
+                FROM completion_rows cr
+                JOIN datasets d ON d.id = cr.dataset_id
+                WHERE cr.id = %s
+                """,
+                (row_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "Řádek kompletace nebyl nalezen."}), 404
+
+            expedition_day_id = row.get("expedition_day_id")
+            active_sorting = None
+            if expedition_day_id:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM datasets
+                    WHERE expedition_day_id = %s
+                      AND dataset_kind = 'sorting'
+                      AND status = 'active'
+                      AND deleted_at IS NULL
+                    ORDER BY uploaded_at DESC, id DESC
+                    LIMIT 1
+                    """,
+                    (expedition_day_id,),
+                )
+                active_sorting = cur.fetchone()
+
+            sorting_rows = []
+            if active_sorting:
+                cur.execute(
+                    """
+                    SELECT *
+                    FROM dataset_rows
+                    WHERE dataset_id = %s
+                      AND order_number = %s
+                    ORDER BY row_number NULLS LAST, id
+                    """,
+                    (active_sorting["id"], row["order_number"]),
+                )
+                sorting_rows = [row_to_api(item) for item in cur.fetchall()]
+
+    remaining_total = sum(max(0, int_from_text(item.get("remaining"))) for item in sorting_rows)
+    return jsonify(
+        {
+            "ok": bool(active_sorting) and bool(sorting_rows) and remaining_total == 0,
+            "dataset": dataset_summary(active_sorting) if active_sorting else None,
+            "rows": sorting_rows,
+            "remainingTotal": remaining_total,
+            "orderNumber": clean_text(row.get("order_number")),
+        }
+    )
+
+
 @app.route("/api/completion/rows/<int:row_id>/label")
 def completion_row_label(row_id):
     auth_error = require_upload_token()

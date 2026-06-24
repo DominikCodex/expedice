@@ -773,6 +773,111 @@ select:focus {
   font-weight: 800;
 }
 
+.workflow-sorting-check {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 10px;
+  border: 2px solid var(--line);
+  border-radius: 10px;
+  background: #f8faf8;
+}
+
+.workflow-sorting-check.ok {
+  border-color: #9fd4b7;
+  background: #e9f8ef;
+}
+
+.workflow-sorting-check.warning {
+  border-color: #eccb8d;
+  background: #fff3d9;
+}
+
+.workflow-sorting-check.danger {
+  border-color: #d77d7d;
+  background: #fff0f0;
+}
+
+.workflow-sorting-head {
+  display: grid;
+  gap: 3px;
+}
+
+.workflow-sorting-head strong {
+  color: #11241c;
+  font-size: 20px;
+  font-weight: 950;
+}
+
+.workflow-sorting-head span {
+  color: #35443e;
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.workflow-sorting-totals {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workflow-sorting-totals span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 7px;
+  border: 1px solid #cbd9d2;
+  border-radius: 999px;
+  background: #fff;
+  color: #23332d;
+  font-size: 12px;
+  font-weight: 950;
+}
+
+.workflow-sorting-list {
+  display: grid;
+  gap: 5px;
+}
+
+.workflow-sorting-item {
+  display: grid;
+  grid-template-columns: minmax(125px, 0.9fr) minmax(95px, 0.7fr) minmax(220px, 1.4fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  padding: 7px 8px;
+  border: 1px solid #dfe8e3;
+  border-left: 5px solid #3a9d67;
+  border-radius: 8px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.workflow-sorting-item.pending {
+  border-left-color: #c94444;
+  background: #fff8f8;
+}
+
+.workflow-sorting-item .code {
+  font-family: Consolas, "Courier New", monospace;
+  font-size: 13px;
+  font-weight: 950;
+}
+
+.workflow-sorting-item strong {
+  white-space: nowrap;
+}
+
+.workflow-sorting-empty {
+  padding: 8px;
+  border: 1px dashed #d6dfda;
+  border-radius: 8px;
+  color: var(--muted);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 850;
+}
+
 .workflow-warning {
   padding: 10px 12px;
   color: #fff;
