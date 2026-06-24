@@ -42,6 +42,7 @@ const completionState = {
 
 const completionFilters = {
   search: "",
+  flow: "",
   carrier: "",
   status: "",
   shop: "",
@@ -149,6 +150,7 @@ const els = {
   completionBody: document.getElementById("completion-body"),
   completionRowCount: document.getElementById("completion-row-count"),
   completionFilterSearch: document.getElementById("completion-filter-search"),
+  completionFilterFlow: document.getElementById("completion-filter-flow"),
   completionFilterCarrier: document.getElementById("completion-filter-carrier"),
   completionFilterStatus: document.getElementById("completion-filter-status"),
   completionFilterShop: document.getElementById("completion-filter-shop"),
@@ -1609,6 +1611,45 @@ function paymentCheckTone(row) {
   return "neutral";
 }
 
+function completionFlowValue(row) {
+  return toNumber(String(row?.expeditionOrderCode || "").replace(",", "."), NaN);
+}
+
+function completionFlowKind(row) {
+  const value = completionFlowValue(row);
+  if (!Number.isFinite(value)) return "unknown";
+  return value < 2 ? "stock" : "sorting";
+}
+
+function completionFlowLabel(kind) {
+  if (kind === "stock") return "Samostatné skladovky";
+  if (kind === "sorting") return "Z roztřídění";
+  if (kind === "unknown") return "Neurčeno";
+  return "Všechny typy";
+}
+
+function completionFlowCounts(rows) {
+  return rows.reduce(
+    (acc, row) => {
+      const kind = completionFlowKind(row);
+      acc[kind] = (acc[kind] || 0) + 1;
+      acc.all += 1;
+      return acc;
+    },
+    { all: 0, stock: 0, sorting: 0, unknown: 0 }
+  );
+}
+
+function updateCompletionFlowFilterOptions(rows) {
+  if (!els.completionFilterFlow) return;
+  const counts = completionFlowCounts(rows || []);
+  Array.from(els.completionFilterFlow.options).forEach((option) => {
+    const kind = option.value || "all";
+    const count = counts[kind] || 0;
+    option.textContent = `${completionFlowLabel(option.value)} (${count})`;
+  });
+}
+
 function paymentCheckHtml(row) {
   const label = paymentCheckLabel(row);
   if (!label) return "";
@@ -2288,6 +2329,7 @@ function completionStatus(row) {
 }
 
 function renderCompletionSummary(rows) {
+  updateCompletionFlowFilterOptions(rows);
   const orders = new Set(rows.map((row) => row.orderNumber).filter(Boolean)).size;
   const pieces = rows.reduce((total, row) => total + Math.max(0, Math.trunc(toNumber(row.quantity, 0))), 0);
   const labels = rows.filter((row) => normalize(row.labelPrinted).includes("label printed")).length;
@@ -2519,6 +2561,9 @@ function completionSearchText(row) {
 
 function completionMatchesFilters(row) {
   const status = completionStatus(row);
+  if (completionFilters.flow && completionFlowKind(row) !== completionFilters.flow) {
+    return false;
+  }
   if (completionFilters.search && !completionSearchText(row).includes(normalize(completionFilters.search))) {
     return false;
   }
@@ -4018,6 +4063,10 @@ els.completionFilterCarrier?.addEventListener("change", () => {
   completionFilters.carrier = els.completionFilterCarrier.value;
   renderCompletion();
 });
+els.completionFilterFlow?.addEventListener("change", () => {
+  completionFilters.flow = els.completionFilterFlow.value;
+  renderCompletion();
+});
 els.completionFilterStatus?.addEventListener("change", () => {
   completionFilters.status = els.completionFilterStatus.value;
   renderCompletion();
@@ -4028,10 +4077,12 @@ els.completionFilterShop?.addEventListener("change", () => {
 });
 els.completionFilterReset?.addEventListener("click", () => {
   completionFilters.search = "";
+  completionFilters.flow = "";
   completionFilters.carrier = "";
   completionFilters.status = "";
   completionFilters.shop = "";
   els.completionFilterSearch.value = "";
+  if (els.completionFilterFlow) els.completionFilterFlow.value = "";
   els.completionFilterCarrier.value = "";
   els.completionFilterStatus.value = "";
   els.completionFilterShop.value = "";

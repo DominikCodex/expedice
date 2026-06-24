@@ -282,6 +282,15 @@
                 <input id="completion-filter-search" autocomplete="off" placeholder="Objednávka, zákazník, adresa, telefon..." />
               </label>
               <label class="field">
+                <span>Typ práce</span>
+                <select id="completion-filter-flow">
+                  <option value="">Všechny typy</option>
+                  <option value="stock">Samostatné skladovky</option>
+                  <option value="sorting">Z roztřídění</option>
+                  <option value="unknown">Neurčeno</option>
+                </select>
+              </label>
+              <label class="field">
                 <span>Dopravce</span>
                 <select id="completion-filter-carrier">
                   <option value="">Všichni dopravci</option>
