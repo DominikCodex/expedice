@@ -3280,16 +3280,153 @@ function normalizeWorkflowPhysicalItem(item, index, fallbackRow = null) {
       physicalOnly: true,
     };
   }
+  const color = item.color || item.colour || item.barva || item["Barva"] || "";
+  const size = item.size || item.velikost || item["Velikost"] || "";
+  const variant = item.variant || item.variantName || item.varianta || [color, size].filter(Boolean).join(" / ");
   return {
     ...item,
     datasetRowId: item.datasetRowId || item.id || `physical-${fallbackRow?.id || fallbackRow?.orderNumber || "row"}-${index}`,
-    variantCode: item.variantCode || item.productCode || item.code || fallbackRow?.orderNumber || "-",
-    variant: item.variant || item.variantName || item.size || "",
-    productName: item.productName || item.name || item.title || item.info || item.description || fallbackRow?.note || "Položka objednávky",
-    initialQuantity: item.initialQuantity || item.quantity || item.count || fallbackRow?.quantity || 1,
+    variantCode: item.variantCode || item.productCode || item.sku || item.code || item.kod || item["Kód"] || fallbackRow?.orderNumber || "-",
+    variant,
+    color,
+    size,
+    productName:
+      item.productName ||
+      item.product_name ||
+      item.name ||
+      item.title ||
+      item.nazev ||
+      item["Název"] ||
+      item.info ||
+      item.description ||
+      fallbackRow?.note ||
+      "Položka objednávky",
+    initialQuantity: item.initialQuantity || item.quantity || item.quantityText || item.mnozstvi || item["Množství"] || item.count || fallbackRow?.quantity || 1,
     remaining: item.remaining ?? null,
     physicalOnly: Boolean(item.physicalOnly),
   };
+}
+
+function normalizedObjectValue(object, keys) {
+  if (!object || typeof object !== "object") return "";
+  for (const key of keys) {
+    if (object[key] !== undefined && object[key] !== null && String(object[key]).trim() !== "") return object[key];
+  }
+  const wanted = new Set(keys.map((key) => normalize(String(key)).replace(/[^a-z0-9]/g, "")));
+  for (const [key, value] of Object.entries(object)) {
+    const normalizedKey = normalize(String(key)).replace(/[^a-z0-9]/g, "");
+    if (wanted.has(normalizedKey) && value !== undefined && value !== null && String(value).trim() !== "") return value;
+  }
+  return "";
+}
+
+function parseCompletionProductLine(line, row, index) {
+  const cleanLine = String(line || "")
+    .replace(/^ERROR:\s*/i, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!cleanLine) return null;
+  const match =
+    cleanLine.match(/^([A-Z0-9][A-Z0-9-]{2,})\s+(.+?)\s+(\d+)\s*x\s+(.+)$/i) ||
+    cleanLine.match(/^([A-Z0-9][A-Z0-9-]{2,})\s+(.+?)\s+(\d+)\s*ks\s+(.+)$/i);
+  if (!match) return null;
+  const variantPart = match[2].trim();
+  const variantParts = variantPart.split("/").map((part) => part.trim()).filter(Boolean);
+  return normalizeWorkflowPhysicalItem(
+    {
+      datasetRowId: `parsed-${row.id || row.orderNumber || "row"}-${index}`,
+      variantCode: match[1].trim(),
+      color: variantParts[0] || "",
+      size: variantParts.slice(1).join(" / "),
+      variant: variantPart,
+      initialQuantity: match[3],
+      productName: match[4].trim(),
+      physicalOnly: true,
+    },
+    index,
+    row
+  );
+}
+
+function completionTextProductItems(row) {
+  const values = [];
+  const raw = row?.raw && typeof row.raw === "object" ? row.raw : {};
+  Object.values(raw).forEach((value) => {
+    if (typeof value === "string") values.push(value);
+  });
+  (row?.cells || []).forEach((value) => {
+    if (typeof value === "string") values.push(value);
+  });
+
+  const items = [];
+  values.forEach((value) => {
+    String(value)
+      .split(/\r?\n| {3,}|\t+/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .forEach((line) => {
+        const parsed = parseCompletionProductLine(line, row, items.length);
+        if (parsed) items.push(parsed);
+      });
+  });
+  return items;
+}
+
+function completionStructuredProductItems(row) {
+  const raw = row?.raw && typeof row.raw === "object" ? row.raw : {};
+  const arrayKeys = ["items", "products", "productItems", "product_items", "orderProducts", "order_items", "goods", "zbozi", "zboží"];
+  for (const key of arrayKeys) {
+    if (Array.isArray(raw[key]) && raw[key].length) {
+      return raw[key].map((item, index) => normalizeWorkflowPhysicalItem(item, index, row));
+    }
+  }
+
+  const productName = normalizedObjectValue(raw, ["productName", "product_name", "name", "title", "nazev", "název", "Název", "zbozi", "zboží", "polozka", "položka"]);
+  const productCode = normalizedObjectValue(raw, ["variantCode", "productCode", "sku", "code", "kod", "kód", "Kód", "Označení varianty", "Kod produktu", "Kód produktu"]);
+  if (!productName && !productCode) return [];
+
+  return [
+    normalizeWorkflowPhysicalItem(
+      {
+        datasetRowId: `structured-${row.id || row.orderNumber || "row"}`,
+        variantCode: productCode,
+        color: normalizedObjectValue(raw, ["color", "colour", "barva", "Barva"]),
+        size: normalizedObjectValue(raw, ["size", "velikost", "Velikost"]),
+        variant: normalizedObjectValue(raw, ["variant", "variantName", "varianta", "Varianta"]),
+        productName,
+        initialQuantity: normalizedObjectValue(raw, ["quantity", "quantityText", "mnozstvi", "množství", "Množství", "pocet", "počet", "ks"]) || row.quantity || 1,
+        physicalOnly: true,
+      },
+      0,
+      row
+    ),
+  ];
+}
+
+function completionRowsForWorkflowOrder(row) {
+  if (!row?.orderNumber) return row ? [row] : [];
+  return completionState.rows.filter(
+    (candidate) =>
+      String(candidate.datasetId || "") === String(row.datasetId || "") &&
+      String(candidate.orderNumber || "") === String(row.orderNumber || "")
+  );
+}
+
+function completionProductItemsForOrder(row) {
+  const rows = completionRowsForWorkflowOrder(row);
+  const items = [];
+  rows.forEach((entry) => {
+    items.push(...completionStructuredProductItems(entry));
+    items.push(...completionTextProductItems(entry));
+  });
+
+  const seen = new Set();
+  return items.filter((item, index) => {
+    const key = [item.variantCode, item.productName, item.variant, item.initialQuantity].map((value) => normalize(String(value || ""))).join("|");
+    if (seen.has(key)) return false;
+    seen.add(key || `item-${index}`);
+    return true;
+  });
 }
 
 function workflowPhysicalItems(row) {
@@ -3299,9 +3436,9 @@ function workflowPhysicalItems(row) {
     return sortingCheck.items.map((item, index) => normalizeWorkflowPhysicalItem(item, index, row));
   }
 
-  const itemSources = [row.items, row.orderItems, row.products, row.productItems, row.completionItems].filter(Array.isArray);
-  if (itemSources.length && itemSources[0].length) {
-    return itemSources[0].map((item, index) => normalizeWorkflowPhysicalItem(item, index, row));
+  const completionItems = completionProductItemsForOrder(row);
+  if (completionItems.length) {
+    return completionItems;
   }
 
   const itemText =
