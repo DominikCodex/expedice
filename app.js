@@ -1370,7 +1370,7 @@ function renderLabelCacheResult(data) {
     <div class="section-head compact">
       <div>
         <p class="eyebrow">Serverová cache štítků</p>
-        <h2>Příprava štítků dávky</h2>
+        <h2>Příprava DPD štítků dávky</h2>
       </div>
       <div class="dry-run-counts">
         <span>${escapeHtml(data.readyCount || 0)} připraveno</span>
@@ -1379,7 +1379,7 @@ function renderLabelCacheResult(data) {
       </div>
     </div>
     <div class="dry-run-note">
-      Hotové štítky se uložily na server. Sken expedičního boxu už bude tisknout z cache bez volání API dopravce.
+      Hotové DPD štítky se uložily na server. Zásilkovna/Packeta je v tomto testu pouze přeskočená a nic se do ní neodesílá.
     </div>
     <div class="cache-result-list">
       ${errorHtml}
@@ -1396,9 +1396,9 @@ async function runLabelCacheBatch() {
   }
   if (
     !confirm(
-      `Připravit PDF štítky na server pro tuto konkrétní dávku?\n\n${datasetLabel(
+      `Připravit DPD PDF štítky na server pro tuto konkrétní dávku?\n\n${datasetLabel(
         completionState.dataset
-      )}\n\nSystém stáhne jen chybějící štítky. Už připravené štítky nepřepíše.`
+      )}\n\nSystém stáhne jen chybějící DPD štítky. Zásilkovna/Packeta se teď přeskočí a nic se neodešle.`
     )
   ) {
     return;
@@ -1406,18 +1406,18 @@ async function runLabelCacheBatch() {
 
   els.labelCacheBatch.disabled = true;
   hidePacketaDryRunResult();
-  setCompletionMessage("Připravuji štítky dávky na server...", "neutral");
+  setCompletionMessage("Připravuji DPD štítky dávky na server...", "neutral");
   try {
     const data = await fetchJson("/api/labels/cache-batch", {
       method: "POST",
-      body: JSON.stringify({ datasetId: completionState.dataset.id }),
+      body: JSON.stringify({ datasetId: completionState.dataset.id, carrier: "dpd" }),
     });
     (data.rows || []).forEach((row) => replaceCompletionRow(row));
     renderWorkflow();
     renderCompletion();
     renderLabelCacheResult(data);
     setCompletionMessage(
-      `Příprava štítků hotová: ${data.readyCount || 0} připraveno, ${data.skippedCount || 0} přeskočeno, ${
+      `Příprava DPD štítků hotová: ${data.readyCount || 0} připraveno, ${data.skippedCount || 0} přeskočeno, ${
         data.errorCount || 0
       } chyb.`,
       data.errorCount ? "warning" : "success"

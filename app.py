@@ -4608,14 +4608,195 @@ def update_completion_carrier_result(row_id, carrier, ok, status_text="", shipme
             return completion_row_to_api(cur.fetchone())
 
 
-@app.route("/api/completion/rows/<int:row_id>/send-carrier", methods=["POST"])
-def send_completion_row_carrier(row_id):
+def completion_label_number(row):
+    return clean_text(row.get("packetaShipmentId") or row.get("packeta_shipment_id") or "")
+
+
+def label_carrier_for_row(row, label_number=""):
+    delivery = delivery_info_from_row(row)
+    carrier = clean_text(row.get("deliveryCarrier") or delivery.get("carrier")).lower()
+    if carrier in {"dpd", "packeta"}:
+        return carrier
+    digits = "".join(char for char in clean_text(label_number) if char.isdigit())
+    if len(digits) == 14:
+        return "dpd"
+    if clean_text(label_number):
+        return "packeta"
+    return ""
+
+
+def ready_label_cache(row_id, carrier, label_number, include_content=False):
+    columns = "id, dataset_id, completion_row_id, carrier, label_number, status, error, fetched_at, pdf_size"
+    if include_content:
+        columns += ", pdf_content"
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"""
+                SELECT {columns}
+                FROM label_cache
+                WHERE completion_row_id = %s
+                  AND carrier = %s
+                  AND label_number = %s
+                  AND status = 'ready'
+                  AND pdf_content IS NOT NULL
+                ORDER BY fetched_at DESC
+                LIMIT 1
+                """,
+                (row_id, carrier, clean_text(label_number)),
+            )
+            return cur.fetchone()
+
+
+def save_label_cache_result(dataset_id, row_id, carrier, label_number, status, pdf_bytes=None, error=""):
+    pdf_size = len(pdf_bytes or b"")
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                INSERT INTO label_cache (
+                    dataset_id, completion_row_id, carrier, label_number, status,
+                    pdf_content, error, fetched_at, pdf_size, updated_at
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, NOW(), %s, NOW())
+                ON CONFLICT (completion_row_id, carrier, label_number)
+                DO UPDATE SET
+                    dataset_id = EXCLUDED.dataset_id,
+                    status = EXCLUDED.status,
+                    pdf_content = EXCLUDED.pdf_content,
+                    error = EXCLUDED.error,
+                    fetched_at = NOW(),
+                    pdf_size = EXCLUDED.pdf_size,
+                    updated_at = NOW()
+                """,
+                (
+                    dataset_id,
+                    row_id,
+                    carrier,
+                    clean_text(label_number),
+                    status,
+                    psycopg2.Binary(pdf_bytes) if pdf_bytes else None,
+                    clean_text(error)[:500],
+                    pdf_size,
+                ),
+            )
+            cur.execute(
+                """
+                UPDATE completion_rows
+                SET label_cache_status = %s,
+                    label_cache_error = %s,
+                    label_cache_fetched_at = NOW(),
+                    label_cache_size = %s
+                WHERE id = %s
+                RETURNING *
+                """,
+                (status, clean_text(error)[:500], pdf_size, row_id),
+            )
+            return completion_row_to_api(cur.fetchone())
+
+
+@app.route("/api/labels/cache-batch", methods=["POST"])
+def labels_cache_batch():
     auth_error = require_upload_token()
     if auth_error:
         return auth_error
 
     ensure_schema()
     data = request.get_json(silent=True) or {}
+    dataset_id = data.get("datasetId") or request.args.get("datasetId") or request.args.get("id")
+    carrier_filter = clean_text(data.get("carrier") or request.args.get("carrier") or "dpd").lower()
+    if carrier_filter not in {"dpd", "packeta", "all"}:
+        return jsonify({"error": "Unsupported carrier filter"}), 400
+    if not dataset_id:
+        return jsonify({"error": "datasetId is required"}), 400
+
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM datasets WHERE id = %s AND dataset_kind = 'completion'",
+                (dataset_id,),
+            )
+            dataset = cur.fetchone()
+            if not dataset:
+                return jsonify({"error": "Completion dataset not found"}), 404
+            cur.execute(
+                "SELECT * FROM completion_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
+                (dataset["id"],),
+            )
+            rows = [completion_row_to_api(row) for row in cur.fetchall()]
+
+    ready = []
+    skipped = []
+    errors = []
+    updated_rows = []
+
+    for row in rows:
+        row_id = row.get("id")
+        label_number = completion_label_number(row)
+        carrier = label_carrier_for_row(row, label_number)
+        base_item = {
+            "rowId": row_id,
+            "rowNumber": row.get("rowNumber"),
+            "orderNumber": row.get("orderNumber"),
+            "carrier": carrier,
+            "labelNumber": label_number,
+        }
+
+        if carrier_filter != "all" and carrier != carrier_filter:
+            skipped.append({**base_item, "reason": f"jiný dopravce ({carrier or 'neurčeno'})"})
+            continue
+        if not label_number:
+            skipped.append({**base_item, "reason": "chybí číslo štítku/zásilky"})
+            continue
+        if not carrier:
+            skipped.append({**base_item, "reason": "dopravce štítku nelze určit"})
+            continue
+        if ready_label_cache(row_id, carrier, label_number):
+            skipped.append({**base_item, "reason": "štítek už je v cache"})
+            continue
+
+        client_settings = carrier_client_settings(carrier, row)
+        if carrier == "dpd":
+            pdf_bytes, result = dpd_label_pdf(label_number, client_settings)
+        elif carrier == "packeta":
+            pdf_bytes, result = packeta_label_pdf(label_number, client_settings)
+        else:
+            pdf_bytes, result = None, {"ok": False, "error": "Nepodporovaný dopravce štítku"}
+
+        if pdf_bytes and result.get("ok"):
+            updated_row = save_label_cache_result(dataset["id"], row_id, carrier, label_number, "ready", pdf_bytes, "")
+            updated_rows.append(updated_row)
+            ready.append({**base_item, "size": len(pdf_bytes)})
+        else:
+            error = result.get("error") or "Stažení PDF štítku selhalo"
+            updated_row = save_label_cache_result(dataset["id"], row_id, carrier, label_number, "error", None, error)
+            updated_rows.append(updated_row)
+            errors.append({**base_item, "error": error, "httpStatus": result.get("httpStatus")})
+
+    return jsonify(
+        {
+            "ok": not errors,
+            "carrierFilter": carrier_filter,
+            "dataset": dataset_summary(dataset),
+            "rowsCount": len(rows),
+            "readyCount": len(ready),
+            "skippedCount": len(skipped),
+            "errorCount": len(errors),
+            "ready": ready,
+            "skipped": skipped,
+            "errors": errors,
+            "rows": updated_rows,
+        }
+    )
+
+
+@app.route("/api/completion/rows/<int:row_id>/label")
+def completion_row_label(row_id):
+    auth_error = require_upload_token()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute("SELECT * FROM completion_rows WHERE id = %s", (row_id,))
@@ -4624,6 +4805,9 @@ def send_completion_row_carrier(row_id):
         return jsonify({"error": "Řádek kompletace nebyl nalezen."}), 404
 
     row_api = completion_row_to_api(row)
+    label_number = completion_label_number(row_api)
+    if not label_number:
+        return jsonify({"error": "Řádek zatím nemá číslo štítku/zásilky."}), 400
     carrier = label_carrier_for_row(row_api, label_number)
     if not carrier:
         return jsonify({"error": "Pro tento radek neumim urcit dopravce stitku."}), 400
