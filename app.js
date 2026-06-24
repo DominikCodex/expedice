@@ -3268,9 +3268,69 @@ function workflowChecklistKey(item, index) {
   return `${String(base).replace(/[^a-zA-Z0-9_-]/g, "_")}-${index}`;
 }
 
+function normalizeWorkflowPhysicalItem(item, index, fallbackRow = null) {
+  if (typeof item === "string") {
+    return {
+      datasetRowId: `text-${index}`,
+      variantCode: fallbackRow?.orderNumber || "-",
+      variant: "",
+      productName: item,
+      initialQuantity: fallbackRow?.quantity || 1,
+      remaining: null,
+      physicalOnly: true,
+    };
+  }
+  return {
+    ...item,
+    datasetRowId: item.datasetRowId || item.id || `physical-${fallbackRow?.id || fallbackRow?.orderNumber || "row"}-${index}`,
+    variantCode: item.variantCode || item.productCode || item.code || fallbackRow?.orderNumber || "-",
+    variant: item.variant || item.variantName || item.size || "",
+    productName: item.productName || item.name || item.title || item.info || item.description || fallbackRow?.note || "Položka objednávky",
+    initialQuantity: item.initialQuantity || item.quantity || item.count || fallbackRow?.quantity || 1,
+    remaining: item.remaining ?? null,
+    physicalOnly: Boolean(item.physicalOnly),
+  };
+}
+
+function workflowPhysicalItems(row) {
+  if (!row) return [];
+  const sortingCheck = workflowSortingCheck(row);
+  if (sortingCheck.items.length) {
+    return sortingCheck.items.map((item, index) => normalizeWorkflowPhysicalItem(item, index, row));
+  }
+
+  const itemSources = [row.items, row.orderItems, row.products, row.productItems, row.completionItems].filter(Array.isArray);
+  if (itemSources.length && itemSources[0].length) {
+    return itemSources[0].map((item, index) => normalizeWorkflowPhysicalItem(item, index, row));
+  }
+
+  const itemText =
+    row.productName ||
+    row.itemName ||
+    row.productsText ||
+    row.itemsText ||
+    row.orderItemsText ||
+    row.note ||
+    `Objednávka ${row.orderNumber || "-"} - zkontroluj položky ze skladové přípravy`;
+  return [
+    normalizeWorkflowPhysicalItem(
+      {
+        datasetRowId: `completion-${row.id || row.orderNumber || "row"}`,
+        variantCode: row.productCode || row.variantCode || row.orderNumber || "-",
+        variant: row.variant || row.variantName || "",
+        productName: itemText,
+        initialQuantity: row.quantity || row.pieces || row.itemCount || 1,
+        remaining: null,
+        physicalOnly: true,
+      },
+      0,
+      row
+    ),
+  ];
+}
+
 function workflowPhysicalCheck(row) {
-  const check = workflowSortingCheck(row);
-  const items = check.items || [];
+  const items = workflowPhysicalItems(row);
   const required = items.length > 0;
   const checked = items.filter((item, index) => completionWorkflowState.checkedItemKeys.has(workflowChecklistKey(item, index))).length;
   return {
@@ -3310,12 +3370,14 @@ async function refreshWorkflowSortingCheck(row) {
 function workflowSortingCheckHtml(row) {
   const check = workflowSortingCheck(row);
   const physicalCheck = workflowPhysicalCheck(row);
-  const itemRows = check.items.length
-    ? check.items
+  const physicalItems = workflowPhysicalItems(row);
+  const itemRows = physicalItems.length
+    ? physicalItems
         .map((item, itemIndex) => {
           const checkKey = workflowChecklistKey(item, itemIndex);
           const checked = completionWorkflowState.checkedItemKeys.has(checkKey);
-          const remaining = Math.max(0, Math.trunc(toNumber(item.remaining, 0)));
+          const hasRemaining = item.remaining !== null && item.remaining !== undefined && item.remaining !== "";
+          const remaining = hasRemaining ? Math.max(0, Math.trunc(toNumber(item.remaining, 0))) : null;
           const initial = Math.max(0, Math.trunc(toNumber(item.initialQuantity, item.remaining || 0)));
           return `
             <button type="button" class="workflow-sorting-item ${remaining > 0 ? "pending" : "done"} ${checked ? "checked" : ""}" data-action="workflow-check-item" data-check-key="${escapeHtml(checkKey)}">
@@ -3323,14 +3385,14 @@ function workflowSortingCheckHtml(row) {
               <span class="code">${escapeHtml(item.variantCode || item.productCode || "-")}</span>
               <span>${escapeHtml(item.variant || "-")}</span>
               <span>${escapeHtml(item.productName || item.info || "")}</span>
-              <strong>${escapeHtml(initial)} ks původně</strong>
-              <strong>${escapeHtml(remaining)} zbývá</strong>
+              <strong>${escapeHtml(initial)} ks ke kontrole</strong>
+              <strong>${hasRemaining ? `${escapeHtml(remaining)} zbývá` : "fyzická kontrola"}</strong>
               <strong class="workflow-check-action">${checked ? "Zkontrolováno" : "Klik = zkontrolovat"}</strong>
             </button>
           `;
         })
         .join("")
-    : `<div class="workflow-sorting-empty">Žádné položky roztřídění k zobrazení.</div>`;
+    : `<div class="workflow-sorting-empty">Žádné položky ke kontrole.</div>`;
 
   return `
     <section class="workflow-sorting-check ${check.tone}">
