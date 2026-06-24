@@ -2300,7 +2300,7 @@ async function validateAddressDeliveriesBulk() {
   const skippedOk = addressRows.length - rows.length;
   if (!rows.length) {
     setCompletionMessage(`Všechny adresní zásilky už jsou ověřené a v pořádku (${skippedOk} přeskočeno).`, "success");
-    window.alert(addressValidationPopupSummary({ checked: 0, skippedOk, failed: 0, addressErrors: 0, results: [] }));
+    showAddressValidationSummary({ checked: 0, skippedOk, failed: 0, addressErrors: 0, results: [] });
     return;
   }
 
@@ -2341,7 +2341,7 @@ async function validateAddressDeliveriesBulk() {
     els.completionFilterStatus.value = "address_error";
     renderCompletion();
     loadAddressValidationLog();
-    window.alert(addressValidationPopupSummary({ checked, skippedOk, failed, addressErrors, results }));
+    showAddressValidationSummary({ checked, skippedOk, failed, addressErrors, results });
     setCompletionMessage(
       `Kontrola adres hotová: ${checked} ověřeno, ${skippedOk} OK přeskočeno, ${addressErrors} problematických adres${failed ? `, ${failed} technických chyb` : ""}.`,
       addressErrors || failed ? "warning" : "success"
@@ -2496,29 +2496,75 @@ async function revertAddressValidationLog(logId) {
   }
 }
 
-function addressValidationPopupSummary({ checked, skippedOk, failed, addressErrors, results }) {
+function addressValidationSummaryStats({ checked, skippedOk, failed, addressErrors, results }) {
   const verified = results.filter((item) => item.data?.valid).length;
   const replaced = results.filter((item) => item.data?.appliedSuggestion).length;
   const completed = results.filter((item) => item.data?.appliedAddressCompletion).length;
   const cleaned = results.filter((item) => item.data?.appliedAddressCleanup).length;
   const carrierNotes = results.filter((item) => item.data?.appliedCarrierNote).length;
   const notFound = results.filter((item) => item.data?.status === "not_found").length;
-  return [
-    "Ověření adres je hotové.",
-    "",
-    `Nově zkontrolováno: ${checked}`,
-    `Již OK přeskočeno: ${skippedOk}`,
-    `Ověřeno jako v pořádku: ${verified}`,
-    `Přepsané návrhy adres: ${replaced}`,
-    `Doplněné chybějící údaje: ${completed}`,
-    `Očištěné adresy: ${cleaned}`,
-    `Doplněné poznámky pro přepravce: ${carrierNotes}`,
-    `Nenalezeno: ${notFound}`,
-    `Chyby volání: ${failed}`,
-    `Aktuálně problematické adresy: ${addressErrors}`,
-    "",
-    "Detail je uložený dole v Logu ověření adres.",
-  ].join("\n");
+  return { checked, skippedOk, failed, addressErrors, verified, replaced, completed, cleaned, carrierNotes, notFound };
+}
+
+function showAddressValidationSummary(summary) {
+  const stats = addressValidationSummaryStats(summary);
+  document.querySelector(".address-summary-overlay")?.remove();
+
+  const overlay = document.createElement("div");
+  overlay.className = "address-summary-overlay";
+  overlay.innerHTML = `
+    <section class="address-summary-dialog" role="dialog" aria-modal="true" aria-labelledby="address-summary-title">
+      <div class="address-summary-head">
+        <div>
+          <p class="eyebrow">Mapy.com</p>
+          <h2 id="address-summary-title">Ověření adres je hotové</h2>
+        </div>
+        <button type="button" class="address-summary-close" data-address-summary-close aria-label="Zavřít">×</button>
+      </div>
+      <div class="address-summary-lead ${
+        stats.addressErrors || stats.failed ? "warning" : "success"
+      }">
+        ${
+          stats.checked
+            ? `Zkontrolováno ${stats.checked} nových adres. Detailní audit je uložený dole v Logu ověření adres.`
+            : `Všechny adresy už byly ověřené, takže nebylo potřeba znovu volat Mapy.com.`
+        }
+      </div>
+      <div class="address-summary-grid">
+        <article><span>${stats.checked}</span><strong>Nově zkontrolováno</strong></article>
+        <article><span>${stats.skippedOk}</span><strong>OK přeskočeno</strong></article>
+        <article class="ok"><span>${stats.verified}</span><strong>Ověřeno jako OK</strong></article>
+        <article class="${stats.addressErrors ? "warning" : "ok"}"><span>${stats.addressErrors}</span><strong>Problematické adresy</strong></article>
+      </div>
+      <div class="address-summary-details">
+        <h3>Co se upravilo</h3>
+        <ul>
+          <li><span>Přepsané návrhy adres</span><strong>${stats.replaced}</strong></li>
+          <li><span>Doplněné chybějící údaje</span><strong>${stats.completed}</strong></li>
+          <li><span>Očištěné adresy</span><strong>${stats.cleaned}</strong></li>
+          <li><span>Doplněné poznámky pro přepravce</span><strong>${stats.carrierNotes}</strong></li>
+          <li><span>Nenalezeno</span><strong>${stats.notFound}</strong></li>
+          <li><span>Technické chyby volání</span><strong>${stats.failed}</strong></li>
+        </ul>
+      </div>
+      <div class="address-summary-actions">
+        <button type="button" class="secondary" data-address-summary-log>Přejít na log</button>
+        <button type="button" data-address-summary-close>Zavřít</button>
+      </div>
+    </section>
+  `;
+
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay || event.target.closest("[data-address-summary-close]")) {
+      overlay.remove();
+    }
+    if (event.target.closest("[data-address-summary-log]")) {
+      overlay.remove();
+      els.addressValidationLog?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  });
+  document.body.appendChild(overlay);
+  overlay.querySelector("[data-address-summary-close]")?.focus();
 }
 
 function completionInput(row, field, value, className = "") {
