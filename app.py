@@ -1952,6 +1952,9 @@ def default_settings():
         "mapy": {
             "apiKey": os.environ.get("MAPY_API_KEY", ""),
         },
+        "printAgent": {
+            "testingMode": os.environ.get("PRINT_AGENT_TESTING_MODE") == "1",
+        },
         "paymentFeeds": {
             "lookbackDays": env_int("PAYMENT_FEED_LOOKBACK_DAYS", 10),
             "encoding": os.environ.get("PAYMENT_FEED_ENCODING", "windows-1250"),

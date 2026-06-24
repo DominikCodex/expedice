@@ -234,6 +234,7 @@ const els = {
   settingsSenderContact: document.getElementById("settings-sender-contact"),
   settingsSenderPhone: document.getElementById("settings-sender-phone"),
   settingsSenderEmail: document.getElementById("settings-sender-email"),
+  settingsPrintTestingMode: document.getElementById("settings-print-testing-mode"),
   printAgentTest: document.getElementById("print-agent-test"),
   printAgentStatus: document.getElementById("print-agent-status"),
   usersPanel: document.getElementById("users-admin-panel"),
@@ -1691,6 +1692,7 @@ function paymentCheckHtml(row) {
 
 function renderSettings(settings) {
   const mapy = settings.mapy || {};
+  const printAgent = settings.printAgent || {};
   const paymentFeeds = settings.paymentFeeds || {};
   const paymentFeedShops = paymentFeeds.shops || {};
   const paymentIveronika = paymentFeedShops.iveronika_cz || {};
@@ -1707,6 +1709,9 @@ function renderSettings(settings) {
 
   els.settingsMapyKey.value = "";
   els.settingsMapyStatus.textContent = mapy.hasApiKey ? "API key je uložený." : "API key zatím není uložený.";
+  if (els.settingsPrintTestingMode) {
+    els.settingsPrintTestingMode.checked = Boolean(printAgent.testingMode);
+  }
   els.settingsPaymentLookback.value = paymentFeeds.lookbackDays || 10;
   if (els.settingsPaymentStatus) {
     const dateRange = paymentFeeds.dateRange || {};
@@ -1819,6 +1824,9 @@ function collectSettings() {
   return {
     mapy: {
       apiKey: els.settingsMapyKey.value.trim(),
+    },
+    printAgent: {
+      testingMode: Boolean(els.settingsPrintTestingMode?.checked),
     },
     paymentFeeds: {
       lookbackDays: Number(els.settingsPaymentLookback.value) || 10,
@@ -2075,6 +2083,10 @@ async function printCompletionCarrierLabel(rowId, setStatus = setCompletionMessa
       carrier,
       filename: `${labelNumber}.pdf`,
     });
+    if (result.cancelled) {
+      setStatus(`TESTOVÁNÍ: tisk štítku ${labelNumber} byl zrušen, nic se neposlalo na tiskárnu.`, "warning");
+      return false;
+    }
     row.labelPrinted = "Label printed";
     replaceCompletionRow(row);
     renderCompletion();
@@ -2167,6 +2179,10 @@ async function printCompletionIssueDocument(rowId, kind, setStatus = setCompleti
       carrier: "",
       filename: `${kind}-${orderNumber}.pdf`,
     });
+    if (result.cancelled) {
+      setStatus(`TESTOVÁNÍ: tisk dokumentu pro objednávku ${orderNumber} byl zrušen.`, "warning");
+      return;
+    }
     setStatus(`Kontrolní papír byl odeslán na tiskárnu (${result.printer || "výchozí"}).`, "success");
   } catch (error) {
     window.open(url, "_blank", "noopener");
@@ -2891,7 +2907,46 @@ async function fetchWithTimeout(url, options = {}, timeoutMs = 1200) {
   }
 }
 
+async function isPrintAgentTestingModeEnabled() {
+  if (authState.user?.role !== "admin") return false;
+  if (els.settingsPrintTestingMode?.checked) return true;
+
+  if (!settingsState.loaded || !settingsState.settings) {
+    try {
+      const data = await fetchJson("/api/settings");
+      settingsState.settings = data.settings || {};
+      settingsState.loaded = true;
+      renderSettings(settingsState.settings);
+    } catch (error) {
+      console.warn("Nastavení testovacího tisku se nepodařilo načíst.", error);
+      return false;
+    }
+  }
+
+  return Boolean(settingsState.settings?.printAgent?.testingMode);
+}
+
+async function confirmPrintAgentJob({ type, carrier, filename }) {
+  if (!(await isPrintAgentTestingModeEnabled())) return true;
+
+  const lines = [
+    "TESTOVÁNÍ TISKU",
+    "",
+    "Opravdu poslat tento dokument na tiskárnu?",
+    "",
+    `Soubor: ${filename || "-"}`,
+    `Typ: ${type || "-"}`,
+  ];
+  if (carrier) lines.push(`Dopravce: ${carrier}`);
+  lines.push("", "OK = tisknout, Storno = netisknout.");
+  return window.confirm(lines.join("\n"));
+}
+
 async function printPdfViaAgent({ pdfUrl, type, carrier, filename }) {
+  if (!(await confirmPrintAgentJob({ type, carrier, filename }))) {
+    return { ok: true, cancelled: true, printer: "" };
+  }
+
   const health = await fetchWithTimeout(`${PRINT_AGENT_URL}/health`, { cache: "no-store" }, 900);
   if (!health.ok) throw new Error("Lokální tiskový agent neběží.");
 
