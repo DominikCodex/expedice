@@ -54,6 +54,9 @@ const completionWorkflowState = {
   row: null,
   index: -1,
   checkedItemKeys: new Set(),
+  sortingRefreshTimer: null,
+  sortingRefreshRowId: null,
+  sortingRefreshInFlight: false,
 };
 const workflowAutoPrintedRows = new Set();
 
@@ -3478,6 +3481,82 @@ function workflowPhysicalCheck(row) {
   };
 }
 
+function workflowRowNeedsSortingAutoRefresh(row) {
+  return Boolean(row?.id && completionFlowKind(row) === "sorting");
+}
+
+function workflowSortingSnapshot(row) {
+  const check = workflowSortingCheck(row);
+  return JSON.stringify({
+    ok: check.ok,
+    remainingTotal: check.remainingTotal,
+    items: (check.items || []).map((item) => ({
+      id: item.datasetRowId || item.id || item.variantCode || item.productCode || "",
+      remaining: item.remaining,
+      initialQuantity: item.initialQuantity,
+    })),
+  });
+}
+
+function stopWorkflowSortingAutoRefresh() {
+  if (completionWorkflowState.sortingRefreshTimer) {
+    window.clearInterval(completionWorkflowState.sortingRefreshTimer);
+  }
+  completionWorkflowState.sortingRefreshTimer = null;
+  completionWorkflowState.sortingRefreshRowId = null;
+  completionWorkflowState.sortingRefreshInFlight = false;
+}
+
+function syncWorkflowSortingAutoRefresh() {
+  const row = completionWorkflowState.row;
+  if (!workflowRowNeedsSortingAutoRefresh(row)) {
+    stopWorkflowSortingAutoRefresh();
+    return;
+  }
+
+  if (
+    completionWorkflowState.sortingRefreshTimer &&
+    String(completionWorkflowState.sortingRefreshRowId) === String(row.id)
+  ) {
+    return;
+  }
+
+  stopWorkflowSortingAutoRefresh();
+  completionWorkflowState.sortingRefreshRowId = row.id;
+  completionWorkflowState.sortingRefreshTimer = window.setInterval(autoRefreshWorkflowSortingCheck, 5000);
+}
+
+async function autoRefreshWorkflowSortingCheck() {
+  const row = completionWorkflowState.row;
+  if (!workflowRowNeedsSortingAutoRefresh(row)) {
+    stopWorkflowSortingAutoRefresh();
+    return;
+  }
+  if (document.hidden || els.completionView?.classList.contains("hidden")) return;
+  if (completionWorkflowState.sortingRefreshInFlight) return;
+
+  const rowId = row.id;
+  const before = workflowSortingSnapshot(row);
+  completionWorkflowState.sortingRefreshInFlight = true;
+  try {
+    const updatedRow = await refreshWorkflowSortingCheck(row);
+    if (!completionWorkflowState.row || String(completionWorkflowState.row.id) !== String(rowId)) return;
+    const after = workflowSortingSnapshot(updatedRow);
+    if (before !== after) {
+      renderWorkflow();
+      const check = workflowSortingCheck(updatedRow);
+      setWorkflowMessage(
+        check.ok
+          ? "Roztřídění se na pozadí aktualizovalo: všechny položky jsou odepsané."
+          : `Roztřídění se na pozadí aktualizovalo: ještě zbývá ${check.remainingTotal} ks.`,
+        check.ok ? "success" : "warning"
+      );
+    }
+  } finally {
+    completionWorkflowState.sortingRefreshInFlight = false;
+  }
+}
+
 async function refreshWorkflowSortingCheck(row) {
   if (!row?.id || completionFlowKind(row) !== "sorting") return row;
   try {
@@ -3636,6 +3715,7 @@ function renderWorkflow() {
   if (els.workflowSaveOk) {
     els.workflowSaveOk.disabled = disabled || (physicalCheck.required && !physicalCheck.ok);
   }
+  syncWorkflowSortingAutoRefresh();
 }
 
 function selectWorkflowRow(row, message = "", tone = "success") {
@@ -3696,8 +3776,16 @@ function updateCompletionRowInState(row) {
 }
 
 async function saveWorkflowAction(action) {
-  const row = completionWorkflowState.row;
+  let row = completionWorkflowState.row;
   if (!row) return null;
+  if (action === "ok" && workflowRowNeedsSortingAutoRefresh(row)) {
+    setWorkflowMessage("Ještě ověřuji aktuální stav roztřídění před uložením OK...", "neutral");
+    row = await refreshWorkflowSortingCheck(row);
+    if (completionWorkflowState.row && String(completionWorkflowState.row.id) === String(row.id)) {
+      completionWorkflowState.row = row;
+      renderWorkflow();
+    }
+  }
   const sortingCheck = workflowSortingCheck(row);
   const physicalCheck = workflowPhysicalCheck(row);
   if (action === "ok" && physicalCheck.required && !physicalCheck.ok) {
