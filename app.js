@@ -3076,7 +3076,7 @@ function workflowStatusTone(row) {
   const status = normalize(row?.completionStatus || "");
   const paymentStatus = paymentCheckKind(row);
   if (!row) return "neutral";
-  if (paymentStatus === "storno") return "danger";
+  if (paymentStatus === "storno" || status.includes("storno")) return "storno";
   if (["unpaid", "missing", "unknown"].includes(paymentStatus)) return "warning";
   if (status.includes("error")) return "danger";
   if (status.includes("nezaplac")) return "warning";
@@ -3668,6 +3668,12 @@ function workflowSortingCheckHtml(row) {
 function workflowItemsHtml(row) {
   if (!row) return "Po načtení boxu zobrazím obsah objednávky.";
   const quantity = row.quantity || "";
+  const carrierKey = completionCarrierKey(row);
+  const deliveryLabel = row.deliveryCarrierLabel || row.shippingMethod || "Doprava neurčena";
+  const paymentKind = paymentCheckKind(row);
+  const paymentLabel = paymentCheckLabel(row);
+  const flowKind = completionFlowKind(row);
+  const flowLabel = completionFlowLabel(flowKind);
   const parts = [
     row.orderNumber ? `Objednávka ${row.orderNumber}` : "",
     quantity ? `${quantity} ks` : "",
@@ -3676,9 +3682,16 @@ function workflowItemsHtml(row) {
   ].filter(Boolean);
   const note = row.note ? `<small>${escapeHtml(row.note)}</small>` : "";
   return `
-    <strong>${escapeHtml(parts.join(" | ") || "Objednávka")}</strong>
+    <div class="workflow-quick-facts">
+      <span class="workflow-fact order">${escapeHtml(row.orderNumber || "-")}</span>
+      <span class="workflow-fact pieces">${escapeHtml(quantity || "-")} ks</span>
+      <span class="workflow-fact carrier ${escapeHtml(carrierKey)}">${escapeHtml(deliveryLabel)}</span>
+      <span class="workflow-fact payment ${escapeHtml(paymentKind)}">${escapeHtml(paymentLabel)}</span>
+      <span class="workflow-fact flow ${escapeHtml(flowKind)}">${escapeHtml(flowLabel)}</span>
+    </div>
+    <strong class="workflow-order-summary">${escapeHtml(parts.join(" | ") || "Objednávka")}</strong>
     ${note}
-    <small>${escapeHtml(row.email || "")}${row.phone ? ` | ${escapeHtml(row.phone)}` : ""}</small>
+    <small class="workflow-contact-line">${escapeHtml(row.email || "")}${row.phone ? ` | ${escapeHtml(row.phone)}` : ""}</small>
     ${workflowSortingCheckHtml(row)}
   `;
 }
@@ -3688,9 +3701,18 @@ function renderWorkflow() {
   const fullName = row ? `${row.firstName || ""} ${row.lastName || ""}`.trim() : "Načti expediční box";
   const expeditionNumber = row?.expeditionNumber || row?.expeditionOrderCode || "-";
   const tone = workflowStatusTone(row);
-  const statusText = row?.completionStatus || (row ? "Rozpracováno" : "Čekám na sken boxu");
+  let statusText = row?.completionStatus || (row ? "Rozpracováno" : "Čekám na sken boxu");
   const isDpd = row && (row.delivery?.isDpd || normalize(row.shippingMethod || "").includes("dpd"));
   const paymentWarning = row && ["storno", "unpaid", "missing", "unknown"].includes(paymentCheckKind(row));
+  if (tone === "storno") {
+    statusText = "STORNO - neexpedovat";
+  } else if (tone === "ok" && row) {
+    statusText = "OK - připraveno";
+  } else if (tone === "warning" && row) {
+    statusText = "POZOR - zkontrolovat";
+  } else if (tone === "danger" && row) {
+    statusText = "ERROR - řešit";
+  }
 
   els.workflowExpeditionNumber.textContent = expeditionNumber;
   els.workflowCustomerName.textContent = fullName || "-";
@@ -3703,6 +3725,12 @@ function renderWorkflow() {
   els.workflowCountry.textContent = workflowCountryText(row);
   els.workflowStatus.className = `workflow-status ${tone}`;
   els.workflowStatus.textContent = statusText;
+  const workflowPanel = els.workflowStatus.closest(".completion-workflow-panel");
+  if (workflowPanel) {
+    workflowPanel.dataset.tone = tone;
+    workflowPanel.dataset.carrier = row ? completionCarrierKey(row) : "";
+    workflowPanel.dataset.payment = row ? paymentCheckKind(row) : "";
+  }
   els.workflowItems.innerHTML = workflowItemsHtml(row);
   els.workflowNote.textContent = [row?.completionStatus ? `Stav kompletace: ${row.completionStatus}` : "", row?.paymentCheckSourceStatus ? `Feed: ${row.paymentCheckSourceStatus}` : ""]
     .filter(Boolean)
