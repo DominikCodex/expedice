@@ -3790,9 +3790,10 @@ function confirmWorkflowOrderNoteBeforePrint(row) {
   const note = workflowOrderNoteText(row);
   if (!note) return true;
   const order = row?.orderNumber ? `Objednávka ${row.orderNumber}` : "Objednávka";
-  return window.confirm(
-    `${order} má poznámku:\n\n${note}\n\nOK = poznámku jsem přečetl/a a můžu tisknout.\nStorno = teď netisknout.`
+  window.alert(
+    `${order} má poznámku:\n\n${note}\n\nOK = přečteno. Zkontroluj prosím, jestli poznámka nevyžaduje ruční úpravu objednávky.`
   );
+  return true;
 }
 
 async function scanWorkflowBox() {
