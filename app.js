@@ -3772,6 +3772,20 @@ function selectWorkflowRow(row, message = "", tone = "success") {
   if (message) setWorkflowMessage(message, tone);
 }
 
+function workflowOrderNoteText(row) {
+  const note = String(row?.note || "").trim();
+  if (!note || note === "-") return "";
+  return note;
+}
+
+function confirmWorkflowOrderNoteBeforePrint(row) {
+  const note = workflowOrderNoteText(row);
+  if (!note) return true;
+  return window.confirm(
+    `Objednávka ${row.orderNumber || ""} má poznámku:\n\n${note}\n\nPotvrď, že je poznámka přečtená. Štítek a další automatický tisk se spustí až po potvrzení.`
+  );
+}
+
 async function scanWorkflowBox() {
   const number = parseWorkflowBoxCode(els.workflowBoxCode.value);
   if (!number) {
@@ -3800,6 +3814,10 @@ async function scanWorkflowBox() {
     sortingCheck.requiresSorting && !sortingCheck.ok ? "warning" : "success"
   );
   els.workflowBoxCode.value = "";
+  if (!confirmWorkflowOrderNoteBeforePrint(row)) {
+    setWorkflowMessage("Automatický tisk je pozastavený, protože poznámka objednávky nebyla potvrzená.", "warning");
+    return;
+  }
   await autoPrintWorkflowDocuments(row, number);
 }
 
