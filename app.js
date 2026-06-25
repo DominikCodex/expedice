@@ -2068,11 +2068,15 @@ async function sendCompletionCarrier(rowId) {
   }
 }
 
-async function printCompletionCarrierLabel(rowId, setStatus = setCompletionMessage) {
+async function printCompletionCarrierLabel(rowId, setStatus = setCompletionMessage, options = {}) {
   const row = completionState.rows.find((item) => String(item.id) === String(rowId));
   const labelNumber = row?.packetaShipmentId || "";
   if (!labelNumber) {
     setStatus("Řádek zatím nemá číslo zásilky/štítku.", "warning");
+    return false;
+  }
+  if (!options.skipNoteConfirm && !confirmWorkflowOrderNoteBeforePrint(row)) {
+    setStatus("Tisk zrušený: poznámka objednávky nebyla potvrzená.", "warning");
     return false;
   }
 
@@ -2164,7 +2168,7 @@ async function downloadCompletionCarrierLabel(rowId) {
   }
 }
 
-async function printCompletionIssueDocument(rowId, kind, setStatus = setCompletionMessage) {
+async function printCompletionIssueDocument(rowId, kind, setStatus = setCompletionMessage, options = {}) {
   const row = completionState.rows.find((item) => String(item.id) === String(rowId));
   const labels = {
     unpaid: "nezaplacenku",
@@ -2173,6 +2177,10 @@ async function printCompletionIssueDocument(rowId, kind, setStatus = setCompleti
   };
   const label = labels[kind] || "kontrolní papír";
   const orderNumber = row?.orderNumber || rowId;
+  if (!options.skipNoteConfirm && !confirmWorkflowOrderNoteBeforePrint(row)) {
+    setStatus(`Tisk ${label} zrušený: poznámka objednávky nebyla potvrzená.`, "warning");
+    return false;
+  }
   const url = `/api/completion/rows/${encodeURIComponent(rowId)}/issue-document?kind=${encodeURIComponent(kind)}`;
   setStatus(`Tisknu ${label} pro objednávku ${orderNumber} na výchozí tiskárnu...`, "neutral");
 
@@ -3146,11 +3154,11 @@ async function autoPrintWorkflowDocuments(row, boxNumber) {
   workflowAutoPrintedRows.add(key);
   const printed = [];
   if (hasCarrierLabel) {
-    const labelPrinted = await printCompletionCarrierLabel(row.id, setWorkflowMessage);
+    const labelPrinted = await printCompletionCarrierLabel(row.id, setWorkflowMessage, { skipNoteConfirm: true });
     if (labelPrinted) printed.push("štítek dopravce");
   }
   if (needsUnpaidDocument) {
-    await printCompletionIssueDocument(row.id, "unpaid", setWorkflowMessage);
+    await printCompletionIssueDocument(row.id, "unpaid", setWorkflowMessage, { skipNoteConfirm: true });
     printed.push("nezaplacenka");
   }
   if (printed.length) {
@@ -3781,8 +3789,9 @@ function workflowOrderNoteText(row) {
 function confirmWorkflowOrderNoteBeforePrint(row) {
   const note = workflowOrderNoteText(row);
   if (!note) return true;
+  const order = row?.orderNumber ? `Objednávka ${row.orderNumber}` : "Objednávka";
   return window.confirm(
-    `Objednávka ${row.orderNumber || ""} má poznámku:\n\n${note}\n\nPotvrď, že je poznámka přečtená. Štítek a další automatický tisk se spustí až po potvrzení.`
+    `${order} má poznámku:\n\n${note}\n\nOK = poznámku jsem přečetl/a a můžu tisknout.\nStorno = teď netisknout.`
   );
 }
 
