@@ -3190,19 +3190,6 @@ function workflowSortingCheck(row) {
   }
 
   const flowKind = completionFlowKind(row);
-  if (flowKind === "stock") {
-    return {
-      requiresSorting: false,
-      ok: true,
-      tone: "ok",
-      label: "Samostatná skladovka",
-      message: "Kód pořadí je pod 2, roztřídění z dodavatelských balíků se nevyžaduje.",
-      items: [],
-      remainingTotal: 0,
-      initialTotal: 0,
-    };
-  }
-
   if (flowKind === "unknown") {
     return {
       requiresSorting: false,
@@ -3218,26 +3205,33 @@ function workflowSortingCheck(row) {
 
   const items = workflowSortingItems(row);
   const sortingDataset = row.workflowSortingDataset || sortingState.dataset;
+  const remainingTotal = items.reduce((total, item) => total + Math.max(0, Math.trunc(toNumber(item.remaining, 0))), 0);
+  const initialTotal = items.reduce((total, item) => {
+    const initial = toNumber(item.initialQuantity, NaN);
+    const fallback = toNumber(item.quantity, toNumber(item.remaining, 0));
+    return total + Math.max(0, Math.trunc(Number.isFinite(initial) ? initial : fallback));
+  }, 0);
+
   if (row.workflowSortingError) {
     return {
-      requiresSorting: true,
+      requiresSorting: flowKind === "sorting",
       ok: false,
       tone: "warning",
       label: "Roztřídění nelze ověřit",
       message: `Aktuální stav z databáze se nepodařilo načíst: ${row.workflowSortingError}`,
       items,
-      remainingTotal: items.reduce((total, item) => total + Math.max(0, Math.trunc(toNumber(item.remaining, 0))), 0),
-      initialTotal: items.reduce((total, item) => total + Math.max(0, Math.trunc(toNumber(item.initialQuantity, item.remaining || 0))), 0),
+      remainingTotal,
+      initialTotal,
     };
   }
   if (!items.length) {
     return {
-      requiresSorting: true,
+      requiresSorting: flowKind === "sorting",
       ok: false,
       tone: "danger",
-      label: "Roztřídění nenalezeno",
+      label: "Položky objednávky nenalezeny",
       message: sortingDataset
-        ? "V aktivní dávce roztřídění nejsou položky pro tuto objednávku."
+        ? "Položky objednávky v Roztřídění nenalezeny."
         : "Pro tento expediční den není načtená aktivní dávka roztřídění.",
       items: [],
       remainingTotal: 0,
@@ -3245,12 +3239,19 @@ function workflowSortingCheck(row) {
     };
   }
 
-  const remainingTotal = items.reduce((total, item) => total + Math.max(0, Math.trunc(toNumber(item.remaining, 0))), 0);
-  const initialTotal = items.reduce((total, item) => {
-    const initial = toNumber(item.initialQuantity, NaN);
-    const fallback = toNumber(item.remaining, 0);
-    return total + Math.max(0, Math.trunc(Number.isFinite(initial) ? initial : fallback));
-  }, 0);
+  if (flowKind === "stock") {
+    return {
+      requiresSorting: false,
+      ok: true,
+      tone: "ok",
+      label: "Samostatná skladovka",
+      message: "Kód pořadí je pod 2, položky z Roztřídění slouží jen k fyzické kontrole boxu.",
+      items,
+      remainingTotal,
+      initialTotal,
+    };
+  }
+
   const ok = remainingTotal === 0;
   return {
     requiresSorting: true,
@@ -3378,11 +3379,6 @@ function completionTextProductItems(row) {
 function completionStructuredProductItems(row) {
   const raw = row?.raw && typeof row.raw === "object" ? row.raw : {};
   const arrayKeys = [
-    "warehouseItems",
-    "warehouse_items",
-    "vyskladniItems",
-    "pickList",
-    "pick_list",
     "items",
     "products",
     "productItems",
@@ -3453,6 +3449,9 @@ function workflowPhysicalItems(row) {
   if (sortingCheck.items.length) {
     return sortingCheck.items.map((item, index) => normalizeWorkflowPhysicalItem(item, index, row));
   }
+  if (row.orderNumber && completionFlowKind(row) !== "unknown") {
+    return [];
+  }
 
   const completionItems = completionProductItemsForOrder(row);
   if (completionItems.length) {
@@ -3497,7 +3496,7 @@ function workflowPhysicalCheck(row) {
 }
 
 function workflowRowNeedsSortingAutoRefresh(row) {
-  return Boolean(row?.id && completionFlowKind(row) === "sorting");
+  return Boolean(row?.id && row?.orderNumber && completionFlowKind(row) !== "unknown");
 }
 
 function workflowSortingSnapshot(row) {
@@ -3573,7 +3572,7 @@ async function autoRefreshWorkflowSortingCheck() {
 }
 
 async function refreshWorkflowSortingCheck(row) {
-  if (!row?.id || completionFlowKind(row) !== "sorting") return row;
+  if (!row?.id || !row?.orderNumber || completionFlowKind(row) === "unknown") return row;
   try {
     const data = await fetchJson(`/api/completion/rows/${encodeURIComponent(row.id)}/sorting-check`);
     const updatedRow = {
@@ -3601,6 +3600,7 @@ async function refreshWorkflowSortingCheck(row) {
 function workflowSortingCheckHtml(row) {
   const check = workflowSortingCheck(row);
   const physicalCheck = workflowPhysicalCheck(row);
+  const flowKind = completionFlowKind(row);
   const physicalItems = workflowPhysicalItems(row);
   const itemRows = physicalItems.length
     ? physicalItems
@@ -3608,8 +3608,9 @@ function workflowSortingCheckHtml(row) {
           const checkKey = workflowChecklistKey(item, itemIndex);
           const checked = completionWorkflowState.checkedItemKeys.has(checkKey);
           const hasRemaining = item.remaining !== null && item.remaining !== undefined && item.remaining !== "";
+          const showRemaining = flowKind === "sorting" && hasRemaining;
           const remaining = hasRemaining ? Math.max(0, Math.trunc(toNumber(item.remaining, 0))) : null;
-          const initial = Math.max(0, Math.trunc(toNumber(item.initialQuantity, item.remaining || 0)));
+          const initial = Math.max(0, Math.trunc(toNumber(item.initialQuantity, item.quantity || item.remaining || 0)));
           const variantParts = String(item.variant || "")
             .split("/")
             .map((part) => part.trim())
@@ -3622,13 +3623,13 @@ function workflowSortingCheckHtml(row) {
             !color && !size && item.variant ? `Varianta: ${item.variant}` : "",
           ].filter(Boolean);
           return `
-            <button type="button" class="workflow-sorting-item ${remaining > 0 ? "pending" : "done"} ${checked ? "checked" : ""}" data-action="workflow-check-item" data-check-key="${escapeHtml(checkKey)}">
+            <button type="button" class="workflow-sorting-item ${showRemaining && remaining > 0 ? "pending" : "done"} ${checked ? "checked" : ""}" data-action="workflow-check-item" data-check-key="${escapeHtml(checkKey)}">
               <span class="workflow-check-box" aria-hidden="true">${checked ? "OK" : ""}</span>
               <span class="workflow-product-code">${escapeHtml(item.variantCode || item.productCode || "-")}</span>
               <span class="workflow-product-name">${escapeHtml(item.productName || item.info || "Položka objednávky")}</span>
               <span class="workflow-product-meta">${escapeHtml(meta.join(" | ") || "Bez varianty")}</span>
               <strong class="workflow-product-qty">${escapeHtml(initial || 1)} ks</strong>
-              <strong class="workflow-product-state">${hasRemaining ? `${escapeHtml(remaining)} zbývá` : "ke kontrole"}</strong>
+              <strong class="workflow-product-state">${showRemaining ? `${escapeHtml(remaining)} zbývá` : "ke kontrole"}</strong>
               <strong class="workflow-check-action">${checked ? "Zkontrolováno" : "Klik = zkontrolovat"}</strong>
             </button>
           `;
@@ -3758,7 +3759,7 @@ async function scanWorkflowBox() {
     setWorkflowMessage(`Expediční číslo ${number} v načtené kompletaci nevidím.`, "error");
     return;
   }
-  if (completionFlowKind(row) === "sorting") {
+  if (row.orderNumber && completionFlowKind(row) !== "unknown") {
     setWorkflowMessage("Ověřuji aktuální stav roztřídění pro tento box...", "neutral");
     row = await refreshWorkflowSortingCheck(row);
   }
