@@ -24,8 +24,8 @@ Private Sub ExpediceUploadSheet(ByVal datasetKind As String, ByVal sheetName As 
 
     Dim lastCol As Long
     lastCol = ExpediceLastUsedColumn(ws)
-    If datasetKind = "completion" And lastCol < 44 Then lastCol = 44
-    If datasetKind = "sorting" And lastCol < 13 Then lastCol = 13
+    If datasetKind = "completion" And lastCol < 50 Then lastCol = 50
+    If datasetKind = "sorting" And lastCol < 30 Then lastCol = 30
 
     Dim payload As String
     payload = ExpediceBuildPayload(ws, datasetKind, lastRow, lastCol)
@@ -235,10 +235,104 @@ Private Function ExpediceBuildCompletionRow(ByVal ws As Worksheet, ByVal r As Lo
     sb = sb & ExpediceJsonPair("dpdOrderAndPieces", ExpediceCellString(ws.Cells(r, 31))) & ","
     sb = sb & ExpediceJsonPair("canceledOrderBackup", ExpediceCellString(ws.Cells(r, 34))) & ","
     sb = sb & ExpediceJsonPair("labelPrinted", ExpediceCellString(ws.Cells(r, 38))) & ","
+    sb = sb & """warehouseItems"":" & ExpediceBuildWarehouseItems(ExpediceCellString(ws.Cells(r, 17))) & ","
     sb = sb & """cells"":" & ExpediceBuildCellArray(ws, r, lastCol)
     sb = sb & "}"
 
     ExpediceBuildCompletionRow = sb
+End Function
+
+Private Function ExpediceBuildWarehouseItems(ByVal expeditionNumber As String) As String
+    Dim boxNumber As String
+    boxNumber = ExpediceNormalizeExpeditionNumber(expeditionNumber)
+    If Len(boxNumber) = 0 Then
+        ExpediceBuildWarehouseItems = "[]"
+        Exit Function
+    End If
+
+    Dim ws As Worksheet
+    On Error Resume Next
+    Set ws = ThisWorkbook.Worksheets("VYSKLADNI")
+    On Error GoTo 0
+    If ws Is Nothing Then
+        ExpediceBuildWarehouseItems = "[]"
+        Exit Function
+    End If
+
+    Dim lastRow As Long
+    lastRow = ws.Cells(ws.Rows.Count, "B").End(xlUp).Row
+    If ws.Cells(ws.Rows.Count, "D").End(xlUp).Row > lastRow Then lastRow = ws.Cells(ws.Rows.Count, "D").End(xlUp).Row
+    If ws.Cells(ws.Rows.Count, "F").End(xlUp).Row > lastRow Then lastRow = ws.Cells(ws.Rows.Count, "F").End(xlUp).Row
+
+    Dim sb As String
+    Dim r As Long
+    Dim qty As String
+    sb = "["
+
+    For r = 2 To lastRow
+        qty = ExpediceWarehouseQuantityForBox(ExpediceCellString(ws.Cells(r, 4)), boxNumber)
+        If Len(qty) > 0 Then
+            If Right$(sb, 1) <> "[" Then sb = sb & ","
+            sb = sb & "{"
+            sb = sb & """source"":""VYSKLADNI"","
+            sb = sb & """rowNumber"":" & CStr(r) & ","
+            sb = sb & ExpediceJsonPair("productCode", ExpediceCellString(ws.Cells(r, 1))) & ","
+            sb = sb & ExpediceJsonPair("variantCode", ExpediceCellString(ws.Cells(r, 2))) & ","
+            sb = sb & ExpediceJsonPair("variant", ExpediceCellString(ws.Cells(r, 3))) & ","
+            sb = sb & ExpediceJsonPair("quantity", qty) & ","
+            sb = sb & ExpediceJsonPair("productName", ExpediceCellString(ws.Cells(r, 6))) & ","
+            sb = sb & ExpediceJsonPair("warehouseDistribution", ExpediceCellString(ws.Cells(r, 4))) & ","
+            sb = sb & ExpediceJsonPair("warehouseTotal", ExpediceCellString(ws.Cells(r, 5)))
+            sb = sb & "}"
+        End If
+    Next r
+
+    sb = sb & "]"
+    ExpediceBuildWarehouseItems = sb
+End Function
+
+Private Function ExpediceWarehouseQuantityForBox(ByVal distribution As String, ByVal expeditionNumber As String) As String
+    Dim parts() As String
+    Dim part As Variant
+    Dim token As String
+    Dim xPos As Long
+    Dim qtyText As String
+    Dim targetText As String
+    Dim total As Long
+
+    parts = Split(distribution, ",")
+    For Each part In parts
+        token = LCase$(Trim$(CStr(part)))
+        token = Replace(token, " ", "")
+        xPos = InStr(1, token, "x", vbTextCompare)
+        If xPos > 1 Then
+            qtyText = Left$(token, xPos - 1)
+            targetText = Mid$(token, xPos + 1)
+            If ExpediceNormalizeExpeditionNumber(targetText) = expeditionNumber Then
+                If IsNumeric(qtyText) Then total = total + CLng(qtyText)
+            End If
+        End If
+    Next part
+
+    If total > 0 Then
+        ExpediceWarehouseQuantityForBox = CStr(total)
+    Else
+        ExpediceWarehouseQuantityForBox = ""
+    End If
+End Function
+
+Private Function ExpediceNormalizeExpeditionNumber(ByVal value As String) As String
+    Dim text As String
+    text = Trim$(value)
+    text = Replace(text, " ", "")
+    text = Replace(text, ",", ".")
+    If InStr(1, text, ".", vbTextCompare) > 0 Then text = Split(text, ".")(0)
+
+    Do While Len(text) > 1 And Left$(text, 1) = "0"
+        text = Mid$(text, 2)
+    Loop
+
+    ExpediceNormalizeExpeditionNumber = text
 End Function
 
 Private Function ExpediceBuildCellArray(ByVal ws As Worksheet, ByVal r As Long, ByVal lastCol As Long) As String

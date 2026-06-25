@@ -3377,7 +3377,22 @@ function completionTextProductItems(row) {
 
 function completionStructuredProductItems(row) {
   const raw = row?.raw && typeof row.raw === "object" ? row.raw : {};
-  const arrayKeys = ["items", "products", "productItems", "product_items", "orderProducts", "order_items", "goods", "zbozi", "zboží"];
+  const arrayKeys = [
+    "warehouseItems",
+    "warehouse_items",
+    "vyskladniItems",
+    "pickList",
+    "pick_list",
+    "items",
+    "products",
+    "productItems",
+    "product_items",
+    "orderProducts",
+    "order_items",
+    "goods",
+    "zbozi",
+    "zboží",
+  ];
   for (const key of arrayKeys) {
     if (Array.isArray(raw[key]) && raw[key].length) {
       return raw[key].map((item, index) => normalizeWorkflowPhysicalItem(item, index, row));
