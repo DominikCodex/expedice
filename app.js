@@ -196,6 +196,11 @@ const els = {
   settingsMessage: document.getElementById("settings-message"),
   settingsMapyKey: document.getElementById("settings-mapy-key"),
   settingsMapyStatus: document.getElementById("settings-mapy-status"),
+  settingsProductFeedUrl: document.getElementById("settings-product-feed-url"),
+  settingsProductFeedTimeout: document.getElementById("settings-product-feed-timeout"),
+  settingsProductFeedMaxMb: document.getElementById("settings-product-feed-max-mb"),
+  settingsProductFeedStatus: document.getElementById("settings-product-feed-status"),
+  productFeedTest: document.getElementById("product-feed-test"),
   settingsPaymentLookback: document.getElementById("settings-payment-lookback"),
   settingsPaymentStatus: document.getElementById("settings-payment-status"),
   settingsPaymentIveronikaUrl: document.getElementById("settings-payment-iveronika-url"),
@@ -1531,6 +1536,31 @@ function renderSecretInput(input, status, saved, savedText, emptyText) {
   }
 }
 
+function formatBytes(bytes) {
+  const value = Number(bytes) || 0;
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  if (value >= 1024) return `${(value / 1024).toFixed(1)} kB`;
+  return `${value} B`;
+}
+
+function productFeedStatusText(productFeed) {
+  const timeout = productFeed.downloadTimeoutSeconds || 300;
+  const maxMb = productFeed.maxDownloadMegabytes || 512;
+  return productFeed.hasUrl
+    ? `Produktový feed je uložený. Timeout ${timeout} s, limit ${maxMb} MB.`
+    : `Produktový feed zatím není uložený. Timeout ${timeout} s, limit ${maxMb} MB.`;
+}
+
+function collectProductFeedSettings() {
+  return {
+    url: els.settingsProductFeedUrl.value.trim(),
+    encoding: "windows-1250",
+    delimiter: ";",
+    downloadTimeoutSeconds: Number(els.settingsProductFeedTimeout.value) || 300,
+    maxDownloadMegabytes: Number(els.settingsProductFeedMaxMb.value) || 512,
+  };
+}
+
 function paymentCheckKind(row) {
   return normalize(row?.paymentCheckStatus || "");
 }
@@ -1629,6 +1659,7 @@ function renderSettings(settings) {
   const mapy = settings.mapy || {};
   const printAgent = settings.printAgent || {};
   const paymentFeeds = settings.paymentFeeds || {};
+  const productFeed = settings.productFeed || {};
   const paymentFeedShops = paymentFeeds.shops || {};
   const paymentIveronika = paymentFeedShops.iveronika_cz || {};
   const paymentIveronikaSk = paymentFeedShops.iveronika_sk || {};
@@ -1647,6 +1678,15 @@ function renderSettings(settings) {
   if (els.settingsPrintTestingMode) {
     els.settingsPrintTestingMode.checked = Boolean(printAgent.testingMode);
   }
+  renderSecretInput(
+    els.settingsProductFeedUrl,
+    els.settingsProductFeedStatus,
+    productFeed.hasUrl,
+    productFeedStatusText(productFeed),
+    productFeedStatusText(productFeed)
+  );
+  els.settingsProductFeedTimeout.value = productFeed.downloadTimeoutSeconds || 300;
+  els.settingsProductFeedMaxMb.value = productFeed.maxDownloadMegabytes || 512;
   els.settingsPaymentLookback.value = paymentFeeds.lookbackDays || 10;
   if (els.settingsPaymentStatus) {
     const dateRange = paymentFeeds.dateRange || {};
@@ -1763,6 +1803,7 @@ function collectSettings() {
     printAgent: {
       testingMode: Boolean(els.settingsPrintTestingMode?.checked),
     },
+    productFeed: collectProductFeedSettings(),
     paymentFeeds: {
       lookbackDays: Number(els.settingsPaymentLookback.value) || 10,
       encoding: "windows-1250",
@@ -1848,6 +1889,32 @@ async function saveSettings() {
     setSettingsMessage(`Nastavení se nepodařilo uložit: ${error.message}`, "error");
   } finally {
     els.settingsSave.disabled = false;
+  }
+}
+
+async function testProductFeed() {
+  els.productFeedTest.disabled = true;
+  els.settingsProductFeedStatus.classList.remove("settings-hint-ok", "settings-hint-missing");
+  els.settingsProductFeedStatus.textContent = "Ověřuju produktový feed...";
+  setSettingsMessage("Ověřuju produktový feed...", "neutral");
+  try {
+    const data = await fetchJson("/api/product-feed/check", {
+      method: "POST",
+      body: JSON.stringify({ productFeed: collectProductFeedSettings() }),
+    });
+    const imageColumns = (data.imageColumns || []).slice(0, 6).join(", ");
+    const rowsSeen = Number(data.rowsSeen || 0).toLocaleString("cs-CZ");
+    els.settingsProductFeedStatus.textContent =
+      `Feed OK: ${rowsSeen} řádků, ${formatBytes(data.bytesRead)}, ` +
+      `${data.fieldCount || 0} sloupců, obrázky: ${imageColumns || "nenalezeny"}.`;
+    els.settingsProductFeedStatus.classList.add("settings-hint-ok");
+    setSettingsMessage("Produktový feed je ověřený.", "success");
+  } catch (error) {
+    els.settingsProductFeedStatus.textContent = `Feed se nepodařilo ověřit: ${error.message}`;
+    els.settingsProductFeedStatus.classList.add("settings-hint-missing");
+    setSettingsMessage(`Produktový feed se nepodařilo ověřit: ${error.message}`, "error");
+  } finally {
+    els.productFeedTest.disabled = false;
   }
 }
 
@@ -4643,6 +4710,7 @@ window.addEventListener("popstate", () => {
   switchView(viewFromRoute(), { updateRoute: false });
 });
 els.settingsSave.addEventListener("click", saveSettings);
+els.productFeedTest.addEventListener("click", testProductFeed);
 els.usersRefresh.addEventListener("click", loadUsers);
 els.userCreateSubmit.addEventListener("click", createUserFromForm);
 els.usersList.addEventListener("click", (event) => {

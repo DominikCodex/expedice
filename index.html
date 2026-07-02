@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Roztřídění zboží</title>
-    <link rel="stylesheet" href="styles.css?v=admin-trash-20260702" />
+    <link rel="stylesheet" href="styles.css?v=product-feed-settings-20260702" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=remove-dataset-delete-20260702"></script>
+    <script defer src="app.js?v=product-feed-settings-20260702"></script>
   </head>
   <body>
     <section id="auth-view" class="auth-view">
@@ -404,6 +404,26 @@
                     <input id="settings-mapy-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
                   </label>
                   <div id="settings-mapy-status" class="settings-hint"></div>
+                </fieldset>
+
+                <fieldset class="settings-card settings-card-wide">
+                  <legend>Produktový feed</legend>
+                  <label class="field">
+                    <span>URL feedu produktů</span>
+                    <input id="settings-product-feed-url" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
+                  </label>
+                  <label class="field">
+                    <span>Timeout stažení (s)</span>
+                    <input id="settings-product-feed-timeout" type="number" min="30" max="900" step="30" autocomplete="off" />
+                  </label>
+                  <label class="field">
+                    <span>Limit velikosti (MB)</span>
+                    <input id="settings-product-feed-max-mb" type="number" min="50" max="1024" step="50" autocomplete="off" />
+                  </label>
+                  <div class="settings-actions">
+                    <button id="product-feed-test" type="button" class="secondary">Ověřit feed</button>
+                  </div>
+                  <div id="settings-product-feed-status" class="settings-hint"></div>
                 </fieldset>
 
                 <fieldset class="settings-card settings-card-wide">

@@ -6,6 +6,7 @@ import json
 import os
 import re
 import secrets
+import tempfile
 import threading
 import time
 import unicodedata
@@ -42,6 +43,14 @@ INITIAL_ADMIN_PASSWORD = "1234"
 PASSWORD_HASH_METHOD = "pbkdf2:sha256:260000"
 PAYMENT_SYNC_LOCK = threading.Lock()
 PAYMENT_SYNC_ACTIVE_SECONDS = 20 * 60
+PRODUCT_FEED_DEFAULT_TIMEOUT_SECONDS = 300
+PRODUCT_FEED_DEFAULT_MAX_DOWNLOAD_MB = 512
+PRODUCT_FEED_MIN_TIMEOUT_SECONDS = 30
+PRODUCT_FEED_MAX_TIMEOUT_SECONDS = 900
+PRODUCT_FEED_MIN_DOWNLOAD_MB = 50
+PRODUCT_FEED_MAX_DOWNLOAD_MB = 1024
+
+csv.field_size_limit(max(csv.field_size_limit(), 20 * 1024 * 1024))
 
 DEFAULT_SHOPS = [
     {
@@ -901,6 +910,8 @@ def create_user_session(cur, user_id):
 
 def api_path_requires_admin(path):
     if path == "/api/settings" or path.startswith("/api/users"):
+        return True
+    if path.startswith("/api/product-feed"):
         return True
     if path == "/api/packeta/validate" or path == "/api/dpd/send":
         return True
@@ -1995,6 +2006,13 @@ def default_settings():
                 },
             },
         },
+        "productFeed": {
+            "url": os.environ.get("PRODUCT_FEED_URL", ""),
+            "encoding": os.environ.get("PRODUCT_FEED_ENCODING", "windows-1250"),
+            "delimiter": os.environ.get("PRODUCT_FEED_DELIMITER", ";"),
+            "downloadTimeoutSeconds": env_int("PRODUCT_FEED_DOWNLOAD_TIMEOUT_SECONDS", PRODUCT_FEED_DEFAULT_TIMEOUT_SECONDS),
+            "maxDownloadMegabytes": env_int("PRODUCT_FEED_MAX_DOWNLOAD_MB", PRODUCT_FEED_DEFAULT_MAX_DOWNLOAD_MB),
+        },
         "packeta": {
             "apiUrl": os.environ.get("PACKETA_API_URL", "https://www.zasilkovna.cz/api/rest"),
             "apiPassword": os.environ.get("PACKETA_API_PASSWORD", ""),
@@ -2068,6 +2086,36 @@ def deep_merge_settings(base, override):
         else:
             merged[key] = value
     return merged
+
+
+def clamp_int(value, default, minimum, maximum):
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        number = default
+    return max(minimum, min(maximum, number))
+
+
+def normalize_product_feed_settings(settings):
+    source = settings if isinstance(settings, dict) else {}
+    delimiter = clean_text(source.get("delimiter") or ";")
+    normalized = dict(source)
+    normalized["url"] = clean_text(source.get("url")).strip()
+    normalized["encoding"] = clean_text(source.get("encoding") or "windows-1250").strip() or "windows-1250"
+    normalized["delimiter"] = delimiter[:1] if delimiter else ";"
+    normalized["downloadTimeoutSeconds"] = clamp_int(
+        source.get("downloadTimeoutSeconds"),
+        PRODUCT_FEED_DEFAULT_TIMEOUT_SECONDS,
+        PRODUCT_FEED_MIN_TIMEOUT_SECONDS,
+        PRODUCT_FEED_MAX_TIMEOUT_SECONDS,
+    )
+    normalized["maxDownloadMegabytes"] = clamp_int(
+        source.get("maxDownloadMegabytes"),
+        PRODUCT_FEED_DEFAULT_MAX_DOWNLOAD_MB,
+        PRODUCT_FEED_MIN_DOWNLOAD_MB,
+        PRODUCT_FEED_MAX_DOWNLOAD_MB,
+    )
+    return normalized
 
 
 def normalize_carrier_client_code(value):
@@ -2158,6 +2206,9 @@ def read_settings(include_secrets=False):
         shop["hasUrl"] = bool(value)
         shop["url"] = ""
     public_settings["paymentFeeds"]["dateRange"] = payment_feed_date_range(public_settings.get("paymentFeeds", {}))
+    product_feed = public_settings.get("productFeed", {})
+    product_feed["hasUrl"] = bool(product_feed.get("url"))
+    product_feed["url"] = ""
     return public_settings
 
 
@@ -2190,12 +2241,15 @@ def save_settings_payload(payload):
     current = read_settings(include_secrets=True)
     incoming = payload if isinstance(payload, dict) else {}
     next_settings = deep_merge_settings(current, incoming)
+    next_settings.setdefault("productFeed", {})
     merge_secret_field(next_settings["mapy"], current["mapy"], "apiKey")
     merge_secret_field(next_settings["packeta"], current["packeta"], "apiPassword")
     merge_secret_field(next_settings["dpd"], current["dpd"], "apiKey")
+    merge_secret_field(next_settings["productFeed"], current.get("productFeed", {}), "url")
     merge_client_secret_fields(next_settings["packeta"], current["packeta"], "apiPassword")
     merge_client_secret_fields(next_settings["dpd"], current["dpd"], "apiKey")
     merge_shop_secret_fields(next_settings["paymentFeeds"], current["paymentFeeds"], "url")
+    next_settings["productFeed"] = normalize_product_feed_settings(next_settings["productFeed"])
     next_settings["dpd"]["apiBaseUrl"] = clean_text(next_settings["dpd"].get("apiBaseUrl")).rstrip("/")
     try:
         lookback_days = int(next_settings["paymentFeeds"].get("lookbackDays") or 10)
@@ -2219,6 +2273,141 @@ def save_settings_payload(payload):
             saved = cur.fetchone()["value"]
 
     return deep_merge_settings(default_settings(), saved)
+
+
+class ProductFeedError(Exception):
+    pass
+
+
+def product_feed_settings_from_payload(payload):
+    current = read_settings(include_secrets=True).get("productFeed", {})
+    incoming = payload if isinstance(payload, dict) else {}
+    settings = deep_merge_settings(current, incoming)
+    merge_secret_field(settings, current, "url")
+    return normalize_product_feed_settings(settings)
+
+
+def format_size_mb(byte_count):
+    return round(byte_count / (1024 * 1024), 2)
+
+
+def product_feed_image_columns(headers):
+    columns = []
+    for header in headers:
+        key = clean_text(header).strip()
+        normalized = key.lower()
+        if normalized == "defaultimage" or normalized == "image" or re.fullmatch(r"image\d+", normalized):
+            columns.append(key)
+    return columns
+
+
+def product_feed_first_image(row, image_columns):
+    for column in image_columns:
+        value = clean_text(row.get(column)).strip()
+        if value:
+            return value
+    return ""
+
+
+def probe_product_feed(settings):
+    product_settings = normalize_product_feed_settings(settings)
+    feed_url = clean_text(product_settings.get("url")).strip()
+    if not feed_url:
+        raise ProductFeedError("URL produktového feedu není nastavená.")
+
+    parsed = urllib.parse.urlsplit(feed_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ProductFeedError("Produktový feed musí být dostupný přes http nebo https URL.")
+
+    timeout = product_settings["downloadTimeoutSeconds"]
+    max_bytes = product_settings["maxDownloadMegabytes"] * 1024 * 1024
+    request_obj = urllib.request.Request(
+        feed_url,
+        headers={"User-Agent": "ExpediceProductFeed/1.0"},
+    )
+
+    try:
+        with urllib.request.urlopen(request_obj, timeout=timeout) as response:
+            content_length = response.headers.get("Content-Length")
+            content_length_bytes = int(content_length) if content_length and content_length.isdigit() else None
+            content_type = response.headers.get("Content-Type", "")
+            if content_length_bytes and content_length_bytes > max_bytes:
+                raise ProductFeedError(
+                    f"Feed hlásí velikost {format_size_mb(content_length_bytes)} MB, limit je {product_settings['maxDownloadMegabytes']} MB."
+                )
+
+            bytes_read = 0
+            with tempfile.TemporaryFile() as tmp:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    bytes_read += len(chunk)
+                    if bytes_read > max_bytes:
+                        raise ProductFeedError(
+                            f"Feed je větší než povolený limit {product_settings['maxDownloadMegabytes']} MB."
+                        )
+                    tmp.write(chunk)
+
+                tmp.seek(0)
+                text_stream = io.TextIOWrapper(
+                    tmp,
+                    encoding=product_settings["encoding"],
+                    errors="replace",
+                    newline="",
+                )
+                reader = csv.DictReader(text_stream, delimiter=product_settings["delimiter"])
+                headers = [clean_text(header).strip() for header in (reader.fieldnames or []) if clean_text(header).strip()]
+                if not headers:
+                    raise ProductFeedError("Feed se stáhl, ale CSV hlavička je prázdná.")
+
+                code_column = next((header for header in headers if header.lower() == "code"), "")
+                if not code_column:
+                    raise ProductFeedError("Feed nemá sloupec code, podle kterého budeme párovat varianty.")
+
+                image_columns = product_feed_image_columns(headers)
+                if not image_columns:
+                    raise ProductFeedError("Feed nemá sloupce defaultImage/image pro obrázky produktů.")
+
+                rows_seen = 0
+                sample = []
+                for row in reader:
+                    rows_seen += 1
+                    if len(sample) < 3:
+                        sample.append(
+                            {
+                                "code": clean_text(row.get(code_column)).strip(),
+                                "name": clean_text(row.get("name") or row.get("Name")).strip(),
+                                "image": product_feed_first_image(row, image_columns),
+                            }
+                        )
+
+        return {
+            "ok": True,
+            "rowsSeen": rows_seen,
+            "bytesRead": bytes_read,
+            "downloadedMegabytes": format_size_mb(bytes_read),
+            "maxDownloadMegabytes": product_settings["maxDownloadMegabytes"],
+            "timeoutSeconds": timeout,
+            "fieldCount": len(headers),
+            "codeColumn": code_column,
+            "imageColumns": image_columns,
+            "sample": sample,
+            "contentType": content_type,
+            "contentLength": content_length_bytes,
+        }
+    except ProductFeedError:
+        raise
+    except urllib.error.HTTPError as exc:
+        raise ProductFeedError(f"Feed vrátil HTTP {exc.code}: {clean_text(exc.reason)}") from exc
+    except urllib.error.URLError as exc:
+        raise ProductFeedError(f"Feed se nepodařilo stáhnout: {clean_text(exc.reason)}") from exc
+    except TimeoutError as exc:
+        raise ProductFeedError(f"Stahování feedu překročilo timeout {timeout} s.") from exc
+    except csv.Error as exc:
+        raise ProductFeedError(f"CSV feed se nepodařilo přečíst: {clean_text(exc)}") from exc
+    except UnicodeError as exc:
+        raise ProductFeedError(f"Feed se nepodařilo dekódovat: {clean_text(exc)}") from exc
 
 
 def row_to_api(row):
@@ -5497,6 +5686,20 @@ def update_settings():
     payload = request.get_json(silent=True) or {}
     save_settings_payload(payload.get("settings") or payload)
     return jsonify({"ok": True, "settings": read_settings(include_secrets=False)})
+
+
+@app.route("/api/product-feed/check", methods=["POST"])
+def check_product_feed():
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+
+    payload = request.get_json(silent=True) or {}
+    try:
+        settings = product_feed_settings_from_payload(payload.get("productFeed") or {})
+        return jsonify(probe_product_feed(settings))
+    except ProductFeedError as exc:
+        return jsonify({"ok": False, "error": clean_text(exc)}), 400
 
 
 @app.route("/api/payment-feeds/sync", methods=["POST"])
