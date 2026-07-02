@@ -416,31 +416,6 @@
                 <div id="eans-summary" class="dataset-summary">Čekám na data.</div>
               </div>
 
-              <section class="ean-period-panel" aria-label="Období EAN auditu">
-                <div class="ean-period-status">
-                  <p class="eyebrow">Období</p>
-                  <strong id="eans-period-label">Aktuální načtená dávka</strong>
-                  <small id="eans-period-meta">Audit podle právě načteného roztřídění.</small>
-                </div>
-                <div class="ean-period-controls">
-                  <label class="field">
-                    <span>Od</span>
-                    <input id="eans-filter-date-from" type="date" />
-                  </label>
-                  <label class="field">
-                    <span>Do</span>
-                    <input id="eans-filter-date-to" type="date" />
-                  </label>
-                  <div id="eans-period-buttons" class="ean-period-buttons" aria-label="Rychlé volby období">
-                    <button type="button" class="secondary" data-ean-period="current">Načtená dávka</button>
-                    <button type="button" class="secondary" data-ean-period="day">Den</button>
-                    <button type="button" class="secondary" data-ean-period="7">7 dní</button>
-                    <button type="button" class="secondary" data-ean-period="14">14 dní</button>
-                    <button type="button" class="secondary" data-ean-period="30">30 dní</button>
-                  </div>
-                </div>
-              </section>
-
               <section class="ean-filter-panel" aria-label="Filtry EANů">
                 <label class="field">
                   <span>Hledání</span>
@@ -449,7 +424,6 @@
                 <label class="field">
                   <span>Stav</span>
                   <select id="eans-filter-risk">
-                    <option value="shutdown">Kandidáti na vypnutí</option>
                     <option value="ambiguous">Rizikové EANy</option>
                     <option value="">Všechny EANy</option>
                     <option value="scan-choice">Vyžadují výběr</option>
@@ -476,7 +450,6 @@
                 <label class="field">
                   <span>Řazení</span>
                   <select id="eans-filter-sort">
-                    <option value="shutdown">Kandidáti nahoře</option>
                     <option value="risk">Riziko</option>
                     <option value="ean">EAN</option>
                     <option value="candidates">Počet shod</option>
@@ -485,17 +458,6 @@
                 </label>
                 <button id="eans-filter-reset" type="button" class="secondary">Vyčistit filtry</button>
               </section>
-            </section>
-
-            <section id="eans-shutdown-panel" class="table-panel ean-shutdown-panel hidden">
-              <div class="section-head compact">
-                <div>
-                  <p class="eyebrow">Priorita</p>
-                  <h2>Potenciální kandidáti na vypnutí</h2>
-                </div>
-                <div id="eans-shutdown-count" class="row-count">0 kandidátů</div>
-              </div>
-              <div id="eans-shutdown-list" class="ean-shutdown-list"></div>
             </section>
 
             <section class="table-panel ean-audit-table-panel">
