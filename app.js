@@ -3387,10 +3387,13 @@ function workflowCountryText(row) {
 }
 
 function workflowSortingItems(row) {
-  if (Array.isArray(row?.workflowSortingItems)) return row.workflowSortingItems;
+  if (Array.isArray(row?.workflowSortingItems)) {
+    return applyCompletionOrderQuantitiesToSortingItems(row, row.workflowSortingItems);
+  }
   const orderNumber = normalize(row?.orderNumber || "").trim();
   if (!orderNumber) return [];
-  return (state.items || []).filter((item) => normalize(item.orderNumber || "").trim() === orderNumber);
+  const items = (state.items || []).filter((item) => normalize(item.orderNumber || "").trim() === orderNumber);
+  return applyCompletionOrderQuantitiesToSortingItems(row, items);
 }
 
 function workflowSortingCheck(row) {
@@ -3661,6 +3664,84 @@ function completionProductItemsForOrder(row) {
   });
 }
 
+function workflowQuantityFromValue(value) {
+  const text = String(value ?? "").replace(",", ".").trim();
+  if (!text) return 0;
+  const match = text.match(/\d+(?:\.\d+)?/);
+  if (!match) return 0;
+  return Math.max(0, Math.trunc(toNumber(match[0], 0)));
+}
+
+function workflowItemQuantity(item) {
+  const fields = [
+    item?.orderQuantity,
+    item?.displayQuantity,
+    item?.initialQuantity,
+    item?.quantity,
+    item?.quantityText,
+    item?.mnozstvi,
+    item?.["Množství"],
+    item?.count,
+    item?.qty,
+  ];
+  for (const value of fields) {
+    const quantity = workflowQuantityFromValue(value);
+    if (quantity > 0) return quantity;
+  }
+  return 0;
+}
+
+function workflowItemCodeKeys(item) {
+  const keys = new Set();
+  addProductImageCode(keys, item?.variantCode);
+  addProductImageCode(keys, item?.code);
+  addProductImageCode(keys, item?.sku);
+  if (!keys.size) addProductImageCode(keys, item?.productCode);
+  return Array.from(keys);
+}
+
+function completionOrderQuantityMap(row) {
+  const quantities = new Map();
+  completionProductItemsForOrder(row).forEach((item) => {
+    const quantity = workflowItemQuantity(item) || 1;
+    workflowItemCodeKeys(item).forEach((code) => {
+      quantities.set(code, (quantities.get(code) || 0) + quantity);
+    });
+  });
+  return quantities;
+}
+
+function applyCompletionOrderQuantitiesToSortingItems(row, items) {
+  const quantityByCode = completionOrderQuantityMap(row);
+  const sortingItems = items || [];
+  if (!quantityByCode.size) {
+    const orderTotal = workflowQuantityFromValue(row?.quantity || row?.amount);
+    if (orderTotal > 0 && sortingItems.length === orderTotal) {
+      return sortingItems.map((item) => ({
+        ...item,
+        sortingInitialQuantity: item.initialQuantity || item.quantity || "",
+        initialQuantity: 1,
+        quantity: 1,
+        orderQuantity: 1,
+      }));
+    }
+    return sortingItems;
+  }
+  return sortingItems.map((item) => {
+    const matchedCode = workflowItemCodeKeys(item).find((code) => quantityByCode.has(code));
+    if (!matchedCode) return item;
+    const orderQuantity = quantityByCode.get(matchedCode);
+    if (!orderQuantity) return item;
+    return {
+      ...item,
+      sortingInitialQuantity: item.initialQuantity || item.quantity || "",
+      initialQuantity: orderQuantity,
+      quantity: orderQuantity,
+      orderQuantity,
+    };
+  });
+}
+
 function workflowPhysicalItems(row) {
   if (!row) return [];
   const sortingCheck = workflowSortingCheck(row);
@@ -3829,7 +3910,12 @@ function workflowSortingCheckHtml(row) {
           const hasRemaining = item.remaining !== null && item.remaining !== undefined && item.remaining !== "";
           const showRemaining = flowKind === "sorting" && hasRemaining;
           const remaining = hasRemaining ? Math.max(0, Math.trunc(toNumber(item.remaining, 0))) : null;
-          const initial = Math.max(0, Math.trunc(toNumber(item.initialQuantity, item.quantity || item.remaining || 0)));
+          const initial = workflowItemQuantity(item) || 1;
+          const sortingInitial = workflowQuantityFromValue(item.sortingInitialQuantity);
+          const quantityTitle =
+            sortingInitial && sortingInitial !== initial
+              ? ` title="${escapeHtml(`Množství podle objednávky. V roztřídění bylo ${sortingInitial} ks.`)}"`
+              : "";
           const variantParts = String(item.variant || "")
             .split("/")
             .map((part) => part.trim())
@@ -3848,7 +3934,7 @@ function workflowSortingCheckHtml(row) {
               <span class="workflow-product-code">${escapeHtml(item.variantCode || item.productCode || "-")}</span>
               <span class="workflow-product-name">${escapeHtml(item.productName || item.info || "Položka objednávky")}</span>
               <span class="workflow-product-meta">${escapeHtml(meta.join(" | ") || "Bez varianty")}</span>
-              <strong class="workflow-product-qty">${escapeHtml(initial || 1)} ks</strong>
+              <strong class="workflow-product-qty"${quantityTitle}>${escapeHtml(initial)} ks</strong>
               <strong class="workflow-product-state">${showRemaining ? `${escapeHtml(remaining)} zbývá` : "ke kontrole"}</strong>
               <strong class="workflow-check-action">${checked ? "Zkontrolováno" : "Klik = zkontrolovat"}</strong>
             </button>
