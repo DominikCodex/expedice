@@ -975,12 +975,19 @@ function focusBarcodeInputForView(view) {
   const target = view === "completion" ? els.workflowBoxCode : view === "sorting" ? els.eanInput : null;
   if (!target) return;
 
-  requestAnimationFrame(() => {
+  const applyFocus = () => {
+    if (view === "completion" && els.completionView.classList.contains("hidden")) return;
+    if (view === "sorting" && els.sortingView.classList.contains("hidden")) return;
     if (!document.body.contains(target) || target.disabled) return;
     target.focus({ preventScroll: true });
     if (typeof target.select === "function") {
       target.select();
     }
+  };
+
+  requestAnimationFrame(() => {
+    applyFocus();
+    requestAnimationFrame(applyFocus);
   });
 }
 
@@ -1203,6 +1210,7 @@ function applySortingDataset(dataset, rows) {
   renderAll();
   ensureProductImagesForCodes(collectProductImageCodesFromItems(nextItems));
   setMessage(`Načteno roztřídění: ${datasetLabel(sortingState.dataset)}.`, "success");
+  focusBarcodeInputForView("sorting");
 }
 
 async function loadSortingDataset(datasetId) {
