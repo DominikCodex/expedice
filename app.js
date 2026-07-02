@@ -1,5 +1,6 @@
 ﻿const STORAGE_KEY = "rozrazovani-zbozi-v2";
 const MAX_HISTORY = 500;
+const EAN_AUDIT_RENDER_LIMIT = 500;
 
 const seed = window.SORTING_SEED || { items: [], eanMap: {}, summary: {} };
 
@@ -48,6 +49,14 @@ const completionFilters = {
   shop: "",
 };
 
+const eanFilters = {
+  search: "",
+  risk: "ambiguous",
+  match: "",
+  shop: "",
+  sort: "risk",
+};
+
 const expandedCompletionRows = new Set();
 
 const completionWorkflowState = {
@@ -82,6 +91,7 @@ const authState = {
 const VIEW_ROUTES = {
   sorting: "/roztrideni",
   completion: "/kompletace",
+  eans: "/eany",
   settings: "/nastaveni",
 };
 
@@ -89,6 +99,7 @@ const ROUTE_VIEWS = {
   "/": "sorting",
   "/roztrideni": "sorting",
   "/kompletace": "completion",
+  "/eany": "eans",
   "/nastaveni": "settings",
 };
 
@@ -147,6 +158,7 @@ const els = {
   expeditionDaySummary: document.getElementById("expedition-day-summary"),
   tabSorting: document.getElementById("tab-sorting"),
   tabCompletion: document.getElementById("tab-completion"),
+  tabEans: document.getElementById("tab-eans"),
   tabSettings: document.getElementById("tab-settings"),
   sortingView: document.getElementById("sorting-view"),
   sortingDataset: document.getElementById("sorting-dataset"),
@@ -200,6 +212,16 @@ const els = {
   workflowClearError: document.getElementById("workflow-clear-error"),
   workflowManualReprint: document.getElementById("workflow-manual-reprint"),
   workflowMessage: document.getElementById("workflow-message"),
+  eansView: document.getElementById("eans-view"),
+  eansSummary: document.getElementById("eans-summary"),
+  eansFilterSearch: document.getElementById("eans-filter-search"),
+  eansFilterRisk: document.getElementById("eans-filter-risk"),
+  eansFilterMatch: document.getElementById("eans-filter-match"),
+  eansFilterShop: document.getElementById("eans-filter-shop"),
+  eansFilterSort: document.getElementById("eans-filter-sort"),
+  eansFilterReset: document.getElementById("eans-filter-reset"),
+  eansRowCount: document.getElementById("eans-row-count"),
+  eansBody: document.getElementById("eans-body"),
   settingsView: document.getElementById("settings-view"),
   settingsSave: document.getElementById("settings-save"),
   settingsMessage: document.getElementById("settings-message"),
@@ -602,6 +624,7 @@ function showPasswordChange(user) {
 
 function applyRoleVisibility() {
   const admin = isAdmin();
+  els.tabEans?.classList.toggle("hidden", !admin);
   els.tabSettings.classList.toggle("hidden", !admin);
   els.expeditionDeleteDay?.classList.toggle("hidden", !admin);
   els.expeditionTrashToggle?.classList.toggle("hidden", !admin);
@@ -613,7 +636,7 @@ function applyRoleVisibility() {
   els.packetaSend?.classList.toggle("hidden", !admin);
   els.labelCacheBatch?.classList.toggle("hidden", !admin);
   els.dpdSend.classList.toggle("hidden", !admin);
-  if (!admin && !els.settingsView.classList.contains("hidden")) {
+  if (!admin && (!els.settingsView.classList.contains("hidden") || (els.eansView && !els.eansView.classList.contains("hidden")))) {
     switchView("sorting");
   }
 }
@@ -780,21 +803,28 @@ function includeInactiveQuery() {
 }
 
 function switchView(view, options = {}) {
-  if (view === "settings" && !isAdmin()) {
-    setMessage("Nastavení je dostupné jen adminovi.", "warning");
+  if ((view === "settings" || view === "eans") && !isAdmin()) {
+    setMessage("Tahle stránka je dostupná jen adminovi.", "warning");
     view = "sorting";
   }
   const completion = view === "completion";
+  const eans = view === "eans";
   const settings = view === "settings";
-  els.sortingView.classList.toggle("hidden", completion || settings);
+  els.sortingView.classList.toggle("hidden", completion || eans || settings);
   els.completionView.classList.toggle("hidden", !completion);
+  els.eansView?.classList.toggle("hidden", !eans);
   els.settingsView.classList.toggle("hidden", !settings);
-  els.tabSorting.classList.toggle("active", !completion && !settings);
+  els.tabSorting.classList.toggle("active", !completion && !eans && !settings);
   els.tabCompletion.classList.toggle("active", completion);
+  els.tabEans?.classList.toggle("active", eans);
   els.tabSettings.classList.toggle("active", settings);
 
   if (completion && !completionState.loaded) {
     loadCompletionDatasets();
+  }
+
+  if (eans) {
+    renderEanAudit();
   }
 
   if (settings && !settingsState.loaded) {
@@ -805,7 +835,7 @@ function switchView(view, options = {}) {
     loadUsers();
   }
 
-  if (!completion && !settings) {
+  if (!completion && !eans && !settings) {
     requestAnimationFrame(() => els.eanInput.focus());
   }
 
@@ -4483,6 +4513,350 @@ function renderEans(item) {
   `;
 }
 
+function uniqueCleanValues(values) {
+  const unique = new Map();
+  values
+    .map((value) => String(value ?? "").trim())
+    .filter(Boolean)
+    .forEach((value) => {
+      const key = normalize(value);
+      if (!unique.has(key)) unique.set(key, value);
+    });
+  return Array.from(unique.values());
+}
+
+function sortEanCandidates(candidates) {
+  return candidates.sort((a, b) => {
+    if (a.exact !== b.exact) return a.exact ? -1 : 1;
+    const remainingDiff = toNumber(b.item.remaining, 0) - toNumber(a.item.remaining, 0);
+    if (remainingDiff) return remainingDiff;
+    return Number(a.item.sequence || 0) - Number(b.item.sequence || 0);
+  });
+}
+
+function setBestEanCandidate(target, item, entry, exact) {
+  const current = target.get(item.id);
+  if (current && (!exact || current.exact)) return;
+  target.set(item.id, {
+    item,
+    entry,
+    exact,
+    matchType: exact ? "přesná varianta" : "paircode/prefix",
+  });
+}
+
+function buildEanAuditData() {
+  const itemIdsWithEan = new Set();
+  const records = Object.entries(state.eanMap || {}).map(([ean, entries]) => {
+    const entryList = Array.isArray(entries) ? entries : [];
+    const allCandidateMap = new Map();
+    const activeCandidateMap = new Map();
+
+    entryList.forEach((entry) => {
+      state.items.forEach((item) => {
+        const exact = sameCode(item.variantCode, entry.articleCode);
+        const pair = sameCode(item.paircode, entry.prefix) || sameCode(item.productCode, entry.prefix);
+        if (!exact && !pair) return;
+        itemIdsWithEan.add(item.id);
+        setBestEanCandidate(allCandidateMap, item, entry, exact);
+        if (toNumber(item.remaining, 0) > 0) {
+          setBestEanCandidate(activeCandidateMap, item, entry, exact);
+        }
+      });
+    });
+
+    const allCandidates = sortEanCandidates(Array.from(allCandidateMap.values()));
+    const activeCandidates = sortEanCandidates(Array.from(activeCandidateMap.values()));
+    const exactCandidates = activeCandidates.filter((candidate) => candidate.exact);
+    const pairCandidates = activeCandidates.filter((candidate) => !candidate.exact);
+    const articleCodes = uniqueCleanValues(entryList.map((entry) => entry.articleCode));
+    const prefixes = uniqueCleanValues(entryList.map((entry) => entry.prefix));
+    const colors = uniqueCleanValues(entryList.flatMap((entry) => [entry.color, entry.secondColor, entry.colorCode]));
+    const sizes = uniqueCleanValues(entryList.map((entry) => entry.size));
+    const shopCodes = uniqueCleanValues(allCandidates.map((candidate) => candidate.item.shopCode || "bez e-shopu"));
+    const scanMode =
+      activeCandidates.length === 0
+        ? "no-active"
+        : entryList.length === 1 && exactCandidates.length === 1
+          ? "ok"
+          : "choice";
+
+    const record = {
+      ean,
+      entries: entryList,
+      entryCount: entryList.length,
+      articleCodes,
+      prefixes,
+      colors,
+      sizes,
+      allCandidates,
+      activeCandidates,
+      exactCandidates,
+      pairCandidates,
+      shopCodes,
+      scanMode,
+    };
+    record.reasons = eanAuditReasons(record);
+    record.tone = eanAuditTone(record);
+    return record;
+  });
+
+  return {
+    records,
+    itemIdsWithEan,
+    rowsWithoutEan: state.items.filter((item) => !itemIdsWithEan.has(item.id)).length,
+  };
+}
+
+function eanAuditReasons(record) {
+  const reasons = [];
+  if (record.entryCount > 1) reasons.push("více záznamů EAN mapy");
+  if (record.articleCodes.length > 1) reasons.push("více articleCode");
+  if (record.prefixes.length > 1) reasons.push("více prefixů");
+  if (record.activeCandidates.length > 1) reasons.push("více aktivních řádků");
+  if (record.exactCandidates.length > 1) reasons.push("více přesných variant");
+  if (record.activeCandidates.length && !record.exactCandidates.length) reasons.push("jen paircode/prefix");
+  if (!record.activeCandidates.length && record.allCandidates.length) reasons.push("shody jsou na nule");
+  if (!record.allCandidates.length) reasons.push("není v aktuální dávce");
+  if (!reasons.length) reasons.push("jednoznačný sken");
+  return reasons;
+}
+
+function eanAuditTone(record) {
+  if (
+    record.scanMode === "choice" ||
+    record.entryCount > 1 ||
+    record.articleCodes.length > 1 ||
+    record.prefixes.length > 1 ||
+    record.activeCandidates.length > 1
+  ) {
+    return "danger";
+  }
+  if (record.scanMode === "no-active") return "warning";
+  return "ok";
+}
+
+function eanAuditStatusLabel(record) {
+  if (record.scanMode === "ok") return "Jednoznačný";
+  if (record.scanMode === "choice") return "Výběr kandidáta";
+  return "Bez aktivní shody";
+}
+
+function eanAuditIsAmbiguous(record) {
+  return record.tone === "danger";
+}
+
+function eanAuditHaystack(record) {
+  return normalize(
+    [
+      record.ean,
+      record.articleCodes.join(" "),
+      record.prefixes.join(" "),
+      record.colors.join(" "),
+      record.sizes.join(" "),
+      record.entries.map((entry) => entry.description).join(" "),
+      record.allCandidates
+        .map((candidate) =>
+          [
+            candidate.item.orderNumber,
+            candidate.item.sequence,
+            candidate.item.variantCode,
+            candidate.item.productCode,
+            candidate.item.paircode,
+            candidate.item.variant,
+            candidate.item.productName,
+            candidate.item.info,
+            candidate.item.shopCode,
+          ].join(" ")
+        )
+        .join(" "),
+    ].join(" ")
+  );
+}
+
+function eanAuditPassesFilters(record) {
+  const query = normalize(eanFilters.search);
+  if (query && !eanAuditHaystack(record).includes(query)) return false;
+
+  if (eanFilters.risk === "ambiguous" && !eanAuditIsAmbiguous(record)) return false;
+  if (eanFilters.risk === "scan-choice" && record.scanMode !== "choice") return false;
+  if (
+    eanFilters.risk === "map" &&
+    !(record.entryCount > 1 || record.articleCodes.length > 1 || record.prefixes.length > 1)
+  ) {
+    return false;
+  }
+  if (eanFilters.risk === "no-current" && record.activeCandidates.length) return false;
+  if (eanFilters.risk === "ok" && record.scanMode !== "ok") return false;
+
+  if (eanFilters.match === "exact" && !record.exactCandidates.length) return false;
+  if (eanFilters.match === "pair" && !record.pairCandidates.length) return false;
+  if (eanFilters.match === "none" && record.allCandidates.length) return false;
+  if (eanFilters.shop && !record.shopCodes.includes(eanFilters.shop)) return false;
+  return true;
+}
+
+function eanAuditRiskRank(record) {
+  if (record.tone === "danger") return 0;
+  if (record.tone === "warning") return 1;
+  return 2;
+}
+
+function sortEanAuditRecords(records) {
+  return records.sort((a, b) => {
+    if (eanFilters.sort === "ean") return a.ean.localeCompare(b.ean);
+    if (eanFilters.sort === "candidates") {
+      return b.activeCandidates.length - a.activeCandidates.length || a.ean.localeCompare(b.ean);
+    }
+    if (eanFilters.sort === "entries") return b.entryCount - a.entryCount || a.ean.localeCompare(b.ean);
+    return (
+      eanAuditRiskRank(a) - eanAuditRiskRank(b) ||
+      b.activeCandidates.length - a.activeCandidates.length ||
+      b.entryCount - a.entryCount ||
+      a.ean.localeCompare(b.ean)
+    );
+  });
+}
+
+function renderEanShopFilter(records) {
+  if (!els.eansFilterShop) return;
+  const shops = uniqueCleanValues(records.flatMap((record) => record.shopCodes)).sort((a, b) => a.localeCompare(b));
+  if (eanFilters.shop && !shops.includes(eanFilters.shop)) {
+    eanFilters.shop = "";
+  }
+  els.eansFilterShop.innerHTML = `
+    <option value="">Všechny e-shopy</option>
+    ${shops.map((shop) => `<option value="${escapeHtml(shop)}">${escapeHtml(shop)}</option>`).join("")}
+  `;
+  els.eansFilterShop.value = eanFilters.shop;
+}
+
+function renderEanSummary(data, visibleRecords) {
+  if (!els.eansSummary) return;
+  const ambiguous = data.records.filter(eanAuditIsAmbiguous).length;
+  const choice = data.records.filter((record) => record.scanMode === "choice").length;
+  const noCurrent = data.records.filter((record) => !record.allCandidates.length).length;
+  els.eansSummary.innerHTML = `
+    <span><strong>${escapeHtml(data.records.length)}</strong> EANů v mapě</span>
+    <span><strong>${escapeHtml(ambiguous)}</strong> rizikových</span>
+    <span><strong>${escapeHtml(choice)}</strong> vyžaduje výběr</span>
+    <span><strong>${escapeHtml(noCurrent)}</strong> mimo aktuální dávku</span>
+    <span><strong>${escapeHtml(data.rowsWithoutEan)}</strong> řádků bez EAN shody</span>
+    <span>Zobrazeno ${escapeHtml(visibleRecords.length)}</span>
+  `;
+}
+
+function renderEanEntryDetail(entry) {
+  const meta = [
+    entry.prefix ? `prefix ${entry.prefix}` : "",
+    entry.color ? `barva ${entry.color}` : "",
+    entry.size ? `vel. ${entry.size}` : "",
+    entry.weight ? `${entry.weight} kg` : "",
+  ].filter(Boolean);
+  return `
+    <div class="ean-detail-line">
+      <strong class="code">${escapeHtml(entry.articleCode || "-")}</strong>
+      <span>${escapeHtml(entry.description || "-")}</span>
+      <small>${escapeHtml(meta.join(" | ") || "bez detailu")}</small>
+    </div>
+  `;
+}
+
+function renderEanCandidateDetail(candidate) {
+  const item = candidate.item;
+  return `
+    <div class="ean-detail-line ${candidate.exact ? "exact" : "pair"}">
+      <strong class="code">${escapeHtml(item.variantCode || item.productCode || "-")}</strong>
+      <span>${escapeHtml(item.productName || item.info || "-")}</span>
+      <small>Obj. ${escapeHtml(item.orderNumber || "-")} | poř. ${escapeHtml(item.sequence || "-")} | ${escapeHtml(
+    candidate.matchType
+  )} | zbývá ${escapeHtml(item.remaining ?? "-")} | ${escapeHtml(item.shopCode || "bez e-shopu")}</small>
+    </div>
+  `;
+}
+
+function renderEanAuditDetails(record) {
+  const entries = record.entries.slice(0, 20).map(renderEanEntryDetail).join("");
+  const candidates = record.allCandidates.slice(0, 30).map(renderEanCandidateDetail).join("");
+  const entryMore = record.entries.length > 20 ? `<small class="muted">+${escapeHtml(record.entries.length - 20)} dalších záznamů</small>` : "";
+  const candidateMore =
+    record.allCandidates.length > 30 ? `<small class="muted">+${escapeHtml(record.allCandidates.length - 30)} dalších shod</small>` : "";
+  return `
+    <details class="ean-audit-detail">
+      <summary>Podrobnosti</summary>
+      <div class="ean-detail-grid">
+        <div>
+          <h3>EAN mapa</h3>
+          ${entries || `<div class="empty">Bez záznamu v EAN mapě.</div>`}
+          ${entryMore}
+        </div>
+        <div>
+          <h3>Shody v dávce</h3>
+          ${candidates || `<div class="empty">Žádná shoda v aktuální dávce.</div>`}
+          ${candidateMore}
+        </div>
+      </div>
+    </details>
+  `;
+}
+
+function renderEanAuditRow(record) {
+  const reasonHtml = record.reasons
+    .slice(0, 5)
+    .map((reason) => `<span class="ean-reason ${escapeHtml(record.tone)}">${escapeHtml(reason)}</span>`)
+    .join("");
+  const extraReasons = record.reasons.length > 5 ? `<span class="ean-reason">+${escapeHtml(record.reasons.length - 5)}</span>` : "";
+  const firstArticles = record.articleCodes.slice(0, 3).join(", ") || "-";
+  const firstPrefixes = record.prefixes.slice(0, 3).join(", ") || "-";
+  return `
+    <tr class="ean-audit-row ${escapeHtml(record.tone)}">
+      <td class="code">${escapeHtml(record.ean)}</td>
+      <td>
+        <span class="status-chip ${escapeHtml(record.tone)}">${escapeHtml(eanAuditStatusLabel(record))}</span>
+      </td>
+      <td>
+        <strong>${escapeHtml(record.entryCount)} záznamů</strong>
+        <small>${escapeHtml(record.articleCodes.length)} article | ${escapeHtml(record.prefixes.length)} prefix</small>
+        <small class="code">${escapeHtml(firstArticles)}</small>
+        <small>${escapeHtml(firstPrefixes)}</small>
+      </td>
+      <td>
+        <strong>${escapeHtml(record.activeCandidates.length)} aktivních shod</strong>
+        <small>${escapeHtml(record.exactCandidates.length)} přesně | ${escapeHtml(record.pairCandidates.length)} přes prefix</small>
+        <small>${escapeHtml(record.allCandidates.length)} shod celkem</small>
+      </td>
+      <td><div class="ean-reasons">${reasonHtml}${extraReasons}</div></td>
+      <td>${renderEanAuditDetails(record)}</td>
+    </tr>
+  `;
+}
+
+function renderEanAudit() {
+  if (!els.eansBody) return;
+  const data = buildEanAuditData();
+  renderEanShopFilter(data.records);
+  const filtered = sortEanAuditRecords(data.records.filter(eanAuditPassesFilters));
+  const visible = filtered.slice(0, EAN_AUDIT_RENDER_LIMIT);
+  const hiddenCount = filtered.length - visible.length;
+
+  renderEanSummary(data, filtered);
+  els.eansRowCount.textContent = `${filtered.length} EANů${hiddenCount > 0 ? ` | zobrazeno prvních ${EAN_AUDIT_RENDER_LIMIT}` : ""}`;
+
+  if (!visible.length) {
+    els.eansBody.innerHTML = `<tr><td colspan="6" class="empty">Nic nenalezeno.</td></tr>`;
+    return;
+  }
+
+  els.eansBody.innerHTML = `
+    ${visible.map(renderEanAuditRow).join("")}
+    ${
+      hiddenCount > 0
+        ? `<tr><td colspan="6" class="empty">Dalších ${escapeHtml(hiddenCount)} EANů je skryto. Zpřesni filtr nebo hledání.</td></tr>`
+        : ""
+    }
+  `;
+}
+
 function visibleItems() {
   const query = normalize(els.manualSearch.value.trim());
   return state.items.filter((item) => {
@@ -4621,6 +4995,9 @@ function renderAll() {
   renderTable();
   renderHistory();
   renderCandidates();
+  if (els.eansView && !els.eansView.classList.contains("hidden")) {
+    renderEanAudit();
+  }
 }
 
 function historyEntry(item, amount, type, context = {}) {
@@ -4980,6 +5357,7 @@ els.expeditionDayList.addEventListener("click", (event) => {
 
 els.tabSorting.addEventListener("click", () => switchView("sorting"));
 els.tabCompletion.addEventListener("click", () => switchView("completion"));
+els.tabEans?.addEventListener("click", () => switchView("eans"));
 els.tabSettings.addEventListener("click", () => switchView("settings"));
 window.addEventListener("popstate", () => {
   if (!authState.user) return;
@@ -5107,6 +5485,39 @@ els.completionFilterReset?.addEventListener("click", () => {
   els.completionFilterStatus.value = "";
   els.completionFilterShop.value = "";
   renderCompletion();
+});
+els.eansFilterSearch?.addEventListener("input", () => {
+  eanFilters.search = els.eansFilterSearch.value.trim();
+  renderEanAudit();
+});
+els.eansFilterRisk?.addEventListener("change", () => {
+  eanFilters.risk = els.eansFilterRisk.value;
+  renderEanAudit();
+});
+els.eansFilterMatch?.addEventListener("change", () => {
+  eanFilters.match = els.eansFilterMatch.value;
+  renderEanAudit();
+});
+els.eansFilterShop?.addEventListener("change", () => {
+  eanFilters.shop = els.eansFilterShop.value;
+  renderEanAudit();
+});
+els.eansFilterSort?.addEventListener("change", () => {
+  eanFilters.sort = els.eansFilterSort.value;
+  renderEanAudit();
+});
+els.eansFilterReset?.addEventListener("click", () => {
+  eanFilters.search = "";
+  eanFilters.risk = "ambiguous";
+  eanFilters.match = "";
+  eanFilters.shop = "";
+  eanFilters.sort = "risk";
+  if (els.eansFilterSearch) els.eansFilterSearch.value = "";
+  if (els.eansFilterRisk) els.eansFilterRisk.value = eanFilters.risk;
+  if (els.eansFilterMatch) els.eansFilterMatch.value = "";
+  if (els.eansFilterShop) els.eansFilterShop.value = "";
+  if (els.eansFilterSort) els.eansFilterSort.value = eanFilters.sort;
+  renderEanAudit();
 });
 els.completionValidateAddresses?.addEventListener("click", validateAddressDeliveriesBulk);
 els.addressValidationLogRefresh?.addEventListener("click", loadAddressValidationLog);

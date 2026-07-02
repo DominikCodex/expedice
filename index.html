@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Roztřídění zboží</title>
-    <link rel="stylesheet" href="styles.css?v=workflow-cleanup-20260702" />
+    <link rel="stylesheet" href="styles.css?v=ean-audit-20260702" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=workflow-cleanup-20260702"></script>
+    <script defer src="app.js?v=ean-audit-20260702"></script>
   </head>
   <body>
     <section id="auth-view" class="auth-view">
@@ -101,6 +101,7 @@
           <nav class="view-tabs" aria-label="Moduly expedice">
             <button id="tab-sorting" type="button" class="tab-button active">Roztřídění</button>
             <button id="tab-completion" type="button" class="tab-button">Kompletace</button>
+            <button id="tab-eans" type="button" class="tab-button hidden">EANY</button>
             <button id="tab-settings" type="button" class="tab-button">Nastavení</button>
           </nav>
 
@@ -401,6 +402,86 @@
               </div>
               <div id="address-validation-log" class="address-validation-log">
                 <p class="empty-log">Log se načte po výběru kompletace.</p>
+              </div>
+            </section>
+          </section>
+
+          <section id="eans-view" class="app-view hidden">
+            <section class="table-panel ean-audit-panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">EAN audit</p>
+                  <h2>Přehled EANů</h2>
+                </div>
+                <div id="eans-summary" class="dataset-summary">Čekám na data.</div>
+              </div>
+
+              <section class="ean-filter-panel" aria-label="Filtry EANů">
+                <label class="field">
+                  <span>Hledání</span>
+                  <input id="eans-filter-search" autocomplete="off" placeholder="EAN, kód, prefix, barva, velikost..." />
+                </label>
+                <label class="field">
+                  <span>Stav</span>
+                  <select id="eans-filter-risk">
+                    <option value="ambiguous">Rizikové EANy</option>
+                    <option value="">Všechny EANy</option>
+                    <option value="scan-choice">Vyžadují výběr</option>
+                    <option value="map">Více záznamů v mapě</option>
+                    <option value="no-current">Bez aktuální shody</option>
+                    <option value="ok">Jednoznačné</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Shoda</span>
+                  <select id="eans-filter-match">
+                    <option value="">Všechny shody</option>
+                    <option value="exact">Přesná varianta</option>
+                    <option value="pair">Jen paircode/prefix</option>
+                    <option value="none">Bez shody v dávce</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>E-shop</span>
+                  <select id="eans-filter-shop">
+                    <option value="">Všechny e-shopy</option>
+                  </select>
+                </label>
+                <label class="field">
+                  <span>Řazení</span>
+                  <select id="eans-filter-sort">
+                    <option value="risk">Riziko</option>
+                    <option value="ean">EAN</option>
+                    <option value="candidates">Počet shod</option>
+                    <option value="entries">Počet záznamů</option>
+                  </select>
+                </label>
+                <button id="eans-filter-reset" type="button" class="secondary">Vyčistit filtry</button>
+              </section>
+            </section>
+
+            <section class="table-panel ean-audit-table-panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Detail</p>
+                  <h2>Jednotlivé EANy</h2>
+                </div>
+                <div id="eans-row-count" class="row-count">0 EANů</div>
+              </div>
+              <div class="table-wrap">
+                <table class="ean-audit-table">
+                  <thead>
+                    <tr>
+                      <th>EAN</th>
+                      <th>Stav skenu</th>
+                      <th>EAN mapa</th>
+                      <th>Aktuální dávka</th>
+                      <th>Důvody</th>
+                      <th>Podrobnosti</th>
+                    </tr>
+                  </thead>
+                  <tbody id="eans-body"></tbody>
+                </table>
               </div>
             </section>
           </section>

@@ -2744,6 +2744,132 @@ tbody tr.done {
   border: 1px solid #edcf98;
 }
 
+.ean-audit-panel {
+  margin-bottom: 12px;
+}
+
+.ean-filter-panel {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.4fr) repeat(4, minmax(150px, 1fr)) auto;
+  gap: 10px;
+  align-items: end;
+  padding: 12px;
+}
+
+.ean-filter-panel button {
+  min-height: 42px;
+}
+
+.ean-audit-table {
+  min-width: 1280px;
+}
+
+.ean-audit-row.danger {
+  background: #fff8f8;
+}
+
+.ean-audit-row.warning {
+  background: #fffdf6;
+}
+
+.ean-audit-table td {
+  vertical-align: top;
+}
+
+.ean-audit-table td strong,
+.ean-audit-table td small {
+  display: block;
+}
+
+.ean-audit-table td small {
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.ean-reasons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 185px;
+}
+
+.ean-reason {
+  display: inline-flex;
+  align-items: center;
+  min-height: 24px;
+  padding: 3px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  color: #43504b;
+  background: #eef1f0;
+  font-size: 11px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.ean-reason.ok {
+  color: var(--accent-dark);
+  background: var(--accent-soft);
+  border-color: #bddbce;
+}
+
+.ean-reason.warning {
+  color: var(--warning);
+  background: var(--warning-soft);
+  border-color: #edcf98;
+}
+
+.ean-reason.danger {
+  color: var(--danger);
+  background: var(--danger-soft);
+  border-color: #e6b9b9;
+}
+
+.ean-audit-detail {
+  min-width: 360px;
+}
+
+.ean-audit-detail summary {
+  cursor: pointer;
+  color: var(--accent-dark);
+  font-weight: 900;
+}
+
+.ean-detail-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(260px, 1fr));
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.ean-detail-grid h3 {
+  margin: 0 0 6px;
+  font-size: 13px;
+}
+
+.ean-detail-line {
+  display: grid;
+  gap: 2px;
+  padding: 7px 8px;
+  border: 1px solid #dfe8e3;
+  border-left: 4px solid #8a9690;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.ean-detail-line + .ean-detail-line {
+  margin-top: 5px;
+}
+
+.ean-detail-line.exact {
+  border-left-color: var(--accent);
+}
+
+.ean-detail-line.pair {
+  border-left-color: var(--warning);
+}
+
 .qty {
   display: inline-flex;
   justify-content: center;
@@ -2973,6 +3099,7 @@ tbody tr.done {
   }
 
   .completion-filter-panel,
+  .ean-filter-panel,
   .completion-detail-grid {
     grid-template-columns: 1fr;
   }
@@ -2995,6 +3122,10 @@ tbody tr.done {
 
   .history-list {
     max-height: 320px;
+  }
+
+  .ean-detail-grid {
+    grid-template-columns: 1fr;
   }
 }
 
