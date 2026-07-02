@@ -4771,6 +4771,16 @@ function eanMapEntryHaystack(row) {
   );
 }
 
+function formatEanWeight(value) {
+  const raw = String(value ?? "").trim();
+  if (!raw) return "-";
+  const parsed = toNumber(raw, NaN);
+  if (!Number.isFinite(parsed)) return raw;
+  return `${parsed.toLocaleString("cs-CZ", {
+    maximumFractionDigits: 3,
+  })} kg`;
+}
+
 function buildEanMapRows() {
   return Object.entries(state.eanMap || {})
     .flatMap(([ean, entries]) => {
@@ -4808,7 +4818,7 @@ function renderEanMapRow(row) {
         <strong>${escapeHtml(entry.description || "-")}</strong>
         ${entry.originalArticle ? `<small>${escapeHtml(entry.originalArticle)}</small>` : ""}
       </td>
-      <td>${escapeHtml(entry.weight || "-")}</td>
+      <td>${escapeHtml(formatEanWeight(entry.weight))}</td>
       <td>
         <strong>${escapeHtml(row.activeMatches.length)} aktivních / ${escapeHtml(row.matches.length)} celkem</strong>
         <small>${escapeHtml(row.exactActive)} přesně | ${escapeHtml(row.pairActive)} přes prefix</small>
@@ -4838,7 +4848,7 @@ function renderEanEntryDetail(entry) {
     entry.prefix ? `prefix ${entry.prefix}` : "",
     entry.color ? `barva ${entry.color}` : "",
     entry.size ? `vel. ${entry.size}` : "",
-    entry.weight ? `${entry.weight} kg` : "",
+    entry.weight ? formatEanWeight(entry.weight) : "",
   ].filter(Boolean);
   return `
     <div class="ean-detail-line">
