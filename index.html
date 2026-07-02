@@ -515,7 +515,7 @@
 
           <section id="settings-view" class="app-view hidden">
             <section class="settings-panel">
-              <div class="section-head">
+              <div class="section-head settings-head">
                 <div>
                   <p class="eyebrow">Konfigurace</p>
                   <h2>Nastavení expedice</h2>
@@ -525,7 +525,48 @@
 
               <section id="settings-message" class="message neutral" aria-live="polite"></section>
 
-              <div class="settings-grid">
+              <section class="settings-overview" aria-label="Rychlý stav nastavení">
+                <a class="settings-status-tile tone-general" href="#settings-section-general">
+                  <span>Vzhled</span>
+                  <strong id="settings-status-font">-</strong>
+                </a>
+                <a class="settings-status-tile tone-feed" href="#settings-section-feeds">
+                  <span>Produktový feed</span>
+                  <strong id="settings-status-product-feed">-</strong>
+                </a>
+                <a class="settings-status-tile tone-feed" href="#settings-section-feeds">
+                  <span>Platební feedy</span>
+                  <strong id="settings-status-payments">-</strong>
+                </a>
+                <a class="settings-status-tile tone-carrier" href="#settings-section-carriers">
+                  <span>Dopravci</span>
+                  <strong id="settings-status-carriers">-</strong>
+                </a>
+                <a class="settings-status-tile tone-print" href="#settings-section-print">
+                  <span>Tisk</span>
+                  <strong id="settings-status-print">-</strong>
+                </a>
+              </section>
+
+              <div class="settings-console">
+                <nav class="settings-nav" aria-label="Sekce nastavení">
+                  <a class="tone-general" href="#settings-section-general">Obecné</a>
+                  <a class="tone-feed" href="#settings-section-feeds">Feedy</a>
+                  <a class="tone-carrier" href="#settings-section-carriers">Dopravci</a>
+                  <a class="tone-print" href="#settings-section-print">Tisk</a>
+                  <a class="tone-admin" href="#settings-section-users">Uživatelé</a>
+                </nav>
+
+                <div class="settings-content">
+                  <section id="settings-section-general" class="settings-section settings-section-general">
+                    <div class="settings-section-title">
+                      <div>
+                        <p class="eyebrow">Obecné</p>
+                        <h3>Vzhled a základní služby</h3>
+                      </div>
+                      <span>Globální volby</span>
+                    </div>
+                    <div class="settings-grid settings-grid-compact">
                 <fieldset class="settings-card">
                   <legend>Vzhled aplikace</legend>
                   <label class="field">
@@ -555,7 +596,18 @@
                   </label>
                   <div id="settings-mapy-status" class="settings-hint"></div>
                 </fieldset>
+                    </div>
+                  </section>
 
+                  <section id="settings-section-feeds" class="settings-section settings-section-feeds">
+                    <div class="settings-section-title">
+                      <div>
+                        <p class="eyebrow">Feedy</p>
+                        <h3>Produkty a platby</h3>
+                      </div>
+                      <span>Importy a kontroly</span>
+                    </div>
+                    <div class="settings-grid">
                 <fieldset class="settings-card settings-card-wide">
                   <legend>Produktový feed</legend>
                   <label class="field">
@@ -614,7 +666,18 @@
                     </div>
                   </div>
                 </fieldset>
+                    </div>
+                  </section>
 
+                  <section id="settings-section-carriers" class="settings-section settings-section-carriers">
+                    <div class="settings-section-title">
+                      <div>
+                        <p class="eyebrow">Dopravci</p>
+                        <h3>Packeta, DPD a odesílatel</h3>
+                      </div>
+                      <span>Štítky a API</span>
+                    </div>
+                    <div class="settings-grid">
                 <fieldset class="settings-card">
                   <legend>Zásilkovna / Packeta</legend>
                   <label class="field">
@@ -766,7 +829,18 @@
                     <input id="settings-sender-email" autocomplete="off" />
                   </label>
                 </fieldset>
+                    </div>
+                  </section>
 
+                  <section id="settings-section-print" class="settings-section settings-section-print">
+                    <div class="settings-section-title">
+                      <div>
+                        <p class="eyebrow">Tisk</p>
+                        <h3>Lokální tiskový agent</h3>
+                      </div>
+                      <span>Skladové PC</span>
+                    </div>
+                    <div class="settings-grid settings-grid-compact">
                 <fieldset class="settings-card">
                   <legend>Lokální tisk</legend>
                   <p class="settings-description">
@@ -790,13 +864,22 @@
                   </div>
                   <div id="print-agent-status" class="settings-hint">Agent se otestuje po kliknutí.</div>
                 </fieldset>
-              </div>
+                    </div>
+                  </section>
 
+                  <section id="settings-section-users" class="settings-section settings-section-users">
+                    <div class="settings-section-title">
+                      <div>
+                        <p class="eyebrow">Admin</p>
+                        <h3>Uživatelé a zaměstnanci</h3>
+                      </div>
+                      <span>Přístupy</span>
+                    </div>
               <section id="users-admin-panel" class="settings-user-panel">
                 <div class="section-head">
                   <div>
-                    <p class="eyebrow">Admin</p>
-                    <h2>Uživatelé a zaměstnanci</h2>
+                    <p class="eyebrow">Přístupy</p>
+                    <h2>Seznam a nový uživatel</h2>
                   </div>
                   <button id="users-refresh" type="button" class="secondary">Obnovit uživatele</button>
                 </div>
@@ -824,6 +907,9 @@
                 </div>
                 <div id="users-list" class="users-list"></div>
               </section>
+                  </section>
+                </div>
+              </div>
             </section>
           </section>
         </section>

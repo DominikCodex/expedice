@@ -272,6 +272,11 @@ const els = {
   settingsMessage: document.getElementById("settings-message"),
   settingsUiFont: document.getElementById("settings-ui-font"),
   settingsUiFontPreview: document.getElementById("settings-ui-font-preview"),
+  settingsStatusFont: document.getElementById("settings-status-font"),
+  settingsStatusProductFeed: document.getElementById("settings-status-product-feed"),
+  settingsStatusPayments: document.getElementById("settings-status-payments"),
+  settingsStatusCarriers: document.getElementById("settings-status-carriers"),
+  settingsStatusPrint: document.getElementById("settings-status-print"),
   settingsMapyKey: document.getElementById("settings-mapy-key"),
   settingsMapyStatus: document.getElementById("settings-mapy-status"),
   settingsProductFeedUrl: document.getElementById("settings-product-feed-url"),
@@ -1893,6 +1898,63 @@ function paymentCheckHtml(row) {
   return `<span class="payment-check-badge ${tone}" title="${escapeHtml(title)}">${escapeHtml(label)}</span>`;
 }
 
+function setSettingsStatus(element, text, status = "ok") {
+  if (!element) return;
+  element.textContent = text;
+  const tile = element.closest(".settings-status-tile");
+  if (tile) tile.dataset.status = status;
+}
+
+function storedCount(items) {
+  return items.filter(Boolean).length;
+}
+
+function renderSettingsOverview(settings, context = {}) {
+  const appearance = settings.appearance || {};
+  const fontKey = uiFontKey(appearance.font);
+  const productFeed = context.productFeed || settings.productFeed || {};
+  const paymentIveronika = context.paymentIveronika || {};
+  const paymentIveronikaSk = context.paymentIveronikaSk || {};
+  const paymentGalantra = context.paymentGalantra || {};
+  const packeta = context.packeta || settings.packeta || {};
+  const dpd = context.dpd || settings.dpd || {};
+  const packetaIveronika = context.packetaIveronika || {};
+  const packetaGalantra = context.packetaGalantra || {};
+  const dpdIveronika = context.dpdIveronika || {};
+  const dpdGalantra = context.dpdGalantra || {};
+  const printAgent = context.printAgent || settings.printAgent || {};
+
+  setSettingsStatus(els.settingsStatusFont, UI_FONT_OPTIONS[fontKey].label, "ok");
+  setSettingsStatus(
+    els.settingsStatusProductFeed,
+    productFeed.hasUrl
+      ? `${productFeed.downloadTimeoutSeconds || 600}s / ${productFeed.maxDownloadMegabytes || 512} MB`
+      : "URL chybí",
+    productFeed.hasUrl ? "ok" : "missing"
+  );
+
+  const paymentCount = storedCount([paymentIveronika.hasUrl, paymentIveronikaSk.hasUrl, paymentGalantra.hasUrl]);
+  setSettingsStatus(
+    els.settingsStatusPayments,
+    `${paymentCount}/3 e-shopy`,
+    paymentCount === 3 ? "ok" : paymentCount > 0 ? "warning" : "missing"
+  );
+
+  const packetaReady = packeta.hasApiPassword || packetaIveronika.hasApiPassword || packetaGalantra.hasApiPassword;
+  const dpdReady = dpd.hasApiKey || dpdIveronika.hasApiKey || dpdGalantra.hasApiKey;
+  setSettingsStatus(
+    els.settingsStatusCarriers,
+    `${packetaReady ? "Packeta OK" : "Packeta chybí"} · ${dpdReady ? "DPD OK" : "DPD chybí"}`,
+    packetaReady && dpdReady ? "ok" : packetaReady || dpdReady ? "warning" : "missing"
+  );
+
+  setSettingsStatus(
+    els.settingsStatusPrint,
+    printAgent.testingMode ? "Testovací režim" : "Přímý tisk",
+    printAgent.testingMode ? "warning" : "ok"
+  );
+}
+
 function renderSettings(settings) {
   applyAppearanceSettings(settings);
   const mapy = settings.mapy || {};
@@ -1911,6 +1973,20 @@ function renderSettings(settings) {
   const dpdClients = dpd.clients || {};
   const dpdIveronika = dpdClients.iveronika_cz || {};
   const dpdGalantra = dpdClients.galantra_cz || {};
+
+  renderSettingsOverview(settings, {
+    printAgent,
+    productFeed,
+    paymentIveronika,
+    paymentIveronikaSk,
+    paymentGalantra,
+    packeta,
+    packetaIveronika,
+    packetaGalantra,
+    dpd,
+    dpdIveronika,
+    dpdGalantra,
+  });
 
   els.settingsMapyKey.value = "";
   els.settingsMapyStatus.textContent = mapy.hasApiKey ? "API key je uložený." : "API key zatím není uložený.";
@@ -5572,6 +5648,7 @@ window.addEventListener("popstate", () => {
 els.settingsSave.addEventListener("click", saveSettings);
 els.settingsUiFont?.addEventListener("change", () => {
   applyAppearanceSettings({ appearance: { font: els.settingsUiFont.value } });
+  setSettingsStatus(els.settingsStatusFont, UI_FONT_OPTIONS[uiFontKey(els.settingsUiFont.value)].label, "ok");
 });
 els.productFeedTest.addEventListener("click", testProductFeed);
 els.usersRefresh.addEventListener("click", loadUsers);
