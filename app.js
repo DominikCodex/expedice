@@ -4530,10 +4530,13 @@ function uniqueCleanValues(values) {
 function sortEanCandidates(candidates) {
   return candidates.sort((a, b) => {
     if (a.exact !== b.exact) return a.exact ? -1 : 1;
-    const remainingDiff = toNumber(b.item.remaining, 0) - toNumber(a.item.remaining, 0);
-    if (remainingDiff) return remainingDiff;
-    return Number(a.item.sequence || 0) - Number(b.item.sequence || 0);
+    return candidateSequenceRank(a) - candidateSequenceRank(b) || toNumber(b.item.remaining, 0) - toNumber(a.item.remaining, 0);
   });
+}
+
+function candidateSequenceRank(candidate) {
+  const sequence = Number(candidate?.item?.sequence);
+  return Number.isFinite(sequence) ? sequence : Number.MAX_SAFE_INTEGER;
 }
 
 function setBestEanCandidate(target, item, entry, exact) {
@@ -4551,6 +4554,33 @@ function eanEntryMatchType(entry, item) {
   if (sameCode(item.variantCode, entry.articleCode)) return "exact";
   if (sameCode(item.paircode, entry.prefix) || sameCode(item.productCode, entry.prefix)) return "pair";
   return "";
+}
+
+function candidateVariantKey(candidate) {
+  return productCodeKey(candidate?.item?.variantCode || candidate?.entry?.articleCode || candidate?.item?.productCode || "");
+}
+
+function candidateVariantKeys(candidates) {
+  return uniqueCleanValues(candidates.map(candidateVariantKey));
+}
+
+function scanDecisionForCandidates(candidates) {
+  const exactCandidates = sortEanCandidates(candidates.filter((candidate) => candidate.exact));
+  const exactVariantKeys = candidateVariantKeys(exactCandidates);
+  if (exactCandidates.length && exactVariantKeys.length === 1) {
+    return {
+      mode: "ok",
+      candidates: exactCandidates,
+      exactCandidates,
+      exactVariantKeys,
+    };
+  }
+  return {
+    mode: candidates.length ? "choice" : "no-active",
+    candidates: sortEanCandidates(candidates.slice()),
+    exactCandidates,
+    exactVariantKeys,
+  };
 }
 
 function buildEanAuditData() {
@@ -4576,17 +4606,14 @@ function buildEanAuditData() {
     const activeCandidates = sortEanCandidates(Array.from(activeCandidateMap.values()));
     const exactCandidates = activeCandidates.filter((candidate) => candidate.exact);
     const pairCandidates = activeCandidates.filter((candidate) => !candidate.exact);
+    const scanDecision = scanDecisionForCandidates(activeCandidates);
+    const exactVariantKeys = scanDecision.exactVariantKeys;
     const articleCodes = uniqueCleanValues(entryList.map((entry) => entry.articleCode));
     const prefixes = uniqueCleanValues(entryList.map((entry) => entry.prefix));
     const colors = uniqueCleanValues(entryList.flatMap((entry) => [entry.color, entry.secondColor, entry.colorCode]));
     const sizes = uniqueCleanValues(entryList.map((entry) => entry.size));
     const shopCodes = uniqueCleanValues(allCandidates.map((candidate) => candidate.item.shopCode || "bez e-shopu"));
-    const scanMode =
-      activeCandidates.length === 0
-        ? "no-active"
-        : entryList.length === 1 && exactCandidates.length === 1
-          ? "ok"
-          : "choice";
+    const scanMode = scanDecision.mode;
 
     const record = {
       ean,
@@ -4600,6 +4627,8 @@ function buildEanAuditData() {
       activeCandidates,
       exactCandidates,
       pairCandidates,
+      exactVariantKeys,
+      safeCandidates: scanDecision.mode === "ok" ? scanDecision.candidates : [],
       shopCodes,
       scanMode,
     };
@@ -4617,11 +4646,16 @@ function buildEanAuditData() {
 
 function eanAuditReasons(record) {
   const reasons = [];
-  if (record.entryCount > 1) reasons.push("více záznamů EAN mapy");
+  if (record.scanMode === "ok") {
+    if (record.safeCandidates.length > 1) reasons.push("více řádků stejné varianty");
+    if (record.pairCandidates.length) reasons.push("prefix shody ignorované");
+    if (record.entryCount > 1 && record.articleCodes.length === 1) reasons.push("duplicitní záznam mapy");
+    if (!reasons.length) reasons.push("jednoznačný sken");
+    return reasons;
+  }
   if (record.articleCodes.length > 1) reasons.push("více articleCode");
   if (record.prefixes.length > 1) reasons.push("více prefixů");
-  if (record.activeCandidates.length > 1) reasons.push("více aktivních řádků");
-  if (record.exactCandidates.length > 1) reasons.push("více přesných variant");
+  if (record.exactVariantKeys.length > 1) reasons.push("více přesných variant");
   if (record.activeCandidates.length && !record.exactCandidates.length) reasons.push("jen paircode/prefix");
   if (!record.activeCandidates.length && record.allCandidates.length) reasons.push("shody jsou na nule");
   if (!record.allCandidates.length) reasons.push("není v aktuální dávce");
@@ -4630,15 +4664,7 @@ function eanAuditReasons(record) {
 }
 
 function eanAuditTone(record) {
-  if (
-    record.scanMode === "choice" ||
-    record.entryCount > 1 ||
-    record.articleCodes.length > 1 ||
-    record.prefixes.length > 1 ||
-    record.activeCandidates.length > 1
-  ) {
-    return "danger";
-  }
+  if (record.scanMode === "choice") return "danger";
   if (record.scanMode === "no-active") return "warning";
   return "ok";
 }
@@ -4905,6 +4931,10 @@ function renderEanAuditRow(record) {
   const extraReasons = record.reasons.length > 5 ? `<span class="ean-reason">+${escapeHtml(record.reasons.length - 5)}</span>` : "";
   const firstArticles = record.articleCodes.slice(0, 3).join(", ") || "-";
   const firstPrefixes = record.prefixes.slice(0, 3).join(", ") || "-";
+  const activeHeadline =
+    record.scanMode === "ok"
+      ? `${record.safeCandidates.length} k postupnému odpisu`
+      : `${record.activeCandidates.length} aktivních shod`;
   return `
     <tr class="ean-audit-row ${escapeHtml(record.tone)}">
       <td class="code">${escapeHtml(record.ean)}</td>
@@ -4918,7 +4948,7 @@ function renderEanAuditRow(record) {
         <small>${escapeHtml(firstPrefixes)}</small>
       </td>
       <td>
-        <strong>${escapeHtml(record.activeCandidates.length)} aktivních shod</strong>
+        <strong>${escapeHtml(activeHeadline)}</strong>
         <small>${escapeHtml(record.exactCandidates.length)} přesně | ${escapeHtml(record.pairCandidates.length)} přes prefix</small>
         <small>${escapeHtml(record.allCandidates.length)} shod celkem</small>
       </td>
@@ -5219,18 +5249,17 @@ function findScanCandidates(ean) {
   entries.forEach((entry) => {
     state.items.forEach((item) => {
       if (item.remaining <= 0) return;
-      const exact = sameCode(item.variantCode, entry.articleCode);
-      const pair =
-        sameCode(item.paircode, entry.prefix) ||
-        sameCode(item.productCode, entry.prefix);
-      if (!exact && !pair) return;
+      const rawMatchType = eanEntryMatchType(entry, item);
+      if (!rawMatchType) return;
 
       const existing = candidates.get(item.id);
-      const matchType = exact ? "přesná varianta" : "paircode";
+      const exact = rawMatchType === "exact";
+      const matchType = exact ? "přesná varianta" : "paircode/prefix";
       if (!existing || exact) {
         candidates.set(item.id, {
           item,
           entry,
+          exact,
           matchType,
         });
       }
@@ -5239,10 +5268,7 @@ function findScanCandidates(ean) {
 
   return {
     entries,
-    candidates: Array.from(candidates.values()).sort((a, b) => {
-      if (a.matchType !== b.matchType) return a.matchType === "přesná varianta" ? -1 : 1;
-      return Number(a.item.sequence || 0) - Number(b.item.sequence || 0);
-    }),
+    candidates: sortEanCandidates(Array.from(candidates.values())),
   };
 }
 
@@ -5269,23 +5295,24 @@ async function processScan(rawValue) {
       return;
     }
 
-    const exactCandidates = result.candidates.filter((candidate) => candidate.matchType === "přesná varianta");
-    if (result.entries.length === 1 && exactCandidates.length === 1) {
-      const entry = await changeItem(exactCandidates[0].item.id, -1, {
+    const scanDecision = scanDecisionForCandidates(result.candidates);
+    if (scanDecision.mode === "ok") {
+      const target = scanDecision.candidates[0];
+      const entry = await changeItem(target.item.id, -1, {
         ean,
         mode: "EAN jednoznačná varianta",
       });
       if (entry) {
         showScanResult(entry);
         setMessage(
-          `Odepsáno 1 ks: ${entry.variantCode}, obj. ${entry.orderNumber}, poř. ${entry.sequence}.`,
+          `Odepsáno 1 ks podle EANu: ${entry.variantCode}, obj. ${entry.orderNumber}, poř. ${entry.sequence}.`,
           "success"
         );
       }
       return;
     }
 
-    activeCandidates = result.candidates;
+    activeCandidates = scanDecision.candidates;
     renderAll();
     setMessage(`EAN ${ean} má více možných shod. Vyber správnou položku.`, "warning");
   } finally {
