@@ -142,13 +142,11 @@ const els = {
   sortingView: document.getElementById("sorting-view"),
   sortingDataset: document.getElementById("sorting-dataset"),
   sortingRefresh: document.getElementById("sorting-refresh"),
-  sortingDelete: document.getElementById("sorting-delete"),
   sortingDatasetInfo: document.getElementById("sorting-dataset-info"),
   completionView: document.getElementById("completion-view"),
   completionDataset: document.getElementById("completion-dataset"),
   completionRefresh: document.getElementById("completion-refresh"),
   paymentFeedSync: document.getElementById("payment-feed-sync"),
-  completionDelete: document.getElementById("completion-delete"),
   packetaDryRun: document.getElementById("packeta-dry-run"),
   packetaValidate: document.getElementById("packeta-validate"),
   packetaSend: document.getElementById("packeta-send"),
@@ -472,8 +470,6 @@ function applyRoleVisibility() {
     els.expeditionShowInactive.checked = false;
     expeditionState.showInactive = false;
   }
-  els.sortingDelete.classList.toggle("hidden", !admin);
-  els.completionDelete.classList.toggle("hidden", !admin);
   els.packetaValidate.classList.toggle("hidden", !admin);
   els.packetaSend?.classList.toggle("hidden", !admin);
   els.labelCacheBatch?.classList.toggle("hidden", !admin);
@@ -711,7 +707,6 @@ function renderSortingOptions() {
   if (!sortingState.datasets.length) {
     els.sortingDataset.innerHTML = `<option value="">Žádná dávka roztřídění</option>`;
     els.sortingDatasetInfo.innerHTML = datasetInfoHtml(null);
-    els.sortingDelete.disabled = true;
     return;
   }
 
@@ -726,7 +721,6 @@ function renderSortingOptions() {
     els.sortingDataset.value = String(sortingState.dataset.id);
   }
   els.sortingDatasetInfo.innerHTML = datasetInfoHtml(sortingState.dataset);
-  els.sortingDelete.disabled = !sortingState.dataset || sortingState.dataset.status !== "active";
 }
 
 async function loadExpeditionDays(preferredDate = "") {
@@ -861,23 +855,6 @@ async function loadSortingDataset(datasetId) {
   }
 }
 
-async function deleteDataset(dataset, afterDelete) {
-  if (!dataset) return false;
-  const label = datasetLabel(dataset);
-  if (!confirm(`Smazat dávku?\n\n${label}\n\nData zůstanou v historii jako smazaná.`)) return false;
-
-  await fetchJson(`/api/datasets/${dataset.id}`, {
-    method: "DELETE",
-    body: JSON.stringify({
-      deletedBy: "web",
-      reason: "Smazáno ve webovém rozhraní",
-    }),
-  });
-
-  await afterDelete();
-  return true;
-}
-
 async function deleteCurrentExpeditionDay() {
   if (!isAdmin()) {
     setMessage("Smazání expedičního dne je dostupné jen adminovi.", "warning");
@@ -931,7 +908,6 @@ function renderCompletionOptions() {
 
   if (!completionState.datasets.length) {
     els.completionDataset.innerHTML = `<option value="">Žádná dávka</option>`;
-    els.completionDelete.disabled = true;
     els.paymentFeedSync.disabled = true;
     els.packetaDryRun.disabled = true;
     els.packetaValidate.disabled = true;
@@ -953,7 +929,6 @@ function renderCompletionOptions() {
   if (completionState.dataset) {
     els.completionDataset.value = String(completionState.dataset.id);
   }
-  els.completionDelete.disabled = !completionState.dataset || completionState.dataset.status !== "active";
   els.paymentFeedSync.disabled = !completionState.dataset;
   els.packetaDryRun.disabled = !completionState.dataset;
   els.packetaValidate.disabled = !completionState.dataset;
@@ -3880,7 +3855,6 @@ function renderCompletion() {
   els.completionRowCount.textContent = `${rows.length} / ${allRows.length} řádků`;
   renderCompletionSummary(rows);
   els.completionBody.innerHTML = "";
-  els.completionDelete.disabled = !completionState.dataset || completionState.dataset.status !== "active";
 
   if (!rows.length) {
     els.completionBody.innerHTML = `<tr><td colspan="14" class="empty">Zadna kompletace k zobrazeni.</td></tr>`;
@@ -4697,16 +4671,6 @@ els.sortingRefresh.addEventListener("click", () => {
 els.sortingDataset.addEventListener("change", () => {
   loadSortingDataset(els.sortingDataset.value);
 });
-els.sortingDelete.addEventListener("click", async () => {
-  try {
-    const deleted = await deleteDataset(sortingState.dataset, () =>
-      loadExpeditionDays(expeditionState.day?.date || "")
-    );
-    if (deleted) setMessage("Dávka roztřídění byla smazaná.", "success");
-  } catch (error) {
-    setMessage(`Dávku roztřídění se nepodařilo smazat: ${error.message}`, "error");
-  }
-});
 els.completionRefresh.addEventListener("click", () => loadCompletionDatasets());
 els.paymentFeedSync.addEventListener("click", syncPaymentFeedsManually);
 els.completionDataset.addEventListener("change", () => {
@@ -4734,16 +4698,6 @@ els.workflowClearError.addEventListener("click", () => saveWorkflowAction("clear
 els.workflowManualReprint.addEventListener("click", () => saveWorkflowAction("manual_reprint"));
 els.workflowOpenOrder.addEventListener("click", openWorkflowOrder);
 setInterval(pollPaymentFeedUpdates, 30000);
-els.completionDelete.addEventListener("click", async () => {
-  try {
-    const deleted = await deleteDataset(completionState.dataset, () =>
-      loadExpeditionDays(expeditionState.day?.date || "")
-    );
-    if (deleted) setCompletionMessage("Dávka kompletace byla smazaná.", "success");
-  } catch (error) {
-    setCompletionMessage(`Dávku kompletace se nepodařilo smazat: ${error.message}`, "error");
-  }
-});
 
 els.completionBody.addEventListener("click", (event) => {
   const interactiveTarget = event.target.closest("button, input, select, textarea, a, label");

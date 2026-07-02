@@ -6,7 +6,7 @@
     <title>Roztřídění zboží</title>
     <link rel="stylesheet" href="styles.css?v=admin-trash-20260702" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=admin-trash-20260702"></script>
+    <script defer src="app.js?v=remove-dataset-delete-20260702"></script>
   </head>
   <body>
     <section id="auth-view" class="auth-view">
@@ -111,7 +111,6 @@
                 <select id="sorting-dataset"></select>
               </label>
               <button id="sorting-refresh" type="button" class="secondary">Načíst roztřídění</button>
-              <button id="sorting-delete" type="button" class="danger">Smazat dávku</button>
               <div id="sorting-dataset-info" class="dataset-summary">Lokální seed / čekám na online dávku.</div>
             </section>
 
@@ -283,7 +282,6 @@
               </label>
               <button id="completion-refresh" type="button" class="secondary">Načíst kompletaci</button>
               <button id="payment-feed-sync" type="button" class="secondary">Spárovat platby</button>
-              <button id="completion-delete" type="button" class="danger">Smazat dávku</button>
               <button id="packeta-dry-run" type="button" class="secondary">Dry run Zásilkovna</button>
               <button id="packeta-validate" type="button" class="secondary">Test API Zásilkovna</button>
               <button id="packeta-send" type="button" class="danger">Odeslat vše Zásilkovna</button>
