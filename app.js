@@ -1,6 +1,8 @@
 ﻿const STORAGE_KEY = "rozrazovani-zbozi-v2";
 const MAX_HISTORY = 500;
 const EAN_AUDIT_RENDER_LIMIT = 500;
+const EMPLOYEE_DAY_LOCK_KEY = "expedition-employee-day-lock-v1";
+const EMPLOYEE_DAY_LOCK_MS = 10 * 60 * 60 * 1000;
 
 const seed = window.SORTING_SEED || { items: [], eanMap: {}, summary: {} };
 
@@ -158,6 +160,10 @@ const usersState = {
   loaded: false,
 };
 
+const employeeDayLockState = {
+  choosing: false,
+};
+
 const els = {
   appShell: document.getElementById("app-shell"),
   authView: document.getElementById("auth-view"),
@@ -196,6 +202,9 @@ const els = {
   expeditionDayList: document.getElementById("expedition-day-list"),
   expeditionRefresh: document.getElementById("expedition-refresh"),
   expeditionDeleteDay: document.getElementById("expedition-delete-day"),
+  expeditionDayLock: document.getElementById("expedition-day-lock"),
+  expeditionDayLockText: document.getElementById("expedition-day-lock-text"),
+  expeditionDayLockChange: document.getElementById("expedition-day-lock-change"),
   expeditionTrashToggle: document.getElementById("expedition-trash-toggle"),
   expeditionShowInactive: document.getElementById("show-inactive-datasets"),
   expeditionDaySummary: document.getElementById("expedition-day-summary"),
@@ -650,6 +659,91 @@ function isAdmin() {
   return authState.user?.role === "admin";
 }
 
+function employeeDayLockStorageKey() {
+  const userKey = authState.user?.id || authState.user?.username || "anonymous";
+  return `${EMPLOYEE_DAY_LOCK_KEY}:${userKey}`;
+}
+
+function removeEmployeeDayLock() {
+  try {
+    localStorage.removeItem(employeeDayLockStorageKey());
+  } catch {
+    // Local storage can be unavailable in strict browser modes.
+  }
+}
+
+function readEmployeeDayLock() {
+  if (!authState.user || isAdmin()) return null;
+  try {
+    const raw = localStorage.getItem(employeeDayLockStorageKey());
+    if (!raw) return null;
+    const lock = JSON.parse(raw);
+    if (!lock?.date || !lock?.expiresAt || Number(lock.expiresAt) <= Date.now()) {
+      removeEmployeeDayLock();
+      return null;
+    }
+    return {
+      date: String(lock.date),
+      expiresAt: Number(lock.expiresAt),
+    };
+  } catch {
+    removeEmployeeDayLock();
+    return null;
+  }
+}
+
+function saveEmployeeDayLock(dayDate) {
+  if (!authState.user || isAdmin() || !dayDate) return;
+  const lock = {
+    date: dayDate,
+    expiresAt: Date.now() + EMPLOYEE_DAY_LOCK_MS,
+  };
+  try {
+    localStorage.setItem(employeeDayLockStorageKey(), JSON.stringify(lock));
+  } catch {
+    // If localStorage is blocked, the app still works without the guard.
+  }
+  employeeDayLockState.choosing = false;
+}
+
+function formatEmployeeDayLockUntil(expiresAt) {
+  return new Date(expiresAt).toLocaleTimeString("cs-CZ", {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function renderEmployeeDayLockPanel(lock = readEmployeeDayLock()) {
+  if (!els.expeditionDayLock) return;
+  const show = !isAdmin() && Boolean(lock) && !employeeDayLockState.choosing;
+  els.expeditionDayLock.classList.toggle("hidden", !show);
+  if (!show) return;
+  const day = expeditionState.days.find((item) => item.date === lock.date);
+  const label = day?.label || lock.date;
+  els.expeditionDayLockText.textContent = `Zamčeno na ${label} do ${formatEmployeeDayLockUntil(lock.expiresAt)}.`;
+}
+
+function employeeVisibleDays() {
+  const lock = readEmployeeDayLock();
+  if (isAdmin() || employeeDayLockState.choosing || !lock) {
+    return { days: expeditionState.days, lock: null };
+  }
+  const lockedDays = expeditionState.days.filter((day) => day.date === lock.date);
+  if (!lockedDays.length) {
+    removeEmployeeDayLock();
+    employeeDayLockState.choosing = true;
+    return { days: expeditionState.days, lock: null };
+  }
+  return { days: lockedDays, lock };
+}
+
+function preferredEmployeeLockedDate() {
+  if (employeeDayLockState.choosing) return "";
+  const lock = readEmployeeDayLock();
+  if (!lock) return "";
+  return expeditionState.days.some((day) => day.date === lock.date) ? lock.date : "";
+}
+
 function setAuthMessage(text, type = "neutral") {
   els.authMessage.className = `message ${type}`;
   els.authMessage.textContent = text;
@@ -671,6 +765,7 @@ function setPasswordChangeBusy(isBusy) {
 
 function showLogin(message = "Přihlas se prosím do expedičního systému.") {
   authState.user = null;
+  employeeDayLockState.choosing = false;
   setLoginBusy(false);
   setPasswordChangeBusy(false);
   els.appShell.classList.add("hidden");
@@ -699,6 +794,9 @@ function applyRoleVisibility() {
   els.tabSettings.classList.toggle("hidden", !admin);
   els.expeditionDeleteDay?.classList.toggle("hidden", !admin);
   els.expeditionTrashToggle?.classList.toggle("hidden", !admin);
+  if (admin) {
+    els.expeditionDayLock?.classList.add("hidden");
+  }
   if (!admin && els.expeditionShowInactive?.checked) {
     els.expeditionShowInactive.checked = false;
     expeditionState.showInactive = false;
@@ -733,6 +831,7 @@ function setRouteForView(view, replace = false) {
 
 function startAppForUser(user) {
   authState.user = user;
+  employeeDayLockState.choosing = false;
   els.authView.classList.add("hidden");
   els.appShell.classList.remove("hidden");
   els.authUserName.textContent = `${user.displayName || user.username} · ${user.role === "admin" ? "admin" : "zaměstnanec"}`;
@@ -922,13 +1021,15 @@ function switchView(view, options = {}) {
 
 function renderExpeditionDayOptions() {
   els.expeditionDayList.innerHTML = "";
+  const visible = employeeVisibleDays();
+  renderEmployeeDayLockPanel(visible.lock);
 
-  if (!expeditionState.days.length) {
+  if (!visible.days.length) {
     els.expeditionDaySummary.innerHTML = `<span>Online zatím neobsahuje žádný expediční den.</span>`;
     return;
   }
 
-  expeditionState.days.forEach((day) => {
+  visible.days.forEach((day) => {
     const deleted = day.status && day.status !== "active";
     const active = expeditionState.day?.date === day.date;
     const batches = deleted ? day.allBatches || 0 : day.activeBatches || 0;
@@ -978,7 +1079,9 @@ async function loadExpeditionDays(preferredDate = "") {
     expeditionState.loaded = true;
     renderExpeditionDayOptions();
 
+    const lockedDate = preferredEmployeeLockedDate();
     const selectedDate =
+      lockedDate ||
       preferredDate ||
       expeditionState.day?.date ||
       expeditionState.days[0]?.date ||
@@ -5630,10 +5733,17 @@ els.historyList.addEventListener("click", (event) => {
 
 els.expeditionRefresh.addEventListener("click", () => loadExpeditionDays(expeditionState.day?.date || ""));
 els.expeditionDeleteDay?.addEventListener("click", deleteCurrentExpeditionDay);
+els.expeditionDayLockChange?.addEventListener("click", () => {
+  removeEmployeeDayLock();
+  employeeDayLockState.choosing = true;
+  renderExpeditionDayOptions();
+  els.expeditionDaySummary.innerHTML = `<span>Vyber datum várky. Po kliknutí se zaměstnanci zamkne na 10 hodin.</span>`;
+});
 els.expeditionShowInactive.addEventListener("change", () => loadExpeditionDays(expeditionState.day?.date || ""));
 els.expeditionDayList.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-date]");
   if (!button) return;
+  saveEmployeeDayLock(button.dataset.date);
   loadExpeditionDay(button.dataset.date);
 });
 
