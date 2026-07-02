@@ -16,6 +16,8 @@
   --ok: #1f7a5b;
   --shadow: 0 8px 22px rgba(31, 45, 39, 0.08);
   --auth-gradient: linear-gradient(135deg, #f8fbf8 0%, #e3ede8 46%, #f4eadf 100%);
+  --app-font-family: "Segoe UI", "Trebuchet MS", Arial, sans-serif;
+  --app-mono-font-family: Consolas, "Courier New", monospace;
 }
 
 * {
@@ -32,7 +34,7 @@ body {
     linear-gradient(rgba(31, 122, 91, 0.05) 1px, transparent 1px),
     var(--bg);
   background-size: 28px 28px;
-  font-family: "Segoe UI", "Trebuchet MS", sans-serif;
+  font-family: var(--app-font-family);
 }
 
 button,
@@ -529,6 +531,7 @@ select:focus {
   align-items: center;
   min-height: 190px;
   padding: 16px 22px;
+  overflow: hidden;
   background: #fff;
   border: 3px solid #111;
   border-radius: 8px;
@@ -548,9 +551,9 @@ select:focus {
   grid-column: 1;
   color: #000;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: clamp(118px, 16vw, 250px);
+  font-size: clamp(92px, 11vw, 170px);
   font-weight: 900;
-  line-height: 0.86;
+  line-height: 0.82;
   text-align: center;
 }
 
@@ -562,18 +565,20 @@ select:focus {
   align-content: center;
   min-width: 0;
   color: #17201d;
-  font-size: 24px;
+  font-size: clamp(18px, 1.5vw, 24px);
   font-weight: 800;
+  overflow-wrap: anywhere;
 }
 
 .scan-result-detail strong {
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 32px;
+  font-family: var(--app-mono-font-family);
+  font-size: clamp(22px, 1.9vw, 32px);
   overflow-wrap: anywhere;
 }
 
 .scan-result-detail span {
   display: block;
+  min-width: 0;
 }
 
 .scan-result.pulse {
@@ -710,7 +715,7 @@ select:focus {
 }
 
 .workflow-order-line b {
-  font-family: Consolas, "Courier New", monospace;
+  font-family: var(--app-mono-font-family);
   font-size: 18px;
 }
 
@@ -924,25 +929,38 @@ select:focus {
 }
 
 .workflow-product-code {
-  font-family: Consolas, "Courier New", monospace;
+  min-width: 0;
+  font-family: var(--app-mono-font-family);
   font-size: 16px;
   font-weight: 950;
+  overflow-wrap: anywhere;
 }
 
 .workflow-product-name {
+  min-width: 0;
   font-size: 15px;
   font-weight: 950;
   line-height: 1.25;
+  overflow-wrap: anywhere;
 }
 
 .workflow-product-meta {
+  min-width: 0;
   color: #41554c;
   font-size: 13px;
   font-weight: 900;
+  overflow-wrap: anywhere;
 }
 
 .workflow-sorting-item strong {
   white-space: nowrap;
+}
+
+.workflow-sorting-item .workflow-product-code,
+.workflow-sorting-item .workflow-product-name,
+.workflow-sorting-item .workflow-product-meta,
+.workflow-sorting-item .workflow-product-state {
+  white-space: normal;
 }
 
 .workflow-product-qty {
@@ -958,8 +976,10 @@ select:focus {
 }
 
 .workflow-product-state {
+  min-width: 0;
   color: #52675d;
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
 .workflow-check-action {
@@ -1100,7 +1120,7 @@ select:focus {
 .cockpit-scan-field input {
   height: 48px;
   border: 2px solid #7ab99d;
-  font-family: Consolas, "Courier New", monospace;
+  font-family: var(--app-mono-font-family);
   font-size: 28px;
   font-weight: 950;
   letter-spacing: 0.02em;
@@ -1481,7 +1501,7 @@ select:focus {
 }
 
 .dry-run-item summary strong {
-  font-family: Consolas, "Courier New", monospace;
+  font-family: var(--app-mono-font-family);
 }
 
 .dry-run-item summary small {
@@ -1523,7 +1543,7 @@ select:focus {
   color: #122019;
   background: #fdfefd;
   border-top: 1px solid var(--line);
-  font-family: Consolas, "Courier New", monospace;
+  font-family: var(--app-mono-font-family);
   font-size: 12px;
   line-height: 1.45;
   white-space: pre-wrap;
@@ -1558,7 +1578,7 @@ select:focus {
 }
 
 .skipped-list strong {
-  font-family: Consolas, "Courier New", monospace;
+  font-family: var(--app-mono-font-family);
 }
 
 .skipped-list small {
@@ -2413,6 +2433,19 @@ select:focus {
   color: var(--danger);
 }
 
+.font-preview {
+  min-height: 46px;
+  padding: 10px 12px;
+  color: var(--text);
+  background: #fff;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font-size: 17px;
+  font-weight: 800;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
 .carrier-client-grid {
   display: grid;
   gap: 10px;
@@ -2697,8 +2730,24 @@ tbody tr.done {
 }
 
 .code {
-  font-family: Consolas, "Courier New", monospace;
+  font-family: var(--app-mono-font-family);
   font-weight: 800;
+}
+
+.variant-cell,
+.product-name-cell {
+  min-width: 0;
+  line-height: 1.32;
+  overflow-wrap: anywhere;
+}
+
+.variant-cell {
+  max-width: 260px;
+}
+
+.product-name-cell {
+  min-width: 240px;
+  max-width: 430px;
 }
 
 .muted {
@@ -2720,7 +2769,7 @@ tbody tr.done {
   min-height: 24px;
   padding: 3px 6px;
   border-radius: 6px;
-  font-family: Consolas, "Courier New", monospace;
+  font-family: var(--app-mono-font-family);
   font-size: 12px;
   font-weight: 800;
   white-space: nowrap;
@@ -3034,7 +3083,7 @@ tbody tr.done {
 }
 
 .history-code {
-  font-family: Consolas, "Courier New", monospace;
+  font-family: var(--app-mono-font-family);
   font-size: 12px;
   font-weight: 800;
   overflow: hidden;

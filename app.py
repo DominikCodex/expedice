@@ -49,6 +49,8 @@ PRODUCT_FEED_MIN_TIMEOUT_SECONDS = 30
 PRODUCT_FEED_MAX_TIMEOUT_SECONDS = 900
 PRODUCT_FEED_MIN_DOWNLOAD_MB = 50
 PRODUCT_FEED_MAX_DOWNLOAD_MB = 1024
+APP_UI_FONT_DEFAULT = "system"
+APP_UI_FONT_CHOICES = {"system", "segoe", "aptos", "inter", "arial", "verdana", "tahoma", "roboto", "lexend", "georgia"}
 PRODUCT_IMAGE_CACHE_SECONDS = 12 * 60 * 60
 PRODUCT_IMAGE_REQUEST_CODE_LIMIT = 10000
 PRODUCT_IMAGE_CACHE_LOCK = threading.Lock()
@@ -1989,7 +1991,13 @@ def maybe_sync_payment_feeds(trigger_source="active_completion"):
 
 
 def default_settings():
+    ui_font = clean_text(os.environ.get("APP_UI_FONT", APP_UI_FONT_DEFAULT)).strip().lower()
+    if ui_font not in APP_UI_FONT_CHOICES:
+        ui_font = APP_UI_FONT_DEFAULT
     return {
+        "appearance": {
+            "font": ui_font,
+        },
         "mapy": {
             "apiKey": os.environ.get("MAPY_API_KEY", ""),
         },
@@ -2108,6 +2116,16 @@ def clamp_int(value, default, minimum, maximum):
     return max(minimum, min(maximum, number))
 
 
+def normalize_appearance_settings(settings):
+    source = settings if isinstance(settings, dict) else {}
+    normalized = dict(source)
+    font = clean_text(source.get("font") or APP_UI_FONT_DEFAULT).strip().lower()
+    if font not in APP_UI_FONT_CHOICES:
+        font = APP_UI_FONT_DEFAULT
+    normalized["font"] = font
+    return normalized
+
+
 def normalize_product_feed_settings(settings):
     source = settings if isinstance(settings, dict) else {}
     delimiter = clean_text(source.get("delimiter") or ";")
@@ -2197,6 +2215,7 @@ def read_settings(include_secrets=False):
             row = cur.fetchone()
 
     settings = deep_merge_settings(default_settings(), row["value"] if row else {})
+    settings["appearance"] = normalize_appearance_settings(settings.get("appearance"))
     if include_secrets:
         return settings
 
@@ -2253,6 +2272,7 @@ def save_settings_payload(payload):
     current = read_settings(include_secrets=True)
     incoming = payload if isinstance(payload, dict) else {}
     next_settings = deep_merge_settings(current, incoming)
+    next_settings["appearance"] = normalize_appearance_settings(next_settings.get("appearance"))
     next_settings.setdefault("productFeed", {})
     merge_secret_field(next_settings["mapy"], current["mapy"], "apiKey")
     merge_secret_field(next_settings["packeta"], current["packeta"], "apiPassword")

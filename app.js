@@ -110,6 +110,49 @@ const SHOP_ADMIN_DOMAINS = {
   fidule_cz: "www.fidule.cz",
 };
 
+const UI_FONT_OPTIONS = {
+  system: {
+    label: "Systémový",
+    stack: '"Segoe UI", "Trebuchet MS", Arial, sans-serif',
+  },
+  segoe: {
+    label: "Segoe UI",
+    stack: '"Segoe UI", Arial, sans-serif',
+  },
+  aptos: {
+    label: "Aptos",
+    stack: 'Aptos, "Segoe UI", Arial, sans-serif',
+  },
+  inter: {
+    label: "Inter / moderní",
+    stack: 'Inter, "Segoe UI", Arial, sans-serif',
+  },
+  arial: {
+    label: "Arial",
+    stack: 'Arial, "Helvetica Neue", sans-serif',
+  },
+  verdana: {
+    label: "Verdana",
+    stack: 'Verdana, "Segoe UI", sans-serif',
+  },
+  tahoma: {
+    label: "Tahoma",
+    stack: 'Tahoma, "Segoe UI", sans-serif',
+  },
+  roboto: {
+    label: "Roboto",
+    stack: 'Roboto, "Segoe UI", Arial, sans-serif',
+  },
+  lexend: {
+    label: "Lexend",
+    stack: 'Lexend, "Segoe UI", Arial, sans-serif',
+  },
+  georgia: {
+    label: "Georgia",
+    stack: 'Georgia, "Times New Roman", serif',
+  },
+};
+
 const usersState = {
   users: [],
   loaded: false,
@@ -227,6 +270,8 @@ const els = {
   settingsView: document.getElementById("settings-view"),
   settingsSave: document.getElementById("settings-save"),
   settingsMessage: document.getElementById("settings-message"),
+  settingsUiFont: document.getElementById("settings-ui-font"),
+  settingsUiFontPreview: document.getElementById("settings-ui-font-preview"),
   settingsMapyKey: document.getElementById("settings-mapy-key"),
   settingsMapyStatus: document.getElementById("settings-mapy-status"),
   settingsProductFeedUrl: document.getElementById("settings-product-feed-url"),
@@ -287,6 +332,25 @@ const els = {
   userCreateRole: document.getElementById("user-create-role"),
   userCreateSubmit: document.getElementById("user-create-submit"),
 };
+
+function uiFontKey(value) {
+  return UI_FONT_OPTIONS[value] ? value : "system";
+}
+
+function applyAppearanceSettings(settings = {}) {
+  const appearance = settings.appearance || {};
+  const fontKey = uiFontKey(appearance.font);
+  const font = UI_FONT_OPTIONS[fontKey];
+  document.documentElement.style.setProperty("--app-font-family", font.stack);
+  document.documentElement.dataset.uiFont = fontKey;
+  if (els.settingsUiFont) {
+    els.settingsUiFont.value = fontKey;
+  }
+  if (els.settingsUiFontPreview) {
+    els.settingsUiFontPreview.style.fontFamily = font.stack;
+    els.settingsUiFontPreview.textContent = `${font.label}: Přehledné roztřídění 03019-MBH-LXL-UPE`;
+  }
+}
 
 function uid(prefix) {
   return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -668,6 +732,11 @@ function startAppForUser(user) {
   els.appShell.classList.remove("hidden");
   els.authUserName.textContent = `${user.displayName || user.username} · ${user.role === "admin" ? "admin" : "zaměstnanec"}`;
   applyRoleVisibility();
+  if (!settingsState.loaded) {
+    loadSettings({ silent: true });
+  } else if (settingsState.settings) {
+    applyAppearanceSettings(settingsState.settings);
+  }
 
   if (!authState.appStarted) {
     loadState();
@@ -1825,6 +1894,7 @@ function paymentCheckHtml(row) {
 }
 
 function renderSettings(settings) {
+  applyAppearanceSettings(settings);
   const mapy = settings.mapy || {};
   const printAgent = settings.printAgent || {};
   const paymentFeeds = settings.paymentFeeds || {};
@@ -1951,21 +2021,32 @@ function renderSettings(settings) {
   els.settingsSenderEmail.value = dpd.senderEmail || "";
 }
 
-async function loadSettings() {
-  setSettingsMessage("Načítám nastavení...", "neutral");
+async function loadSettings(options = {}) {
+  if (!options.silent) {
+    setSettingsMessage("Načítám nastavení...", "neutral");
+  }
   try {
     const data = await fetchJson("/api/settings");
     settingsState.settings = data.settings || {};
     settingsState.loaded = true;
     renderSettings(settingsState.settings);
-    setSettingsMessage("Nastavení je načtené.", "success");
+    if (!options.silent) {
+      setSettingsMessage("Nastavení je načtené.", "success");
+    }
   } catch (error) {
+    if (options.silent) {
+      console.warn("Nastavení vzhledu se nepodařilo načíst.", error);
+      return;
+    }
     setSettingsMessage(`Nastavení se nepodařilo načíst: ${error.message}`, "error");
   }
 }
 
 function collectSettings() {
   return {
+    appearance: {
+      font: uiFontKey(els.settingsUiFont?.value),
+    },
     mapy: {
       apiKey: els.settingsMapyKey.value.trim(),
     },
@@ -5036,7 +5117,7 @@ function renderTable() {
         <small>${escapeHtml(item.paircode)}</small>
       </td>
       <td>${renderEans(item)}</td>
-      <td>${escapeHtml(item.variant)}</td>
+      <td class="variant-cell">${escapeHtml(item.variant)}</td>
       <td><span class="qty ${item.remaining <= 0 ? "zero" : ""}">${item.remaining}</span></td>
       <td>
         <div class="row-actions deduct-actions">
@@ -5044,7 +5125,7 @@ function renderTable() {
         </div>
       </td>
       <td>${escapeHtml(item.brand)}</td>
-      <td>${escapeHtml(item.productName || item.info)}</td>
+      <td class="product-name-cell">${escapeHtml(item.productName || item.info)}</td>
       <td>${imageCell}</td>
       <td>
         <div class="row-actions restore-actions">
@@ -5489,6 +5570,9 @@ window.addEventListener("popstate", () => {
   switchView(viewFromRoute(), { updateRoute: false });
 });
 els.settingsSave.addEventListener("click", saveSettings);
+els.settingsUiFont?.addEventListener("change", () => {
+  applyAppearanceSettings({ appearance: { font: els.settingsUiFont.value } });
+});
 els.productFeedTest.addEventListener("click", testProductFeed);
 els.usersRefresh.addEventListener("click", loadUsers);
 els.userCreateSubmit.addEventListener("click", createUserFromForm);
