@@ -1544,7 +1544,7 @@ function formatBytes(bytes) {
 }
 
 function productFeedStatusText(productFeed) {
-  const timeout = productFeed.downloadTimeoutSeconds || 300;
+  const timeout = productFeed.downloadTimeoutSeconds || 600;
   const maxMb = productFeed.maxDownloadMegabytes || 512;
   return productFeed.hasUrl
     ? `Produktový feed je uložený. Timeout ${timeout} s, limit ${maxMb} MB.`
@@ -1556,7 +1556,7 @@ function collectProductFeedSettings() {
     url: els.settingsProductFeedUrl.value.trim(),
     encoding: "windows-1250",
     delimiter: ";",
-    downloadTimeoutSeconds: Number(els.settingsProductFeedTimeout.value) || 300,
+    downloadTimeoutSeconds: Number(els.settingsProductFeedTimeout.value) || 600,
     maxDownloadMegabytes: Number(els.settingsProductFeedMaxMb.value) || 512,
   };
 }
@@ -1685,7 +1685,7 @@ function renderSettings(settings) {
     productFeedStatusText(productFeed),
     productFeedStatusText(productFeed)
   );
-  els.settingsProductFeedTimeout.value = productFeed.downloadTimeoutSeconds || 300;
+  els.settingsProductFeedTimeout.value = productFeed.downloadTimeoutSeconds || 600;
   els.settingsProductFeedMaxMb.value = productFeed.maxDownloadMegabytes || 512;
   els.settingsPaymentLookback.value = paymentFeeds.lookbackDays || 10;
   if (els.settingsPaymentStatus) {
