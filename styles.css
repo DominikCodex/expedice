@@ -392,29 +392,16 @@ select:focus {
   padding: 6px 9px;
 }
 
-.day-lock-panel {
+.day-lock-actions {
   display: grid;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid #bddbce;
-  border-left: 5px solid var(--accent);
-  border-radius: 8px;
-  background: var(--accent-soft);
 }
 
-.day-lock-panel span {
-  color: var(--accent-dark);
-  font-size: 12px;
-  font-weight: 900;
-  line-height: 1.35;
-}
-
-.day-lock-panel button {
+.day-lock-actions button {
   min-height: 32px;
   padding: 6px 8px;
   color: var(--accent-dark);
   background: #fff;
-  border-color: #bddbce;
+  border-color: var(--strong-line);
   font-size: 12px;
 }
 

@@ -203,7 +203,6 @@ const els = {
   expeditionRefresh: document.getElementById("expedition-refresh"),
   expeditionDeleteDay: document.getElementById("expedition-delete-day"),
   expeditionDayLock: document.getElementById("expedition-day-lock"),
-  expeditionDayLockText: document.getElementById("expedition-day-lock-text"),
   expeditionDayLockChange: document.getElementById("expedition-day-lock-change"),
   expeditionTrashToggle: document.getElementById("expedition-trash-toggle"),
   expeditionShowInactive: document.getElementById("show-inactive-datasets"),
@@ -706,21 +705,10 @@ function saveEmployeeDayLock(dayDate) {
   employeeDayLockState.choosing = false;
 }
 
-function formatEmployeeDayLockUntil(expiresAt) {
-  return new Date(expiresAt).toLocaleTimeString("cs-CZ", {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
 function renderEmployeeDayLockPanel(lock = readEmployeeDayLock()) {
   if (!els.expeditionDayLock) return;
   const show = !isAdmin() && Boolean(lock) && !employeeDayLockState.choosing;
   els.expeditionDayLock.classList.toggle("hidden", !show);
-  if (!show) return;
-  const day = expeditionState.days.find((item) => item.date === lock.date);
-  const label = day?.label || lock.date;
-  els.expeditionDayLockText.textContent = `Zamčeno na ${label} do ${formatEmployeeDayLockUntil(lock.expiresAt)}.`;
 }
 
 function employeeVisibleDays() {
