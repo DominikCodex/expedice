@@ -1330,19 +1330,81 @@ select:focus {
 .workflow-actions.cockpit-actions {
   grid-template-columns: minmax(170px, 1.35fr) repeat(3, minmax(150px, 1fr)) repeat(3, minmax(130px, 0.8fr));
   align-items: stretch;
+  margin-bottom: 8px;
 }
 
 .workflow-actions.cockpit-actions button {
-  min-height: 56px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  min-height: 44px;
+  padding: 7px 10px;
+  gap: 8px;
   font-size: 14px;
   font-weight: 950;
+  line-height: 1.05;
+  white-space: normal;
+}
+
+.workflow-actions.cockpit-actions button span:not(.workflow-action-icon) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.workflow-action-icon {
+  flex: 0 0 22px;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  background-color: rgba(20, 48, 38, 0.78);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 18px 18px;
+}
+
+.workflow-action-ok .workflow-action-icon {
+  background-image: url("assets/workflow-ok.png");
+}
+
+.workflow-action-unpaid .workflow-action-icon {
+  background-image: url("assets/workflow-unpaid.png");
+}
+
+.workflow-action-error .workflow-action-icon {
+  background-image: url("assets/workflow-error.png");
+}
+
+.workflow-action-unpaid-error .workflow-action-icon {
+  background-image: url("assets/workflow-unpaid-error.png");
+}
+
+.workflow-action-open .workflow-action-icon {
+  background-image: url("assets/workflow-open-order.png");
+}
+
+.workflow-action-clear .workflow-action-icon {
+  background-image: url("assets/workflow-clear-error.png");
+}
+
+.workflow-action-reprint .workflow-action-icon {
+  background-image: url("assets/workflow-reprint-label.png");
+}
+
+.cockpit-ok-action .workflow-action-icon,
+.cockpit-danger-action .workflow-action-icon {
+  background-color: rgba(255, 255, 255, 0.18);
+}
+
+.cockpit-warning-action .workflow-action-icon {
+  background-color: rgba(122, 69, 0, 0.78);
 }
 
 .cockpit-ok-action {
   color: #fff;
   background: #147d51;
   border-color: #0d6040;
-  font-size: 18px !important;
+  font-size: 15px !important;
 }
 
 .cockpit-warning-action {
