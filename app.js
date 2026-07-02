@@ -1,6 +1,7 @@
 ﻿const STORAGE_KEY = "rozrazovani-zbozi-v2";
 const MAX_HISTORY = 500;
 const EAN_AUDIT_RENDER_LIMIT = 500;
+const EAN_PERIOD_DATASET_LIMIT = 80;
 
 const seed = window.SORTING_SEED || { items: [], eanMap: {}, summary: {} };
 
@@ -51,13 +52,24 @@ const completionFilters = {
 
 const eanFilters = {
   search: "",
-  risk: "ambiguous",
+  risk: "shutdown",
   match: "",
   shop: "",
-  sort: "risk",
+  sort: "shutdown",
+  period: "current",
+  dateFrom: "",
+  dateTo: "",
 };
 
 const expandedCompletionRows = new Set();
+
+const eanPeriodState = {
+  key: "",
+  source: null,
+  promise: null,
+  error: "",
+};
+let eanAuditRenderSequence = 0;
 
 const completionWorkflowState = {
   row: null,
@@ -257,12 +269,20 @@ const els = {
   workflowMessage: document.getElementById("workflow-message"),
   eansView: document.getElementById("eans-view"),
   eansSummary: document.getElementById("eans-summary"),
+  eansPeriodLabel: document.getElementById("eans-period-label"),
+  eansPeriodMeta: document.getElementById("eans-period-meta"),
+  eansDateFrom: document.getElementById("eans-filter-date-from"),
+  eansDateTo: document.getElementById("eans-filter-date-to"),
+  eansPeriodButtons: document.getElementById("eans-period-buttons"),
   eansFilterSearch: document.getElementById("eans-filter-search"),
   eansFilterRisk: document.getElementById("eans-filter-risk"),
   eansFilterMatch: document.getElementById("eans-filter-match"),
   eansFilterShop: document.getElementById("eans-filter-shop"),
   eansFilterSort: document.getElementById("eans-filter-sort"),
   eansFilterReset: document.getElementById("eans-filter-reset"),
+  eansShutdownPanel: document.getElementById("eans-shutdown-panel"),
+  eansShutdownList: document.getElementById("eans-shutdown-list"),
+  eansShutdownCount: document.getElementById("eans-shutdown-count"),
   eansRowCount: document.getElementById("eans-row-count"),
   eansBody: document.getElementById("eans-body"),
   eansMapRowCount: document.getElementById("eans-map-row-count"),
@@ -4600,6 +4620,96 @@ function formatTime(value) {
   });
 }
 
+function localDateInputValue(date = new Date()) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function parseDateInput(value) {
+  const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  const date = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function addDaysToDateInput(value, days) {
+  const date = parseDateInput(value) || new Date();
+  date.setDate(date.getDate() + days);
+  return localDateInputValue(date);
+}
+
+function eanBaseDate() {
+  return expeditionState.day?.date || sortingState.dataset?.datasetDate || localDateInputValue();
+}
+
+function eanSelectedPeriodRange() {
+  const baseDate = eanBaseDate();
+  if (eanFilters.period === "current") {
+    return { from: baseDate, to: baseDate, mode: "current" };
+  }
+  if (eanFilters.period === "day") {
+    return { from: baseDate, to: baseDate, mode: "day" };
+  }
+
+  let from = eanFilters.dateFrom || baseDate;
+  let to = eanFilters.dateTo || baseDate;
+  if (from > to) {
+    const swap = from;
+    from = to;
+    to = swap;
+  }
+  return { from, to, mode: eanFilters.period || "custom" };
+}
+
+function setEanPeriodPreset(preset) {
+  const baseDate = eanBaseDate();
+  eanFilters.period = preset;
+  if (preset === "current" || preset === "day") {
+    eanFilters.dateFrom = baseDate;
+    eanFilters.dateTo = baseDate;
+  } else {
+    const days = Math.max(1, Number(preset) || 1);
+    eanFilters.dateTo = baseDate;
+    eanFilters.dateFrom = addDaysToDateInput(baseDate, 1 - days);
+  }
+  renderEanAudit();
+}
+
+function syncEanPeriodControls(source = null) {
+  const range = eanSelectedPeriodRange();
+  if (els.eansDateFrom) els.eansDateFrom.value = range.from;
+  if (els.eansDateTo) els.eansDateTo.value = range.to;
+  if (els.eansPeriodButtons) {
+    els.eansPeriodButtons.querySelectorAll("[data-ean-period]").forEach((button) => {
+      button.classList.toggle("active", button.dataset.eanPeriod === eanFilters.period);
+    });
+  }
+
+  if (!els.eansPeriodLabel || !els.eansPeriodMeta) return;
+  if (range.mode === "current") {
+    els.eansPeriodLabel.textContent = "Aktuální načtená dávka";
+    els.eansPeriodMeta.textContent = `${sortingState.dataset ? datasetLabel(sortingState.dataset) : "Bez vybrané dávky"} | ${
+      state.items.length
+    } řádků`;
+    return;
+  }
+
+  const periodLabel = range.from === range.to ? range.from : `${range.from} až ${range.to}`;
+  els.eansPeriodLabel.textContent = periodLabel;
+  if (source?.loading) {
+    els.eansPeriodMeta.textContent = "Načítám roztřídění pro vybrané období...";
+  } else if (source?.error) {
+    els.eansPeriodMeta.textContent = source.error;
+  } else if (source) {
+    const truncated = source.truncated ? ` | limit ${EAN_PERIOD_DATASET_LIMIT} dávek` : "";
+    els.eansPeriodMeta.textContent = `${source.datasetCount} dávek | ${source.rowCount} řádků${truncated}`;
+  } else {
+    els.eansPeriodMeta.textContent = "Audit se načte z aktivních roztřídění v období.";
+  }
+}
+
 function itemHaystack(item) {
   return normalize(
     [
@@ -4740,15 +4850,125 @@ function scanDecisionForCandidates(candidates) {
   };
 }
 
-function buildEanAuditData() {
+function activeEanAuditMap() {
+  return Object.keys(state.eanMap || {}).length ? state.eanMap : seed.eanMap || {};
+}
+
+function currentEanAuditSource() {
+  return {
+    key: "current",
+    mode: "current",
+    items: state.items,
+    eanMap: activeEanAuditMap(),
+    datasetCount: sortingState.dataset ? 1 : 0,
+    rowCount: state.items.length,
+    truncated: false,
+  };
+}
+
+function eanPeriodCacheKey(range) {
+  return `${range.mode}:${range.from}:${range.to}`;
+}
+
+function sortingRowToAuditItem(row, dataset) {
+  const item = sortingRowToItem({
+    ...row,
+    shopCode: row.shopCode || dataset?.shopCode || "",
+  });
+  item.id = `audit-${dataset?.id || "dataset"}-${row.id || row.rowNumber || item.id}`;
+  item.shopCode = item.shopCode || dataset?.shopCode || "";
+  return item;
+}
+
+async function loadEanAuditPeriodSource(range) {
+  const list = await fetchJson("/api/datasets?kind=sorting");
+  const datasets = (list.datasets || []).filter((dataset) => {
+    const date = dataset.datasetDate || "";
+    return date >= range.from && date <= range.to;
+  });
+  const limited = datasets.slice(0, EAN_PERIOD_DATASET_LIMIT);
+  const details = await Promise.all(limited.map((dataset) => fetchJson(`/api/datasets/${encodeURIComponent(dataset.id)}`)));
+  const items = details.flatMap((detail) => {
+    const dataset = detail.dataset || {};
+    return (detail.rows || []).map((row) => sortingRowToAuditItem(row, dataset));
+  });
+
+  return {
+    key: eanPeriodCacheKey(range),
+    mode: range.mode,
+    from: range.from,
+    to: range.to,
+    items,
+    eanMap: activeEanAuditMap(),
+    datasetCount: limited.length,
+    rowCount: items.length,
+    truncated: datasets.length > limited.length,
+  };
+}
+
+async function ensureEanAuditSource() {
+  const range = eanSelectedPeriodRange();
+  if (range.mode === "current") {
+    return currentEanAuditSource();
+  }
+
+  const key = eanPeriodCacheKey(range);
+  if (eanPeriodState.key === key && eanPeriodState.source) {
+    return eanPeriodState.source;
+  }
+  if (eanPeriodState.key === key && eanPeriodState.promise) {
+    return eanPeriodState.promise;
+  }
+
+  eanPeriodState.key = key;
+  eanPeriodState.source = null;
+  eanPeriodState.error = "";
+  eanPeriodState.promise = loadEanAuditPeriodSource(range)
+    .then((source) => {
+      if (eanPeriodState.key === key) {
+        eanPeriodState.source = source;
+        eanPeriodState.error = "";
+      }
+      return source;
+    })
+    .catch((error) => {
+      if (eanPeriodState.key === key) {
+        eanPeriodState.source = null;
+        eanPeriodState.error = error.message;
+      }
+      throw error;
+    })
+    .finally(() => {
+      if (eanPeriodState.key === key) {
+        eanPeriodState.promise = null;
+      }
+    });
+  return eanPeriodState.promise;
+}
+
+function eanShutdownCandidateReason(record) {
+  if (record.scanMode !== "choice") return "";
+  if (record.exactVariantKeys.length > 1) return "více přesných variant";
+  if (record.activeCandidates.length && !record.exactCandidates.length) return "jen paircode/prefix";
+  if (record.articleCodes.length > 1 || record.prefixes.length > 1) return "nejednotná EAN mapa";
+  return "vyžaduje ruční výběr";
+}
+
+function eanAuditIsShutdownCandidate(record) {
+  return Boolean(record.shutdownCandidate);
+}
+
+function buildEanAuditData(sourceItems = state.items, sourceEanMap = state.eanMap, meta = {}) {
   const itemIdsWithEan = new Set();
-  const records = Object.entries(state.eanMap || {}).map(([ean, entries]) => {
+  const items = sourceItems || [];
+  const eanMap = sourceEanMap || {};
+  const records = Object.entries(eanMap).map(([ean, entries]) => {
     const entryList = Array.isArray(entries) ? entries : [];
     const allCandidateMap = new Map();
     const activeCandidateMap = new Map();
 
     entryList.forEach((entry) => {
-      state.items.forEach((item) => {
+      items.forEach((item) => {
         const matchType = eanEntryMatchType(entry, item);
         if (!matchType) return;
         itemIdsWithEan.add(item.id);
@@ -4789,6 +5009,8 @@ function buildEanAuditData() {
       shopCodes,
       scanMode,
     };
+    record.shutdownReason = eanShutdownCandidateReason(record);
+    record.shutdownCandidate = Boolean(record.shutdownReason);
     record.reasons = eanAuditReasons(record);
     record.tone = eanAuditTone(record);
     return record;
@@ -4796,13 +5018,20 @@ function buildEanAuditData() {
 
   return {
     records,
+    sourceItems: items,
+    sourceEanMap: eanMap,
+    meta,
     itemIdsWithEan,
-    rowsWithoutEan: state.items.filter((item) => !itemIdsWithEan.has(item.id)).length,
+    rowsWithoutEan: items.filter((item) => !itemIdsWithEan.has(item.id)).length,
   };
 }
 
 function eanAuditReasons(record) {
   const reasons = [];
+  if (record.shutdownCandidate) {
+    reasons.push("kandidát na vypnutí");
+    if (record.shutdownReason) reasons.push(record.shutdownReason);
+  }
   if (record.scanMode === "ok") {
     if (record.safeCandidates.length > 1) reasons.push("více řádků stejné varianty");
     if (record.pairCandidates.length) reasons.push("prefix shody ignorované");
@@ -4868,6 +5097,7 @@ function eanAuditPassesFilters(record) {
   const query = normalize(eanFilters.search);
   if (query && !eanAuditHaystack(record).includes(query)) return false;
 
+  if (eanFilters.risk === "shutdown" && !eanAuditIsShutdownCandidate(record)) return false;
   if (eanFilters.risk === "ambiguous" && !eanAuditIsAmbiguous(record)) return false;
   if (eanFilters.risk === "scan-choice" && record.scanMode !== "choice") return false;
   if (
@@ -4887,14 +5117,24 @@ function eanAuditPassesFilters(record) {
 }
 
 function eanAuditRiskRank(record) {
-  if (record.tone === "danger") return 0;
-  if (record.tone === "warning") return 1;
-  return 2;
+  if (record.shutdownCandidate) return 0;
+  if (record.tone === "danger") return 1;
+  if (record.tone === "warning") return 2;
+  return 3;
 }
 
 function sortEanAuditRecords(records) {
   return records.sort((a, b) => {
     if (eanFilters.sort === "ean") return a.ean.localeCompare(b.ean);
+    if (eanFilters.sort === "shutdown") {
+      return (
+        Number(b.shutdownCandidate) - Number(a.shutdownCandidate) ||
+        eanAuditRiskRank(a) - eanAuditRiskRank(b) ||
+        b.activeCandidates.length - a.activeCandidates.length ||
+        b.entryCount - a.entryCount ||
+        a.ean.localeCompare(b.ean)
+      );
+    }
     if (eanFilters.sort === "candidates") {
       return b.activeCandidates.length - a.activeCandidates.length || a.ean.localeCompare(b.ean);
     }
@@ -4923,15 +5163,22 @@ function renderEanShopFilter(records) {
 
 function renderEanSummary(data, visibleRecords) {
   if (!els.eansSummary) return;
+  const shutdown = data.records.filter(eanAuditIsShutdownCandidate).length;
   const ambiguous = data.records.filter(eanAuditIsAmbiguous).length;
   const choice = data.records.filter((record) => record.scanMode === "choice").length;
   const noCurrent = data.records.filter((record) => !record.allCandidates.length).length;
+  const source =
+    data.meta?.mode === "current"
+      ? "načtená dávka"
+      : `${data.meta?.datasetCount || 0} dávek / ${data.meta?.rowCount || 0} řádků`;
   els.eansSummary.innerHTML = `
     <span><strong>${escapeHtml(data.records.length)}</strong> EANů v mapě</span>
+    <span><strong>${escapeHtml(shutdown)}</strong> kandidátů na vypnutí</span>
     <span><strong>${escapeHtml(ambiguous)}</strong> rizikových</span>
     <span><strong>${escapeHtml(choice)}</strong> vyžaduje výběr</span>
     <span><strong>${escapeHtml(noCurrent)}</strong> mimo aktuální dávku</span>
     <span><strong>${escapeHtml(data.rowsWithoutEan)}</strong> řádků bez EAN shody</span>
+    <span>${escapeHtml(source)}</span>
     <span>Zobrazeno ${escapeHtml(visibleRecords.length)}</span>
   `;
 }
@@ -4964,12 +5211,13 @@ function formatEanWeight(value) {
   })} kg`;
 }
 
-function buildEanMapRows() {
-  return Object.entries(state.eanMap || {})
+function buildEanMapRows(sourceItems = state.items, sourceEanMap = state.eanMap) {
+  const items = sourceItems || [];
+  return Object.entries(sourceEanMap || {})
     .flatMap(([ean, entries]) => {
       const entryList = Array.isArray(entries) ? entries : [];
       return entryList.map((entry, index) => {
-        const matches = state.items
+        const matches = items
           .map((item) => ({ item, matchType: eanEntryMatchType(entry, item) }))
           .filter((match) => match.matchType);
         const activeMatches = matches.filter((match) => toNumber(match.item.remaining, 0) > 0);
@@ -5010,9 +5258,9 @@ function renderEanMapRow(row) {
   `;
 }
 
-function renderEanMapTable() {
+function renderEanMapTable(data = null) {
   if (!els.eansMapBody) return;
-  const allRows = buildEanMapRows();
+  const allRows = buildEanMapRows(data?.sourceItems || state.items, data?.sourceEanMap || state.eanMap);
   const query = normalize(eanFilters.search);
   const rows = query ? allRows.filter((row) => eanMapEntryHaystack(row).includes(query)) : allRows;
   els.eansMapRowCount.textContent =
@@ -5093,7 +5341,7 @@ function renderEanAuditRow(record) {
       ? `${record.safeCandidates.length} k postupnému odpisu`
       : `${record.activeCandidates.length} aktivních shod`;
   return `
-    <tr class="ean-audit-row ${escapeHtml(record.tone)}">
+    <tr class="ean-audit-row ${escapeHtml(record.tone)} ${record.shutdownCandidate ? "shutdown" : ""}">
       <td class="code">${escapeHtml(record.ean)}</td>
       <td>
         <span class="status-chip ${escapeHtml(record.tone)}">${escapeHtml(eanAuditStatusLabel(record))}</span>
@@ -5115,15 +5363,90 @@ function renderEanAuditRow(record) {
   `;
 }
 
-function renderEanAudit() {
+function renderEanShutdownPanel(records) {
+  if (!els.eansShutdownPanel || !els.eansShutdownList) return;
+  const candidates = sortEanAuditRecords(records.filter(eanAuditIsShutdownCandidate).slice()).slice(0, 12);
+  const total = records.filter(eanAuditIsShutdownCandidate).length;
+  if (els.eansShutdownCount) {
+    els.eansShutdownCount.textContent = `${total} kandidátů`;
+  }
+  if (!candidates.length) {
+    els.eansShutdownPanel.classList.add("hidden");
+    els.eansShutdownList.innerHTML = "";
+    return;
+  }
+
+  els.eansShutdownPanel.classList.remove("hidden");
+  els.eansShutdownList.innerHTML = candidates
+    .map((record) => {
+      const firstCandidate = record.activeCandidates[0]?.item;
+      const primaryCode = record.articleCodes[0] || firstCandidate?.variantCode || "-";
+      const primaryVariant = [firstCandidate?.variant, record.sizes[0], record.colors[0]].filter(Boolean).join(" | ");
+      return `
+        <article class="ean-shutdown-card">
+          <div>
+            <strong class="code">${escapeHtml(record.ean)}</strong>
+            <span>${escapeHtml(record.shutdownReason || "vyžaduje ruční výběr")}</span>
+          </div>
+          <small class="code">${escapeHtml(primaryCode)}</small>
+          <small>${escapeHtml(primaryVariant || "bez detailu varianty")}</small>
+          <div class="ean-shutdown-meta">
+            <span>${escapeHtml(record.activeCandidates.length)} aktivních shod</span>
+            <span>${escapeHtml(record.exactCandidates.length)} přesně</span>
+            <span>${escapeHtml(record.pairCandidates.length)} přes prefix</span>
+          </div>
+          <button type="button" class="secondary" data-action="focus-ean-audit" data-ean="${escapeHtml(record.ean)}">Detail</button>
+        </article>
+      `;
+    })
+    .join("");
+}
+
+function renderEanLoading(message = "Načítám EAN audit...") {
+  if (els.eansSummary) els.eansSummary.innerHTML = `<span>${escapeHtml(message)}</span>`;
+  if (els.eansRowCount) els.eansRowCount.textContent = "Načítám...";
+  if (els.eansBody) els.eansBody.innerHTML = `<tr><td colspan="6" class="empty">${escapeHtml(message)}</td></tr>`;
+  if (els.eansMapBody) els.eansMapBody.innerHTML = `<tr><td colspan="8" class="empty">${escapeHtml(message)}</td></tr>`;
+  if (els.eansShutdownPanel) els.eansShutdownPanel.classList.add("hidden");
+}
+
+function renderEanError(error) {
+  const message = `EAN audit se nepodařilo načíst: ${error.message}`;
+  syncEanPeriodControls({ error: message });
+  if (els.eansSummary) els.eansSummary.innerHTML = `<span>${escapeHtml(message)}</span>`;
+  if (els.eansRowCount) els.eansRowCount.textContent = "Chyba";
+  if (els.eansBody) els.eansBody.innerHTML = `<tr><td colspan="6" class="empty">${escapeHtml(message)}</td></tr>`;
+  if (els.eansMapBody) els.eansMapBody.innerHTML = `<tr><td colspan="8" class="empty">${escapeHtml(message)}</td></tr>`;
+  if (els.eansShutdownPanel) els.eansShutdownPanel.classList.add("hidden");
+}
+
+async function renderEanAudit() {
   if (!els.eansBody) return;
-  const data = buildEanAuditData();
+  const renderSequence = ++eanAuditRenderSequence;
+  syncEanPeriodControls(eanPeriodState.promise ? { loading: true } : eanPeriodState.source);
+  if (eanFilters.period !== "current" && eanPeriodState.key !== eanPeriodCacheKey(eanSelectedPeriodRange())) {
+    renderEanLoading("Načítám roztřídění pro vybrané období...");
+  }
+
+  let source;
+  try {
+    source = await ensureEanAuditSource();
+  } catch (error) {
+    if (renderSequence !== eanAuditRenderSequence) return;
+    renderEanError(error);
+    return;
+  }
+  if (renderSequence !== eanAuditRenderSequence) return;
+
+  syncEanPeriodControls(source);
+  const data = buildEanAuditData(source.items, source.eanMap, source);
   renderEanShopFilter(data.records);
-  renderEanMapTable();
+  renderEanMapTable(data);
   const filtered = sortEanAuditRecords(data.records.filter(eanAuditPassesFilters));
   const visible = filtered.slice(0, EAN_AUDIT_RENDER_LIMIT);
   const hiddenCount = filtered.length - visible.length;
 
+  renderEanShutdownPanel(data.records);
   renderEanSummary(data, filtered);
   els.eansRowCount.textContent = `${filtered.length} EANů${hiddenCount > 0 ? ` | zobrazeno prvních ${EAN_AUDIT_RENDER_LIMIT}` : ""}`;
 
@@ -5776,6 +6099,23 @@ els.eansFilterSearch?.addEventListener("input", () => {
   eanFilters.search = els.eansFilterSearch.value.trim();
   renderEanAudit();
 });
+els.eansDateFrom?.addEventListener("change", () => {
+  eanFilters.period = "custom";
+  eanFilters.dateFrom = els.eansDateFrom.value || eanBaseDate();
+  eanFilters.dateTo = els.eansDateTo?.value || eanFilters.dateFrom;
+  renderEanAudit();
+});
+els.eansDateTo?.addEventListener("change", () => {
+  eanFilters.period = "custom";
+  eanFilters.dateTo = els.eansDateTo.value || eanBaseDate();
+  eanFilters.dateFrom = els.eansDateFrom?.value || eanFilters.dateTo;
+  renderEanAudit();
+});
+els.eansPeriodButtons?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-ean-period]");
+  if (!button) return;
+  setEanPeriodPreset(button.dataset.eanPeriod);
+});
 els.eansFilterRisk?.addEventListener("change", () => {
   eanFilters.risk = els.eansFilterRisk.value;
   renderEanAudit();
@@ -5794,15 +6134,27 @@ els.eansFilterSort?.addEventListener("change", () => {
 });
 els.eansFilterReset?.addEventListener("click", () => {
   eanFilters.search = "";
-  eanFilters.risk = "ambiguous";
+  eanFilters.risk = "shutdown";
   eanFilters.match = "";
   eanFilters.shop = "";
-  eanFilters.sort = "risk";
+  eanFilters.sort = "shutdown";
+  eanFilters.period = "current";
+  eanFilters.dateFrom = "";
+  eanFilters.dateTo = "";
   if (els.eansFilterSearch) els.eansFilterSearch.value = "";
   if (els.eansFilterRisk) els.eansFilterRisk.value = eanFilters.risk;
   if (els.eansFilterMatch) els.eansFilterMatch.value = "";
   if (els.eansFilterShop) els.eansFilterShop.value = "";
   if (els.eansFilterSort) els.eansFilterSort.value = eanFilters.sort;
+  renderEanAudit();
+});
+els.eansShutdownList?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-action='focus-ean-audit']");
+  if (!button) return;
+  eanFilters.search = button.dataset.ean || "";
+  eanFilters.risk = "";
+  if (els.eansFilterSearch) els.eansFilterSearch.value = eanFilters.search;
+  if (els.eansFilterRisk) els.eansFilterRisk.value = eanFilters.risk;
   renderEanAudit();
 });
 els.completionValidateAddresses?.addEventListener("click", validateAddressDeliveriesBulk);
