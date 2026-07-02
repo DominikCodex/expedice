@@ -610,37 +610,46 @@
                     <div class="settings-grid">
                 <fieldset class="settings-card settings-card-wide">
                   <legend>Produktový feed</legend>
-                  <label class="field">
-                    <span>URL feedu produktů</span>
-                    <input id="settings-product-feed-url" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
-                  </label>
-                  <label class="field">
-                    <span>Timeout stažení (s)</span>
-                    <input id="settings-product-feed-timeout" type="number" min="30" max="900" step="30" autocomplete="off" />
-                  </label>
-                  <label class="field">
-                    <span>Limit velikosti (MB)</span>
-                    <input id="settings-product-feed-max-mb" type="number" min="50" max="1024" step="50" autocomplete="off" />
-                  </label>
-                  <div class="settings-actions">
-                    <button id="product-feed-test" type="button" class="secondary">Ověřit feed</button>
+                  <div class="settings-line settings-product-feed-line">
+                    <label class="field settings-field-grow">
+                      <span>URL feedu produktů</span>
+                      <input id="settings-product-feed-url" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
+                    </label>
+                    <label class="field settings-field-number">
+                      <span>Timeout (s)</span>
+                      <input id="settings-product-feed-timeout" type="number" min="30" max="900" step="30" autocomplete="off" />
+                    </label>
+                    <label class="field settings-field-number">
+                      <span>Limit (MB)</span>
+                      <input id="settings-product-feed-max-mb" type="number" min="50" max="1024" step="50" autocomplete="off" />
+                    </label>
+                    <div class="settings-actions">
+                      <button id="product-feed-test" type="button" class="secondary">Ověřit feed</button>
+                    </div>
                   </div>
                   <div id="settings-product-feed-status" class="settings-hint"></div>
                 </fieldset>
 
                 <fieldset class="settings-card settings-card-wide">
                   <legend>Kontrola plateb z CSV</legend>
-                  <p class="settings-description">
-                    Feed URL se ukládá pro každý e-shop zvlášť. Datumy do adresy nedávej ručně: systém při kontrole automaticky
-                    přidá nebo přepíše <code>dateFrom</code> a <code>dateUntil</code>.
-                  </p>
-                  <label class="field">
-                    <span>Načítat zpětně dnů</span>
-                    <input id="settings-payment-lookback" type="number" min="1" max="31" step="1" autocomplete="off" />
-                  </label>
-                  <div id="settings-payment-status" class="settings-hint"></div>
-                  <div class="carrier-client-grid">
-                    <div class="carrier-client-card">
+                  <div class="settings-line settings-payment-line">
+                    <p class="settings-description">
+                      Feed URL se ukládá pro každý e-shop zvlášť. Datumy do adresy nedávej ručně: systém při kontrole automaticky
+                      přidá nebo přepíše <code>dateFrom</code> a <code>dateUntil</code>.
+                    </p>
+                    <label class="field settings-field-number">
+                      <span>Zpětně dnů</span>
+                      <input id="settings-payment-lookback" type="number" min="1" max="31" step="1" autocomplete="off" />
+                    </label>
+                    <div id="settings-payment-status" class="settings-hint"></div>
+                  </div>
+                  <div class="settings-client-list settings-client-list-table">
+                    <div class="settings-client-row settings-client-head" aria-hidden="true">
+                      <span>E-shop</span>
+                      <span>CSV feed</span>
+                      <span>Stav</span>
+                    </div>
+                    <div class="settings-client-row">
                       <strong>iVeronika.cz</strong>
                       <label class="field">
                         <span>CSV feed objednávek</span>
@@ -648,7 +657,7 @@
                       </label>
                       <div id="settings-payment-iveronika-status" class="settings-hint"></div>
                     </div>
-                    <div class="carrier-client-card">
+                    <div class="settings-client-row">
                       <strong>iVeronika.sk</strong>
                       <label class="field">
                         <span>CSV feed objednávek</span>
@@ -656,7 +665,7 @@
                       </label>
                       <div id="settings-payment-iveronika-sk-status" class="settings-hint"></div>
                     </div>
-                    <div class="carrier-client-card">
+                    <div class="settings-client-row">
                       <strong>Galantra.cz</strong>
                       <label class="field">
                         <span>CSV feed objednávek</span>
@@ -680,17 +689,19 @@
                     <div class="settings-grid">
                 <fieldset class="settings-card">
                   <legend>Zásilkovna / Packeta</legend>
-                  <label class="field">
-                    <span>API URL</span>
-                    <input id="settings-packeta-url" autocomplete="off" />
-                  </label>
-                  <label class="field">
-                    <span>API heslo</span>
-                    <input id="settings-packeta-password" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
-                  </label>
+                  <div class="settings-secret-stack">
+                    <label class="field">
+                      <span>API URL</span>
+                      <input id="settings-packeta-url" autocomplete="off" />
+                    </label>
+                    <label class="field">
+                      <span>Výchozí API heslo</span>
+                      <input id="settings-packeta-password" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
+                    </label>
+                  </div>
                   <div id="settings-packeta-status" class="settings-hint"></div>
-                  <div class="carrier-client-grid">
-                    <div class="carrier-client-card">
+                  <div class="settings-client-list">
+                    <div class="settings-client-row settings-client-row-compact">
                       <strong>iVeronika.cz</strong>
                       <label class="field">
                         <span>API heslo klienta</span>
@@ -698,7 +709,7 @@
                       </label>
                       <div id="settings-packeta-iveronika-status" class="settings-hint"></div>
                     </div>
-                    <div class="carrier-client-card">
+                    <div class="settings-client-row settings-client-row-compact">
                       <strong>Galantra.cz</strong>
                       <label class="field">
                         <span>API heslo klienta</span>
@@ -709,125 +720,142 @@
                   </div>
                 </fieldset>
 
-                <fieldset class="settings-card">
+                <fieldset class="settings-card settings-card-wide">
                   <legend>DPD GeoAPI V1</legend>
-                  <label class="field">
-                    <span>Base URL</span>
-                    <input id="settings-dpd-url" autocomplete="off" />
-                  </label>
-                  <label class="field">
-                    <span>API key</span>
-                    <input id="settings-dpd-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
-                  </label>
-                  <label class="field">
-                    <span>Zákazník DSW</span>
-                    <input id="settings-dpd-customer-dsw" autocomplete="off" />
-                  </label>
-                  <label class="field">
-                    <span>Zákazník ID</span>
-                    <input id="settings-dpd-customer-id" autocomplete="off" />
-                  </label>
-                  <div class="carrier-client-grid">
-                    <div class="carrier-client-card">
-                      <strong>iVeronika.cz</strong>
-                      <label class="field">
-                        <span>API key klienta</span>
-                        <input id="settings-dpd-iveronika-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
-                      </label>
-                      <div id="settings-dpd-iveronika-status" class="settings-hint"></div>
-                      <label class="field">
-                        <span>Zákazník DSW</span>
-                        <input id="settings-dpd-iveronika-customer-dsw" autocomplete="off" />
-                      </label>
-                      <label class="field">
-                        <span>Zákazník ID</span>
-                        <input id="settings-dpd-iveronika-customer-id" autocomplete="off" />
-                      </label>
+                  <div class="settings-line settings-dpd-base-line">
+                    <label class="field settings-field-grow">
+                      <span>Base URL</span>
+                      <input id="settings-dpd-url" autocomplete="off" />
+                    </label>
+                    <label class="field">
+                      <span>API key</span>
+                      <input id="settings-dpd-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
+                    </label>
+                  </div>
+                  <div class="settings-line settings-dpd-meta-line">
+                    <label class="field">
+                      <span>Zákazník DSW</span>
+                      <input id="settings-dpd-customer-dsw" autocomplete="off" />
+                    </label>
+                    <label class="field">
+                      <span>Zákazník ID</span>
+                      <input id="settings-dpd-customer-id" autocomplete="off" />
+                    </label>
+                    <label class="field">
+                      <span>Typ zásilky</span>
+                      <select id="settings-dpd-shipment-type">
+                        <option value="Standard">Standard</option>
+                        <option value="Collection">Collection</option>
+                        <option value="ThirdPartyCollection">ThirdPartyCollection</option>
+                        <option value="Import">Import</option>
+                        <option value="ThirdPartyStandard">ThirdPartyStandard</option>
+                        <option value="Return">Return</option>
+                      </select>
+                    </label>
+                    <label class="field">
+                      <span>Režim</span>
+                      <select id="settings-dpd-mode">
+                        <option value="test">test</option>
+                        <option value="production">ostrý</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div class="settings-switch-row">
+                    <label class="toggle settings-toggle">
+                      <input id="settings-dpd-enabled" type="checkbox" />
+                      <span>Povolit odesílání do DPD</span>
+                    </label>
+                    <label class="toggle settings-toggle">
+                      <input id="settings-dpd-notification" type="checkbox" />
+                      <span>DPD notifikace zákazníkovi</span>
+                    </label>
+                  </div>
+                  <div class="settings-client-list">
+                    <div class="settings-client-row settings-client-head" aria-hidden="true">
+                      <span>E-shop</span>
+                      <span>API a zákazník</span>
+                      <span>Stav</span>
                     </div>
-                    <div class="carrier-client-card">
+                    <div class="settings-client-row settings-client-row-dpd">
+                      <strong>iVeronika.cz</strong>
+                      <div class="settings-mini-grid">
+                        <label class="field">
+                          <span>API key klienta</span>
+                          <input id="settings-dpd-iveronika-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
+                        </label>
+                        <label class="field">
+                          <span>Zákazník DSW</span>
+                          <input id="settings-dpd-iveronika-customer-dsw" autocomplete="off" />
+                        </label>
+                        <label class="field">
+                          <span>Zákazník ID</span>
+                          <input id="settings-dpd-iveronika-customer-id" autocomplete="off" />
+                        </label>
+                      </div>
+                      <div id="settings-dpd-iveronika-status" class="settings-hint"></div>
+                    </div>
+                    <div class="settings-client-row settings-client-row-dpd">
                       <strong>Galantra.cz</strong>
-                      <label class="field">
-                        <span>API key klienta</span>
-                        <input id="settings-dpd-galantra-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
-                      </label>
+                      <div class="settings-mini-grid">
+                        <label class="field">
+                          <span>API key klienta</span>
+                          <input id="settings-dpd-galantra-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
+                        </label>
+                        <label class="field">
+                          <span>Zákazník DSW</span>
+                          <input id="settings-dpd-galantra-customer-dsw" autocomplete="off" />
+                        </label>
+                        <label class="field">
+                          <span>Zákazník ID</span>
+                          <input id="settings-dpd-galantra-customer-id" autocomplete="off" />
+                        </label>
+                      </div>
                       <div id="settings-dpd-galantra-status" class="settings-hint"></div>
-                      <label class="field">
-                        <span>Zákazník DSW</span>
-                        <input id="settings-dpd-galantra-customer-dsw" autocomplete="off" />
-                      </label>
-                      <label class="field">
-                        <span>Zákazník ID</span>
-                        <input id="settings-dpd-galantra-customer-id" autocomplete="off" />
-                      </label>
                     </div>
                   </div>
-                  <label class="field">
-                    <span>Typ zásilky</span>
-                    <select id="settings-dpd-shipment-type">
-                      <option value="Standard">Standard</option>
-                      <option value="Collection">Collection</option>
-                      <option value="ThirdPartyCollection">ThirdPartyCollection</option>
-                      <option value="Import">Import</option>
-                      <option value="ThirdPartyStandard">ThirdPartyStandard</option>
-                      <option value="Return">Return</option>
-                    </select>
-                  </label>
-                  <label class="field">
-                    <span>Režim</span>
-                    <select id="settings-dpd-mode">
-                      <option value="test">test</option>
-                      <option value="production">ostrý</option>
-                    </select>
-                  </label>
-                  <label class="toggle settings-toggle">
-                    <input id="settings-dpd-enabled" type="checkbox" />
-                    <span>Povolit odesílání do DPD</span>
-                  </label>
-                  <label class="toggle settings-toggle">
-                    <input id="settings-dpd-notification" type="checkbox" />
-                    <span>DPD notifikace zákazníkovi</span>
-                  </label>
                   <div id="settings-dpd-status" class="settings-hint"></div>
                 </fieldset>
 
                 <fieldset class="settings-card settings-card-wide">
                   <legend>Odesílatel pro DPD</legend>
-                  <label class="field">
-                    <span>Název odesílatele</span>
-                    <input id="settings-sender-name" autocomplete="off" />
-                  </label>
-                  <label class="field">
-                    <span>Ulice</span>
-                    <input id="settings-sender-street" autocomplete="off" />
-                  </label>
-                  <label class="field">
-                    <span>Číslo domu</span>
-                    <input id="settings-sender-house" autocomplete="off" />
-                  </label>
-                  <label class="field">
-                    <span>Město</span>
-                    <input id="settings-sender-city" autocomplete="off" />
-                  </label>
-                  <label class="field">
-                    <span>PSČ</span>
-                    <input id="settings-sender-zip" autocomplete="off" />
-                  </label>
-                  <label class="field">
-                    <span>Země</span>
-                    <input id="settings-sender-country" autocomplete="off" />
-                  </label>
-                  <label class="field">
-                    <span>Kontakt</span>
-                    <input id="settings-sender-contact" autocomplete="off" />
-                  </label>
-                  <label class="field">
-                    <span>Telefon</span>
-                    <input id="settings-sender-phone" autocomplete="off" />
-                  </label>
-                  <label class="field">
-                    <span>E-mail</span>
-                    <input id="settings-sender-email" autocomplete="off" />
-                  </label>
+                  <div class="settings-address-grid">
+                    <label class="field settings-field-grow">
+                      <span>Název odesílatele</span>
+                      <input id="settings-sender-name" autocomplete="off" />
+                    </label>
+                    <label class="field">
+                      <span>Ulice</span>
+                      <input id="settings-sender-street" autocomplete="off" />
+                    </label>
+                    <label class="field settings-field-short">
+                      <span>Číslo domu</span>
+                      <input id="settings-sender-house" autocomplete="off" />
+                    </label>
+                    <label class="field">
+                      <span>Město</span>
+                      <input id="settings-sender-city" autocomplete="off" />
+                    </label>
+                    <label class="field settings-field-short">
+                      <span>PSČ</span>
+                      <input id="settings-sender-zip" autocomplete="off" />
+                    </label>
+                    <label class="field settings-field-short">
+                      <span>Země</span>
+                      <input id="settings-sender-country" autocomplete="off" />
+                    </label>
+                    <label class="field">
+                      <span>Kontakt</span>
+                      <input id="settings-sender-contact" autocomplete="off" />
+                    </label>
+                    <label class="field">
+                      <span>Telefon</span>
+                      <input id="settings-sender-phone" autocomplete="off" />
+                    </label>
+                    <label class="field settings-field-grow">
+                      <span>E-mail</span>
+                      <input id="settings-sender-email" autocomplete="off" />
+                    </label>
+                  </div>
                 </fieldset>
                     </div>
                   </section>
@@ -847,7 +875,7 @@
                     Tiskový agent běží lokálně na skladovém PC a umožní tisknout štítky bez dialogu prohlížeče.
                     Když neběží, aplikace otevře PDF ručně jako doteď.
                   </p>
-                  <label class="settings-check">
+                  <label class="settings-check settings-switch-card">
                     <input id="settings-print-testing-mode" type="checkbox" />
                     <span>
                       <strong>TESTOVÁNÍ</strong>
