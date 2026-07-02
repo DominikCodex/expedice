@@ -4,6 +4,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import secrets
 import threading
 import time
@@ -67,7 +68,7 @@ DEFAULT_SHOPS = [
         "domain": "galantra.cz",
         "currency": "CZK",
         "country": "CZ",
-        "order_prefixes": ["4200"],
+        "order_prefixes": ["42"],
         "source_system": "shoptet",
     },
     {
@@ -4608,8 +4609,19 @@ def update_completion_carrier_result(row_id, carrier, ok, status_text="", shipme
             return completion_row_to_api(cur.fetchone())
 
 
+def dpd_label_number_from_text(value):
+    text = clean_text(value)
+    if not text:
+        return ""
+    match = re.search(r"\b\d{14}\b", text)
+    return match.group(0) if match else ""
+
+
 def completion_label_number(row):
-    return clean_text(row.get("packetaShipmentId") or row.get("packeta_shipment_id") or "")
+    packeta_number = clean_text(row.get("packetaShipmentId") or row.get("packeta_shipment_id") or "")
+    if packeta_number:
+        return packeta_number
+    return dpd_label_number_from_text(row.get("dpdOrderAndPieces") or row.get("dpd_order_and_pieces"))
 
 
 def label_carrier_for_row(row, label_number=""):

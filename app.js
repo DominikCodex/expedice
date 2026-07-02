@@ -724,73 +724,6 @@ async function loadExpeditionDays(preferredDate = "") {
   els.expeditionDaySummary.innerHTML = `<span>Načítám expediční dny...</span>`;
 
   try {
-    const preferred = preferredDate || expeditionState.day?.date || "";
-    const data = await fetchJson(`/api/expedition-days/initial${expeditionQuery({ date: preferred })}`);
-    expeditionState.days = data.days || [];
-    expeditionState.loaded = true;
-
-    if (!data.day) {
-      expeditionState.day = null;
-      sortingState.datasets = [];
-      sortingState.dataset = null;
-      completionState.datasets = [];
-      completionState.dataset = null;
-      completionState.rows = [];
-      completionWorkflowState.row = null;
-      completionWorkflowState.index = -1;
-      renderExpeditionDayOptions();
-      renderSortingOptions();
-      renderCompletionOptions();
-      renderWorkflow();
-      renderCompletion();
-      els.expeditionDaySummary.innerHTML = `<span>Online zatím neobsahuje žádný expediční den.</span>`;
-      return;
-    }
-
-    expeditionState.day = data.day || null;
-    sortingState.datasets = data.sorting || [];
-    completionState.datasets = data.completion || [];
-    sortingState.loaded = true;
-    completionState.loaded = true;
-
-    renderExpeditionDayOptions();
-    els.expeditionDaySummary.innerHTML = `<span><strong>${escapeHtml(expeditionState.day.label)}</strong></span><span>${escapeHtml(
-      expeditionState.day.activeBatches || 0
-    )} aktivní dávky</span><span>${escapeHtml(expeditionState.day.rowsCount || 0)} řádků</span>`;
-
-    renderSortingOptions();
-    renderCompletionOptions();
-
-    if (data.activeSorting?.dataset) {
-      applySortingDataset(data.activeSorting.dataset, data.activeSorting.rows || []);
-    } else {
-      sortingState.dataset = null;
-      renderSortingOptions();
-      setMessage("Pro vybraný expediční den není nahrané roztřídění.", "warning");
-    }
-
-    if (data.activeCompletion?.dataset) {
-      applyCompletionDataset(data.activeCompletion.dataset, data.activeCompletion.rows || []);
-    } else {
-      completionState.dataset = null;
-      completionState.rows = [];
-      completionWorkflowState.row = null;
-      completionWorkflowState.index = -1;
-      renderCompletionOptions();
-      renderWorkflow();
-      renderCompletion();
-      setCompletionMessage("Pro vybraný expediční den není nahraná kompletace.", "warning");
-    }
-  } catch (error) {
-    expeditionState.loaded = true;
-    els.expeditionDaySummary.innerHTML = `<span>Online dny se nepodařilo načíst: ${escapeHtml(error.message)}</span>`;
-  }
-}
-async function loadExpeditionDays(preferredDate = "") {
-  expeditionState.showInactive = els.expeditionShowInactive.checked;
-  els.expeditionDaySummary.innerHTML = `<span>Načítám expediční dny...</span>`;
-
-  try {
     const data = await fetchJson(`/api/expedition-days${includeInactiveQuery()}`);
     expeditionState.days = data.days || [];
     expeditionState.loaded = true;
@@ -2038,11 +1971,22 @@ async function saveCompletionRow(rowId) {
   }
 }
 
+function dpdLabelNumberFromText(value) {
+  const text = String(value || "").trim();
+  if (!text) return "";
+  const match = text.match(/\b\d{14}\b/);
+  return match ? match[0] : "";
+}
+
+function completionLabelNumber(row) {
+  return String(row?.packetaShipmentId || "").trim() || dpdLabelNumberFromText(row?.dpdOrderAndPieces);
+}
+
 async function sendCompletionCarrier(rowId) {
   const row = completionState.rows.find((item) => String(item.id) === String(rowId));
   const carrierLabel = row?.deliveryCarrierLabel || "dopravce";
   const orderNumber = row?.orderNumber || rowId;
-  const alreadySent = row?.packetaShipmentId || row?.labelPrinted;
+  const alreadySent = completionLabelNumber(row) || row?.labelPrinted;
   const warning = alreadySent ? `\n\nPozor: řádek už má záznam štítku/zásilky (${alreadySent}).` : "";
   if (!window.confirm(`Odeslat objednávku ${orderNumber} do ${carrierLabel}?${warning}`)) return;
 
@@ -2070,7 +2014,7 @@ async function sendCompletionCarrier(rowId) {
 
 async function printCompletionCarrierLabel(rowId, setStatus = setCompletionMessage, options = {}) {
   const row = completionState.rows.find((item) => String(item.id) === String(rowId));
-  const labelNumber = row?.packetaShipmentId || "";
+  const labelNumber = completionLabelNumber(row);
   if (!labelNumber) {
     setStatus("Řádek zatím nemá číslo zásilky/štítku.", "warning");
     return false;
@@ -2081,7 +2025,7 @@ async function printCompletionCarrierLabel(rowId, setStatus = setCompletionMessa
   }
 
   const url = `/api/completion/rows/${encodeURIComponent(rowId)}/label?markPrinted=1`;
-  const carrier = row.deliveryCarrier || (String(labelNumber).length === 14 ? "dpd" : "packeta");
+  const carrier = row.deliveryCarrier || (String(labelNumber).replace(/\D/g, "").length === 14 ? "dpd" : "packeta");
   setStatus(`Posílám štítek ${labelNumber} do lokálního tiskového agenta...`, "neutral");
 
   try {
@@ -2139,7 +2083,7 @@ async function printCompletionCarrierLabel(rowId, setStatus = setCompletionMessa
 
 async function downloadCompletionCarrierLabel(rowId) {
   const row = completionState.rows.find((item) => String(item.id) === String(rowId));
-  const labelNumber = row?.packetaShipmentId || "";
+  const labelNumber = completionLabelNumber(row);
   if (!labelNumber) {
     setCompletionMessage("Řádek zatím nemá číslo zásilky/štítku.", "warning");
     return;
@@ -2630,7 +2574,7 @@ function completionRowTone(row, status) {
   if (status?.tone) tones.push(`status-${status.tone}`);
   const paymentTone = paymentCheckTone(row);
   if (paymentTone === "warning" || paymentTone === "danger") tones.push(`payment-${paymentTone}`);
-  if (row.packetaShipmentId || row.labelPrinted) tones.push("has-label");
+  if (completionLabelNumber(row) || row.labelPrinted) tones.push("has-label");
   return tones.join(" ");
 }
 
@@ -2641,7 +2585,7 @@ function completionMainBadges(row, status) {
     )}</span>`,
     `<span class="status-chip ${escapeHtml(status.tone)}">${escapeHtml(status.label)}</span>`,
   ];
-  if (row.packetaShipmentId || row.labelPrinted) {
+  if (completionLabelNumber(row) || row.labelPrinted) {
     badges.push(`<span class="completion-type-badge has-label">štítek</span>`);
   }
   const paymentBadge = paymentCheckHtml(row);
@@ -2671,6 +2615,7 @@ function completionSearchText(row) {
       row.shippingMethod,
       row.deliveryCarrierLabel,
       row.packetaShipmentId,
+      row.dpdOrderAndPieces,
       row.packetaId,
       row.addressValidationStatus,
       row.addressValidationMessage,
@@ -2697,13 +2642,13 @@ function completionMatchesFilters(row) {
     return false;
   }
   if (completionFilters.status === "label") {
-    return Boolean(row.packetaShipmentId || row.labelPrinted);
+    return Boolean(completionLabelNumber(row) || row.labelPrinted);
   }
   if (completionFilters.status === "address_error") {
     return completionRequiresAddressValidation(row) && completionAddressHasError(row);
   }
   if (completionFilters.status === "open") {
-    return !row.completionStatus && status.tone !== "ok" && !row.packetaShipmentId && !row.labelPrinted;
+    return !row.completionStatus && status.tone !== "ok" && !completionLabelNumber(row) && !row.labelPrinted;
   }
   if (completionFilters.status && status.tone !== completionFilters.status) {
     return false;
@@ -2767,6 +2712,7 @@ function completionDetailHtml(row) {
         ${completionMetaLine("Stav Zásilkovna", row.packetaStatus)}
         ${completionMetaLine("Štítek", row.labelPrinted)}
         ${completionMetaLine("DPD", row.dpdFlag)}
+        ${completionMetaLine("DPD štítek", row.dpdOrderAndPieces, "code")}
         ${completionMetaLine("Poznámka pro přepravce", row.carrierNote)}
       </section>
       <section>
@@ -2903,7 +2849,7 @@ function deliveryCarrierHtml(row) {
 }
 
 function labelCacheStatusHtml(row) {
-  if (!row.packetaShipmentId) return "";
+  if (!completionLabelNumber(row)) return "";
   const status = row.labelCacheStatus || "";
   if (status === "ready") {
     return `<span class="label-cache-chip ready" title="PDF štítek je připravený na serveru">v cache</span>`;
@@ -2916,7 +2862,7 @@ function labelCacheStatusHtml(row) {
 
 function carrierSendActionHtml(row) {
   const carrier = row.deliveryCarrier || "manual";
-  const labelNumber = row.packetaShipmentId || "";
+  const labelNumber = completionLabelNumber(row);
   if ((carrier === "dpd" || carrier === "packeta") && labelNumber) {
     return `
       <div class="carrier-actions">
@@ -3147,7 +3093,7 @@ async function autoPrintWorkflowDocuments(row, boxNumber) {
     return;
   }
 
-  const hasCarrierLabel = Boolean(row.packetaShipmentId);
+  const hasCarrierLabel = Boolean(completionLabelNumber(row));
   const needsUnpaidDocument = workflowIsUnpaid(row);
   if (!hasCarrierLabel && !needsUnpaidDocument) return;
 
@@ -3493,11 +3439,10 @@ function workflowPhysicalItems(row) {
 
 function workflowPhysicalCheck(row) {
   const items = workflowPhysicalItems(row);
-  const required = items.length > 0;
   const checked = items.filter((item, index) => completionWorkflowState.checkedItemKeys.has(workflowChecklistKey(item, index))).length;
   return {
-    required,
-    ok: !required || checked >= items.length,
+    required: false,
+    ok: checked >= items.length,
     checked,
     total: items.length,
   };
@@ -3763,9 +3708,8 @@ function renderWorkflow() {
   ].forEach((button) => {
     button.disabled = disabled;
   });
-  const physicalCheck = workflowPhysicalCheck(row);
   if (els.workflowSaveOk) {
-    els.workflowSaveOk.disabled = disabled || (physicalCheck.required && !physicalCheck.ok);
+    els.workflowSaveOk.disabled = disabled;
   }
   syncWorkflowSortingAutoRefresh();
 }
@@ -3859,14 +3803,6 @@ async function saveWorkflowAction(action) {
     }
   }
   const sortingCheck = workflowSortingCheck(row);
-  const physicalCheck = workflowPhysicalCheck(row);
-  if (action === "ok" && physicalCheck.required && !physicalCheck.ok) {
-    setWorkflowMessage(
-      `Nejdřív fyzicky odkontroluj položky v boxu: ${physicalCheck.checked}/${physicalCheck.total}. Teprve potom půjde uložit OK.`,
-      "warning"
-    );
-    return null;
-  }
   if (action === "ok" && sortingCheck.requiresSorting && !sortingCheck.ok) {
     const confirmed = window.confirm(
       `${sortingCheck.label}: ${sortingCheck.message}\n\nOpravdu i přesto uložit box jako OK? Obvykle se v tomhle stavu dává Error.`
@@ -3933,7 +3869,7 @@ function renderCompletion() {
     const customer = [row.firstName, row.lastName].filter(Boolean).join(" ");
     const address = [row.city, row.zipCode].filter(Boolean).join(" ");
     const shop = row.shopCode || completionState.dataset?.shopCode || "-";
-    const labelOrShipment = row.labelPrinted || row.packetaShipmentId || "";
+    const labelOrShipment = row.labelPrinted || completionLabelNumber(row);
     const rowId = String(row.id);
     const expanded = expandedCompletionRows.has(rowId);
     const tr = document.createElement("tr");
