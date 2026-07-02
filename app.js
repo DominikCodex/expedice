@@ -965,6 +965,19 @@ function includeInactiveQuery() {
   return expeditionQuery();
 }
 
+function focusBarcodeInputForView(view) {
+  const target = view === "completion" ? els.workflowBoxCode : view === "sorting" ? els.eanInput : null;
+  if (!target) return;
+
+  requestAnimationFrame(() => {
+    if (!document.body.contains(target) || target.disabled) return;
+    target.focus({ preventScroll: true });
+    if (typeof target.select === "function") {
+      target.select();
+    }
+  });
+}
+
 function switchView(view, options = {}) {
   if ((view === "settings" || view === "eans") && !isAdmin()) {
     setMessage("Tahle stránka je dostupná jen adminovi.", "warning");
@@ -998,9 +1011,7 @@ function switchView(view, options = {}) {
     loadUsers();
   }
 
-  if (!completion && !eans && !settings) {
-    requestAnimationFrame(() => els.eanInput.focus());
-  }
+  focusBarcodeInputForView(completion ? "completion" : !eans && !settings ? "sorting" : "");
 
   if (options.updateRoute !== false) {
     setRouteForView(view, Boolean(options.replaceRoute));
