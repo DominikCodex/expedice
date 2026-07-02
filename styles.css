@@ -423,6 +423,20 @@ select:focus {
   border-left-color: var(--accent);
 }
 
+.day-card.deleted {
+  color: var(--muted);
+  background: #f4f1f1;
+  border-color: #e2d4d4;
+  border-left-color: var(--danger);
+}
+
+.day-card.deleted.active {
+  color: #4f2525;
+  background: #f7e9e9;
+  border-color: #d9b6b6;
+  border-left-color: var(--danger);
+}
+
 .day-card strong {
   font-size: 16px;
 }

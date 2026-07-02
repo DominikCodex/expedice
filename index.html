@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Roztřídění zboží</title>
-    <link rel="stylesheet" href="styles.css?v=expedition-fixes-20260702" />
+    <link rel="stylesheet" href="styles.css?v=admin-trash-20260702" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=expedition-fixes-20260702"></script>
+    <script defer src="app.js?v=admin-trash-20260702"></script>
   </head>
   <body>
     <section id="auth-view" class="auth-view">
@@ -89,9 +89,9 @@
             <button id="expedition-refresh" type="button" class="secondary">Obnovit</button>
             <button id="expedition-delete-day" type="button" class="danger hidden">Smazat den</button>
           </div>
-          <label class="toggle sidebar-toggle">
+          <label id="expedition-trash-toggle" class="toggle sidebar-toggle hidden">
             <input id="show-inactive-datasets" type="checkbox" />
-            <span>Nahrazené/smazané</span>
+            <span>Koš</span>
           </label>
           <div id="expedition-day-summary" class="dataset-summary">Čekám na online data.</div>
           <div id="expedition-day-list" class="day-list"></div>

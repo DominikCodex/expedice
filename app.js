@@ -133,6 +133,7 @@ const els = {
   expeditionDayList: document.getElementById("expedition-day-list"),
   expeditionRefresh: document.getElementById("expedition-refresh"),
   expeditionDeleteDay: document.getElementById("expedition-delete-day"),
+  expeditionTrashToggle: document.getElementById("expedition-trash-toggle"),
   expeditionShowInactive: document.getElementById("show-inactive-datasets"),
   expeditionDaySummary: document.getElementById("expedition-day-summary"),
   tabSorting: document.getElementById("tab-sorting"),
@@ -466,6 +467,11 @@ function applyRoleVisibility() {
   const admin = isAdmin();
   els.tabSettings.classList.toggle("hidden", !admin);
   els.expeditionDeleteDay?.classList.toggle("hidden", !admin);
+  els.expeditionTrashToggle?.classList.toggle("hidden", !admin);
+  if (!admin && els.expeditionShowInactive?.checked) {
+    els.expeditionShowInactive.checked = false;
+    expeditionState.showInactive = false;
+  }
   els.sortingDelete.classList.toggle("hidden", !admin);
   els.completionDelete.classList.toggle("hidden", !admin);
   els.packetaValidate.classList.toggle("hidden", !admin);
@@ -628,7 +634,7 @@ function datasetInfoHtml(dataset) {
 
 function expeditionQuery(params = {}) {
   const query = new URLSearchParams();
-  if (expeditionState.showInactive) query.set("includeDeleted", "1");
+  if (isAdmin() && expeditionState.showInactive) query.set("includeDeleted", "1");
   if (params.date) query.set("date", params.date);
   const text = query.toString();
   return text ? `?${text}` : "";
@@ -682,14 +688,18 @@ function renderExpeditionDayOptions() {
   }
 
   expeditionState.days.forEach((day) => {
+    const deleted = day.status && day.status !== "active";
+    const active = expeditionState.day?.date === day.date;
+    const batches = deleted ? day.allBatches || 0 : day.activeBatches || 0;
+    const rows = deleted ? day.allRowsCount || 0 : day.rowsCount || 0;
     const button = document.createElement("button");
     button.type = "button";
-    button.className = `day-card ${expeditionState.day?.date === day.date ? "active" : ""}`;
+    button.className = `day-card ${active ? "active" : ""} ${deleted ? "deleted" : ""}`;
     button.dataset.date = day.date;
     button.innerHTML = `
       <strong>${escapeHtml(day.label || day.date)}</strong>
-      <span>${escapeHtml(day.activeBatches || 0)} aktivní dávky</span>
-      <small>${escapeHtml(day.rowsCount || 0)} řádků${day.latestUpload ? ` | ${escapeHtml(formatTime(day.latestUpload))}` : ""}</small>
+      <span>${deleted ? "V koši" : `${escapeHtml(batches)} aktivní dávky`}</span>
+      <small>${escapeHtml(batches)} dávky | ${escapeHtml(rows)} řádků${day.latestUpload ? ` | ${escapeHtml(formatTime(day.latestUpload))}` : ""}</small>
     `;
     els.expeditionDayList.appendChild(button);
   });
@@ -720,7 +730,7 @@ function renderSortingOptions() {
 }
 
 async function loadExpeditionDays(preferredDate = "") {
-  expeditionState.showInactive = els.expeditionShowInactive.checked;
+  expeditionState.showInactive = isAdmin() && els.expeditionShowInactive.checked;
   els.expeditionDaySummary.innerHTML = `<span>Načítám expediční dny...</span>`;
 
   try {
@@ -741,6 +751,7 @@ async function loadExpeditionDays(preferredDate = "") {
       completionState.datasets = [];
       completionState.dataset = null;
       completionState.rows = [];
+      if (els.expeditionDeleteDay) els.expeditionDeleteDay.disabled = true;
       renderSortingOptions();
       renderCompletionOptions();
       renderCompletion();
@@ -764,11 +775,17 @@ async function loadExpeditionDay(dayDate) {
   completionState.loaded = true;
 
   renderExpeditionDayOptions();
+  const deleted = expeditionState.day?.status && expeditionState.day.status !== "active";
+  const batches = deleted ? expeditionState.day?.allBatches || 0 : expeditionState.day?.activeBatches || 0;
+  const rows = deleted ? expeditionState.day?.allRowsCount || 0 : expeditionState.day?.rowsCount || 0;
   els.expeditionDaySummary.innerHTML = expeditionState.day
     ? `<span><strong>${escapeHtml(expeditionState.day.label)}</strong></span><span>${escapeHtml(
-        expeditionState.day.activeBatches || 0
-      )} aktivní dávky</span><span>${escapeHtml(expeditionState.day.rowsCount || 0)} řádků</span>`
+        deleted ? "v koši" : `${batches} aktivní dávky`
+      )}</span><span>${escapeHtml(rows)} řádků</span>`
     : `<span>Den není načtený.</span>`;
+  if (els.expeditionDeleteDay) {
+    els.expeditionDeleteDay.disabled = !isAdmin() || !expeditionState.day || deleted;
+  }
 
   renderSortingOptions();
   renderCompletionOptions();
@@ -871,10 +888,14 @@ async function deleteCurrentExpeditionDay() {
     setMessage("Není vybraný žádný expediční den ke smazání.", "warning");
     return;
   }
+  if (day.status && day.status !== "active") {
+    setMessage("Tenhle expediční den už je v koši.", "warning");
+    return;
+  }
 
   const label = day.label || day.date;
   const confirmed = confirm(
-    `Smazat celý expediční den?\n\n${label}\n\nSmažou se všechny dávky roztřídění i kompletace v tomto dni. Data zůstanou v historii jako smazaná.`
+    `Přesunout celý expediční den do koše?\n\n${label}\n\nDo koše se přesunou všechny dávky roztřídění i kompletace v tomto dni. Uvidí je jen admin v Koši.`
   );
   if (!confirmed) return;
 
@@ -893,9 +914,11 @@ async function deleteCurrentExpeditionDay() {
     completionState.datasets = [];
     completionState.rows = [];
     expeditionState.day = null;
-    setMessage(`Expediční den ${label} je smazaný. Smazáno dávek: ${data.deletedDatasets || 0}.`, "success");
-    setCompletionMessage(`Expediční den ${label} je smazaný.`, "success");
-    await loadExpeditionDays();
+    expeditionState.showInactive = true;
+    els.expeditionShowInactive.checked = true;
+    setMessage(`Expediční den ${label} je v koši. Přesunuto dávek: ${data.deletedDatasets || 0}.`, "success");
+    setCompletionMessage(`Expediční den ${label} je v koši.`, "success");
+    await loadExpeditionDays(day.date);
   } catch (error) {
     setMessage(`Expediční den se nepodařilo smazat: ${error.message}`, "error");
   } finally {

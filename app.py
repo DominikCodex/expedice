@@ -192,11 +192,17 @@ def ensure_schema():
                     day_date DATE NOT NULL UNIQUE,
                     label TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'active',
+                    deleted_at TIMESTAMPTZ,
+                    deleted_by TEXT,
+                    delete_reason TEXT,
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
                 """
             )
+            cur.execute("ALTER TABLE expedition_days ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE expedition_days ADD COLUMN IF NOT EXISTS deleted_by TEXT")
+            cur.execute("ALTER TABLE expedition_days ADD COLUMN IF NOT EXISTS delete_reason TEXT")
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS datasets (
@@ -750,6 +756,10 @@ def user_to_api(user):
 def is_admin(user=None):
     active_user = user or current_user()
     return bool(active_user and active_user.get("role") == "admin")
+
+
+def include_deleted_for_admin():
+    return request.args.get("includeDeleted") == "1" and is_admin()
 
 
 def current_user():
@@ -1409,6 +1419,9 @@ def ensure_expedition_day(cur, dataset_date, batch_name=""):
         ON CONFLICT (day_date) DO UPDATE SET
             label = EXCLUDED.label,
             status = 'active',
+            deleted_at = NULL,
+            deleted_by = NULL,
+            delete_reason = NULL,
             updated_at = NOW()
         RETURNING *
         """,
@@ -1426,7 +1439,11 @@ def expedition_day_summary(row):
         "activeBatches": row.get("active_batches", 0),
         "allBatches": row.get("all_batches", 0),
         "rowsCount": row.get("rows_count", 0),
+        "allRowsCount": row.get("all_rows_count", row.get("rows_count", 0)),
         "latestUpload": row["latest_upload"].isoformat() if row.get("latest_upload") else None,
+        "deletedAt": row["deleted_at"].isoformat() if row.get("deleted_at") else None,
+        "deletedBy": row.get("deleted_by"),
+        "deleteReason": row.get("delete_reason"),
     }
 
 
@@ -2644,7 +2661,7 @@ def expedition_overview():
         return auth_error
 
     ensure_schema()
-    include_deleted = request.args.get("includeDeleted") == "1"
+    include_deleted = include_deleted_for_admin()
     filters = []
     params = []
     if not include_deleted:
@@ -2697,7 +2714,7 @@ def list_expedition_days():
         return auth_error
 
     ensure_schema()
-    include_deleted = request.args.get("includeDeleted") == "1"
+    include_deleted = include_deleted_for_admin()
     day_filter = "" if include_deleted else "WHERE ed.status = 'active'"
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
@@ -2708,6 +2725,7 @@ def list_expedition_days():
                     COUNT(d.id) FILTER (WHERE d.status = 'active') AS active_batches,
                     COUNT(d.id) AS all_batches,
                     COALESCE(SUM(d.rows_count) FILTER (WHERE d.status = 'active'), 0) AS rows_count,
+                    COALESCE(SUM(d.rows_count), 0) AS all_rows_count,
                     MAX(d.uploaded_at) AS latest_upload
                 FROM expedition_days ed
                 LEFT JOIN datasets d ON d.expedition_day_id = ed.id
@@ -2729,6 +2747,7 @@ def full_expedition_day_payload(cur, day_date, include_deleted=False):
             COUNT(d.id) FILTER (WHERE d.status = 'active') AS active_batches,
             COUNT(d.id) AS all_batches,
             COALESCE(SUM(d.rows_count) FILTER (WHERE d.status = 'active'), 0) AS rows_count,
+            COALESCE(SUM(d.rows_count), 0) AS all_rows_count,
             MAX(d.uploaded_at) AS latest_upload
         FROM expedition_days ed
         LEFT JOIN datasets d ON d.expedition_day_id = ed.id
@@ -2739,6 +2758,8 @@ def full_expedition_day_payload(cur, day_date, include_deleted=False):
     )
     day = cur.fetchone()
     if not day:
+        return None
+    if day["status"] != "active" and not include_deleted:
         return None
 
     filters = ["expedition_day_id = %s"]
@@ -2804,7 +2825,7 @@ def initial_expedition_day():
         return auth_error
 
     ensure_schema()
-    include_deleted = request.args.get("includeDeleted") == "1"
+    include_deleted = include_deleted_for_admin()
     requested_date = clean_text(request.args.get("date"))
     day_filter = "" if include_deleted else "WHERE ed.status = 'active'"
     with db_conn() as conn:
@@ -2816,6 +2837,7 @@ def initial_expedition_day():
                     COUNT(d.id) FILTER (WHERE d.status = 'active') AS active_batches,
                     COUNT(d.id) AS all_batches,
                     COALESCE(SUM(d.rows_count) FILTER (WHERE d.status = 'active'), 0) AS rows_count,
+                    COALESCE(SUM(d.rows_count), 0) AS all_rows_count,
                     MAX(d.uploaded_at) AS latest_upload
                 FROM expedition_days ed
                 LEFT JOIN datasets d ON d.expedition_day_id = ed.id
@@ -2860,7 +2882,7 @@ def get_expedition_day(day_date):
         return auth_error
 
     ensure_schema()
-    include_deleted = request.args.get("includeDeleted") == "1"
+    include_deleted = include_deleted_for_admin()
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
@@ -2870,6 +2892,7 @@ def get_expedition_day(day_date):
                     COUNT(d.id) FILTER (WHERE d.status = 'active') AS active_batches,
                     COUNT(d.id) AS all_batches,
                     COALESCE(SUM(d.rows_count) FILTER (WHERE d.status = 'active'), 0) AS rows_count,
+                    COALESCE(SUM(d.rows_count), 0) AS all_rows_count,
                     MAX(d.uploaded_at) AS latest_upload
                 FROM expedition_days ed
                 LEFT JOIN datasets d ON d.expedition_day_id = ed.id
@@ -2880,6 +2903,8 @@ def get_expedition_day(day_date):
             )
             day = cur.fetchone()
             if not day:
+                return jsonify({"error": "Expedition day not found"}), 404
+            if day["status"] != "active" and not include_deleted:
                 return jsonify({"error": "Expedition day not found"}), 404
 
             filters = ["expedition_day_id = %s"]
@@ -2914,7 +2939,7 @@ def get_full_expedition_day(day_date):
         return auth_error
 
     ensure_schema()
-    include_deleted = request.args.get("includeDeleted") == "1"
+    include_deleted = include_deleted_for_admin()
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
@@ -2924,6 +2949,7 @@ def get_full_expedition_day(day_date):
                     COUNT(d.id) FILTER (WHERE d.status = 'active') AS active_batches,
                     COUNT(d.id) AS all_batches,
                     COALESCE(SUM(d.rows_count) FILTER (WHERE d.status = 'active'), 0) AS rows_count,
+                    COALESCE(SUM(d.rows_count), 0) AS all_rows_count,
                     MAX(d.uploaded_at) AS latest_upload
                 FROM expedition_days ed
                 LEFT JOIN datasets d ON d.expedition_day_id = ed.id
@@ -2934,6 +2960,8 @@ def get_full_expedition_day(day_date):
             )
             day = cur.fetchone()
             if not day:
+                return jsonify({"error": "Expedition day not found"}), 404
+            if day["status"] != "active" and not include_deleted:
                 return jsonify({"error": "Expedition day not found"}), 404
 
             filters = ["expedition_day_id = %s"]
@@ -3203,7 +3231,7 @@ def list_datasets():
         return auth_error
 
     ensure_schema()
-    include_deleted = request.args.get("includeDeleted") == "1"
+    include_deleted = include_deleted_for_admin()
     dataset_kind = request.args.get("kind")
     datasets = fetch_datasets(include_deleted, dataset_kind, request.args.get("shop"), request.args.get("date"))
     return jsonify({"datasets": datasets})
@@ -5560,11 +5588,14 @@ def delete_expedition_day(day_date):
                 """
                 UPDATE expedition_days
                 SET status = 'deleted',
+                    deleted_at = COALESCE(deleted_at, NOW()),
+                    deleted_by = %s,
+                    delete_reason = %s,
                     updated_at = NOW()
                 WHERE id = %s
                 RETURNING *
                 """,
-                (day["id"],),
+                (actor, reason, day["id"]),
             )
             updated_day = cur.fetchone()
 
@@ -5590,7 +5621,7 @@ def list_completion_datasets():
         return auth_error
 
     ensure_schema()
-    include_deleted = request.args.get("includeDeleted") == "1"
+    include_deleted = include_deleted_for_admin()
     return jsonify({"datasets": fetch_datasets(include_deleted, "completion", request.args.get("shop"), request.args.get("date"))})
 
 
@@ -6215,7 +6246,7 @@ def list_sorting_datasets():
         return auth_error
 
     ensure_schema()
-    include_deleted = request.args.get("includeDeleted") == "1"
+    include_deleted = include_deleted_for_admin()
     return jsonify({"datasets": fetch_datasets(include_deleted, "sorting", request.args.get("shop"), request.args.get("date"))})
 
 
@@ -6332,7 +6363,7 @@ def datasets_csv():
         return auth_error
 
     ensure_schema()
-    include_deleted = request.args.get("includeDeleted") == "1"
+    include_deleted = include_deleted_for_admin()
     dataset_kind = request.args.get("kind")
     shop_code = request.args.get("shop")
     dataset_date = request.args.get("date")
