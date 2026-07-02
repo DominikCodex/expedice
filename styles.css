@@ -856,7 +856,7 @@ select:focus {
 .workflow-sorting-item {
   display: grid;
   width: 100%;
-  grid-template-columns: 42px minmax(150px, 0.9fr) minmax(280px, 1.7fr) minmax(180px, 1fr) auto auto minmax(140px, auto);
+  grid-template-columns: 42px 58px minmax(150px, 0.9fr) minmax(280px, 1.7fr) minmax(180px, 1fr) auto auto minmax(140px, auto);
   gap: 10px;
   align-items: center;
   min-height: 54px;
@@ -907,6 +907,20 @@ select:focus {
   border-color: #168755;
   background: #168755;
   color: #fff;
+}
+
+.workflow-product-image,
+.workflow-product-image-placeholder {
+  justify-self: center;
+  width: 58px;
+  height: 58px;
+}
+
+.workflow-product-image-placeholder {
+  display: inline-flex;
+  border: 1px dashed #c7d5ce;
+  border-radius: 8px;
+  background: #f3f6f4;
 }
 
 .workflow-product-code {
@@ -1280,9 +1294,15 @@ select:focus {
 }
 
 .workflow-sorting-item {
-  grid-template-columns: 46px minmax(160px, 0.8fr) minmax(300px, 1.8fr) minmax(180px, 1fr) auto auto minmax(150px, auto);
+  grid-template-columns: 46px 64px minmax(160px, 0.8fr) minmax(300px, 1.8fr) minmax(180px, 1fr) auto auto minmax(150px, auto);
   min-height: 58px;
   border-radius: 12px;
+}
+
+.workflow-product-image,
+.workflow-product-image-placeholder {
+  width: 64px;
+  height: 64px;
 }
 
 .workflow-product-code {
@@ -1358,7 +1378,13 @@ select:focus {
   }
 
   .workflow-sorting-item {
-    grid-template-columns: 46px minmax(0, 1fr);
+    grid-template-columns: 46px 58px minmax(0, 1fr);
+  }
+
+  .workflow-product-image,
+  .workflow-product-image-placeholder {
+    width: 58px;
+    height: 58px;
   }
 
   .workflow-product-code,
@@ -2098,6 +2124,10 @@ select:focus {
   gap: 12px;
 }
 
+.completion-products-section {
+  grid-column: 1 / -1;
+}
+
 .completion-detail-grid section {
   display: grid;
   align-content: start;
@@ -2123,6 +2153,51 @@ select:focus {
 .completion-detail-fields {
   display: grid;
   gap: 6px;
+}
+
+.completion-product-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.completion-product-list {
+  display: grid;
+  gap: 6px;
+}
+
+.completion-product-item {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 62px;
+  padding: 6px 8px;
+  border: 1px solid #dfe8e3;
+  border-radius: 8px;
+  background: #fbfcfb;
+}
+
+.completion-product-item span,
+.completion-product-item small {
+  display: block;
+}
+
+.completion-product-item small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.completion-product-item b {
+  white-space: nowrap;
+}
+
+.completion-product-empty {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
 }
 
 .carrier-send.dpd {
@@ -2708,6 +2783,60 @@ tbody tr.done {
   color: var(--text);
   background: var(--surface-2);
   border-color: var(--line);
+}
+
+.product-image-frame {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 56px;
+  overflow: hidden;
+  border: 1px solid #d7e1dc;
+  border-radius: 8px;
+  background: #fff;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.75);
+}
+
+.product-image-frame img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.product-image-frame.broken {
+  display: none;
+}
+
+.sorting-product-image {
+  width: 58px;
+  height: 58px;
+}
+
+.completion-product-image {
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+}
+
+.completion-detail-product-image {
+  width: 54px;
+  height: 54px;
+}
+
+.product-image-more {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 6px;
+  color: #43504b;
+  background: #edf0ef;
+  border: 1px solid #c8d2cd;
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .image-chip {

@@ -49,6 +49,18 @@ PRODUCT_FEED_MIN_TIMEOUT_SECONDS = 30
 PRODUCT_FEED_MAX_TIMEOUT_SECONDS = 900
 PRODUCT_FEED_MIN_DOWNLOAD_MB = 50
 PRODUCT_FEED_MAX_DOWNLOAD_MB = 1024
+PRODUCT_IMAGE_CACHE_SECONDS = 12 * 60 * 60
+PRODUCT_IMAGE_REQUEST_CODE_LIMIT = 10000
+PRODUCT_IMAGE_CACHE_LOCK = threading.Lock()
+PRODUCT_IMAGE_CACHE = {
+    "signature": "",
+    "loadedAt": 0,
+    "images": {},
+    "rowsSeen": 0,
+    "bytesRead": 0,
+    "imageColumns": [],
+    "error": "",
+}
 
 csv.field_size_limit(max(csv.field_size_limit(), 20 * 1024 * 1024))
 
@@ -2309,6 +2321,20 @@ def product_feed_first_image(row, image_columns):
     return ""
 
 
+def product_image_code_key(value):
+    return clean_text(value).strip().upper()
+
+
+def product_feed_cache_signature(settings):
+    payload = {
+        "url": settings.get("url") or "",
+        "encoding": settings.get("encoding") or "",
+        "delimiter": settings.get("delimiter") or "",
+        "maxDownloadMegabytes": settings.get("maxDownloadMegabytes") or "",
+    }
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
+
+
 def probe_product_feed(settings):
     product_settings = normalize_product_feed_settings(settings)
     feed_url = clean_text(product_settings.get("url")).strip()
@@ -2408,6 +2434,140 @@ def probe_product_feed(settings):
         raise ProductFeedError(f"CSV feed se nepodařilo přečíst: {clean_text(exc)}") from exc
     except UnicodeError as exc:
         raise ProductFeedError(f"Feed se nepodařilo dekódovat: {clean_text(exc)}") from exc
+
+
+def parse_product_image_feed(settings):
+    product_settings = normalize_product_feed_settings(settings)
+    feed_url = clean_text(product_settings.get("url")).strip()
+    if not feed_url:
+        raise ProductFeedError("URL produktového feedu není nastavená.")
+
+    parsed = urllib.parse.urlsplit(feed_url)
+    if parsed.scheme not in {"http", "https"}:
+        raise ProductFeedError("Produktový feed musí být dostupný přes http nebo https URL.")
+
+    timeout = product_settings["downloadTimeoutSeconds"]
+    max_bytes = product_settings["maxDownloadMegabytes"] * 1024 * 1024
+    request_obj = urllib.request.Request(
+        feed_url,
+        headers={"User-Agent": "ExpediceProductImages/1.0"},
+    )
+
+    try:
+        with urllib.request.urlopen(request_obj, timeout=timeout) as response:
+            content_length = response.headers.get("Content-Length")
+            content_length_bytes = int(content_length) if content_length and content_length.isdigit() else None
+            if content_length_bytes and content_length_bytes > max_bytes:
+                raise ProductFeedError(
+                    f"Feed hlásí velikost {format_size_mb(content_length_bytes)} MB, limit je {product_settings['maxDownloadMegabytes']} MB."
+                )
+
+            bytes_read = 0
+            with tempfile.TemporaryFile() as tmp:
+                while True:
+                    chunk = response.read(1024 * 1024)
+                    if not chunk:
+                        break
+                    bytes_read += len(chunk)
+                    if bytes_read > max_bytes:
+                        raise ProductFeedError(
+                            f"Feed je větší než povolený limit {product_settings['maxDownloadMegabytes']} MB."
+                        )
+                    tmp.write(chunk)
+
+                tmp.seek(0)
+                text_stream = io.TextIOWrapper(
+                    tmp,
+                    encoding=product_settings["encoding"],
+                    errors="replace",
+                    newline="",
+                )
+                reader = csv.DictReader(text_stream, delimiter=product_settings["delimiter"])
+                headers = [clean_text(header).strip() for header in (reader.fieldnames or []) if clean_text(header).strip()]
+                if not headers:
+                    raise ProductFeedError("Feed se stáhl, ale CSV hlavička je prázdná.")
+
+                code_column = next((header for header in headers if header.lower() == "code"), "")
+                if not code_column:
+                    raise ProductFeedError("Feed nemá sloupec code, podle kterého budeme párovat varianty.")
+
+                image_columns = product_feed_image_columns(headers)
+                if not image_columns:
+                    raise ProductFeedError("Feed nemá sloupce defaultImage/image pro obrázky produktů.")
+
+                rows_seen = 0
+                images = {}
+                for row in reader:
+                    rows_seen += 1
+                    code = product_image_code_key(row.get(code_column))
+                    if not code or code in images:
+                        continue
+                    image = product_feed_first_image(row, image_columns)
+                    if image:
+                        images[code] = image
+
+        return {
+            "images": images,
+            "rowsSeen": rows_seen,
+            "bytesRead": bytes_read,
+            "imageColumns": image_columns,
+            "loadedAt": time.time(),
+        }
+    except ProductFeedError:
+        raise
+    except urllib.error.HTTPError as exc:
+        raise ProductFeedError(f"Feed vrátil HTTP {exc.code}: {clean_text(exc.reason)}") from exc
+    except urllib.error.URLError as exc:
+        raise ProductFeedError(f"Feed se nepodařilo stáhnout: {clean_text(exc.reason)}") from exc
+    except TimeoutError as exc:
+        raise ProductFeedError(f"Stahování feedu překročilo timeout {timeout} s.") from exc
+    except csv.Error as exc:
+        raise ProductFeedError(f"CSV feed se nepodařilo přečíst: {clean_text(exc)}") from exc
+    except UnicodeError as exc:
+        raise ProductFeedError(f"Feed se nepodařilo dekódovat: {clean_text(exc)}") from exc
+
+
+def product_image_cache():
+    settings = normalize_product_feed_settings(read_settings(include_secrets=True).get("productFeed", {}))
+    if not clean_text(settings.get("url")).strip():
+        return {
+            "configured": False,
+            "signature": "",
+            "images": {},
+            "rowsSeen": 0,
+            "bytesRead": 0,
+            "imageColumns": [],
+            "loadedAt": 0,
+        }
+
+    signature = product_feed_cache_signature(settings)
+    now = time.time()
+    with PRODUCT_IMAGE_CACHE_LOCK:
+        if (
+            PRODUCT_IMAGE_CACHE["signature"] == signature
+            and PRODUCT_IMAGE_CACHE["images"]
+            and now - PRODUCT_IMAGE_CACHE["loadedAt"] < PRODUCT_IMAGE_CACHE_SECONDS
+        ):
+            return {**PRODUCT_IMAGE_CACHE, "configured": True, "stale": False}
+
+        try:
+            parsed = parse_product_image_feed(settings)
+        except ProductFeedError:
+            if PRODUCT_IMAGE_CACHE["signature"] == signature and PRODUCT_IMAGE_CACHE["images"]:
+                return {**PRODUCT_IMAGE_CACHE, "configured": True, "stale": True}
+            raise
+        PRODUCT_IMAGE_CACHE.update(
+            {
+                "signature": signature,
+                "loadedAt": parsed["loadedAt"],
+                "images": parsed["images"],
+                "rowsSeen": parsed["rowsSeen"],
+                "bytesRead": parsed["bytesRead"],
+                "imageColumns": parsed["imageColumns"],
+                "error": "",
+            }
+        )
+        return {**PRODUCT_IMAGE_CACHE, "configured": True, "stale": False}
 
 
 def row_to_api(row):
@@ -5700,6 +5860,67 @@ def check_product_feed():
         return jsonify(probe_product_feed(settings))
     except ProductFeedError as exc:
         return jsonify({"ok": False, "error": clean_text(exc)}), 400
+
+
+@app.route("/api/product-images", methods=["POST"])
+def product_images():
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+
+    payload = request.get_json(silent=True) or {}
+    incoming_codes = payload.get("codes") or []
+    if not isinstance(incoming_codes, list):
+        incoming_codes = []
+
+    codes = []
+    seen = set()
+    truncated = False
+    for value in incoming_codes:
+        key = product_image_code_key(value)
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        codes.append(key)
+        if len(codes) >= PRODUCT_IMAGE_REQUEST_CODE_LIMIT:
+            truncated = True
+            break
+
+    try:
+        cache = product_image_cache()
+    except ProductFeedError as exc:
+        return jsonify(
+            {
+                "ok": False,
+                "configured": True,
+                "error": clean_text(exc),
+                "images": {},
+                "requestedCount": len(codes),
+                "matchedCount": 0,
+                "truncated": truncated,
+            }
+        )
+
+    source_images = cache.get("images") or {}
+    images = {code: source_images[code] for code in codes if source_images.get(code)}
+    return jsonify(
+        {
+            "ok": True,
+            "configured": cache.get("configured", False),
+            "images": images,
+            "requestedCount": len(codes),
+            "matchedCount": len(images),
+            "truncated": truncated,
+            "cacheRowsSeen": cache.get("rowsSeen", 0),
+            "cacheImageCount": len(source_images),
+            "cacheLoadedAt": datetime.fromtimestamp(cache.get("loadedAt"), PRAGUE_TZ).isoformat()
+            if cache.get("loadedAt")
+            else None,
+            "cacheStale": cache.get("stale", False),
+            "cacheBytesRead": cache.get("bytesRead", 0),
+            "imageColumns": cache.get("imageColumns") or [],
+        }
+    )
 
 
 @app.route("/api/payment-feeds/sync", methods=["POST"])

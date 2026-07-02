@@ -65,6 +65,15 @@ const settingsState = {
   settings: null,
 };
 
+const productImageState = {
+  images: {},
+  requested: new Set(),
+  pending: new Set(),
+  loading: false,
+  error: "",
+  configured: true,
+};
+
 const authState = {
   user: null,
   appStarted: false,
@@ -282,6 +291,59 @@ function sameCode(a, b) {
   return normalize(a).trim() === normalize(b).trim();
 }
 
+function productCodeKey(value) {
+  return String(value ?? "").trim().toUpperCase();
+}
+
+function addProductImageCode(target, value) {
+  const key = productCodeKey(value);
+  if (key) target.add(key);
+}
+
+function resetProductImages() {
+  productImageState.images = {};
+  productImageState.requested = new Set();
+  productImageState.pending = new Set();
+  productImageState.loading = false;
+  productImageState.error = "";
+  productImageState.configured = true;
+}
+
+function productImageForCode(code) {
+  return productImageState.images[productCodeKey(code)] || "";
+}
+
+function productImageForItem(item) {
+  return (
+    item?.image ||
+    productImageForCode(item?.variantCode) ||
+    productImageForCode(item?.productCode) ||
+    productImageForCode(item?.code) ||
+    ""
+  );
+}
+
+function productImageHtml(item, className = "") {
+  const image = productImageForItem(item);
+  if (!state.settings.showImages || !image) return "";
+  const label = item?.productName || item?.variantCode || item?.productCode || "Produkt";
+  return `
+    <span class="product-image-frame ${escapeHtml(className)}" title="${escapeHtml(label)}">
+      <img src="${escapeHtml(image)}" alt="${escapeHtml(label)}" loading="lazy" decoding="async" />
+    </span>
+  `;
+}
+
+function collectProductImageCodesFromItems(items) {
+  const codes = new Set();
+  (items || []).forEach((item) => {
+    addProductImageCode(codes, item?.variantCode);
+    addProductImageCode(codes, item?.productCode);
+    addProductImageCode(codes, item?.code);
+  });
+  return codes;
+}
+
 function toNumber(value, fallback = 0) {
   const parsed = Number(String(value ?? "").replace(",", "."));
   return Number.isFinite(parsed) ? parsed : fallback;
@@ -417,6 +479,78 @@ async function fetchJson(path, options = {}) {
     throw error;
   }
   return response.json();
+}
+
+function collectCompletionProductImageCodes(rows) {
+  const codes = new Set();
+  (rows || []).forEach((row) => {
+    collectProductImageCodesFromItems(workflowSortingItems(row)).forEach((code) => codes.add(code));
+    collectProductImageCodesFromItems(completionStructuredProductItems(row)).forEach((code) => codes.add(code));
+    collectProductImageCodesFromItems(completionTextProductItems(row)).forEach((code) => codes.add(code));
+  });
+  return codes;
+}
+
+function collectCurrentProductImageCodes() {
+  const codes = collectProductImageCodesFromItems(state.items || []);
+  collectCompletionProductImageCodes(completionState.rows || []).forEach((code) => codes.add(code));
+  if (completionWorkflowState.row) {
+    collectProductImageCodesFromItems(workflowPhysicalItems(completionWorkflowState.row)).forEach((code) => codes.add(code));
+  }
+  return codes;
+}
+
+async function ensureProductImagesForCodes(codes, options = {}) {
+  const requestedCodes = Array.from(codes || [])
+    .map(productCodeKey)
+    .filter(Boolean)
+    .filter((code) => !productImageState.images[code] && !productImageState.requested.has(code));
+  if (!requestedCodes.length) return;
+
+  if (productImageState.loading) {
+    requestedCodes.forEach((code) => productImageState.pending.add(code));
+    return;
+  }
+
+  productImageState.loading = true;
+  requestedCodes.forEach((code) => productImageState.requested.add(code));
+  try {
+    const data = await fetchJson("/api/product-images", {
+      method: "POST",
+      body: JSON.stringify({ codes: requestedCodes }),
+    });
+    productImageState.configured = data.configured !== false;
+    productImageState.error = data.ok === false ? data.error || "Produktový feed se nepodařilo načíst." : "";
+    if (data.ok === false) {
+      requestedCodes.forEach((code) => productImageState.requested.delete(code));
+    } else {
+      Object.entries(data.images || {}).forEach(([code, image]) => {
+        if (image) productImageState.images[productCodeKey(code)] = image;
+      });
+    }
+  } catch (error) {
+    productImageState.error = error.message;
+    requestedCodes.forEach((code) => productImageState.requested.delete(code));
+    console.warn("Produktové obrázky se nepodařilo načíst.", error);
+  } finally {
+    productImageState.loading = false;
+  }
+
+  if (options.render !== false) {
+    renderAll();
+    renderCompletion();
+    renderWorkflow();
+  }
+
+  if (productImageState.pending.size) {
+    const pending = new Set(productImageState.pending);
+    productImageState.pending.clear();
+    ensureProductImagesForCodes(pending, options);
+  }
+}
+
+function ensureProductImagesForCurrentData(options = {}) {
+  return ensureProductImagesForCodes(collectCurrentProductImageCodes(), options);
 }
 
 function isAdmin() {
@@ -827,6 +961,7 @@ function sortingRowToItem(row) {
     paircode: row.paircode || "",
     brand: brandFromInfo(row.info),
     productName: cleanInfo(row.info),
+    image: row.image || "",
     datasetRowId: row.id || "",
     shopCode: row.shopCode || "",
   });
@@ -846,6 +981,7 @@ function applySortingDataset(dataset, rows) {
   saveState();
   renderSortingOptions();
   renderAll();
+  ensureProductImagesForCodes(collectProductImageCodesFromItems(nextItems));
   setMessage(`Načteno roztřídění: ${datasetLabel(sortingState.dataset)}.`, "success");
 }
 
@@ -963,6 +1099,7 @@ function applyCompletionDataset(dataset, rows) {
   renderCompletionOptions();
   renderWorkflow();
   renderCompletion();
+  ensureProductImagesForCodes(collectCompletionProductImageCodes(completionState.rows));
   loadAddressValidationLog();
   setCompletionMessage(`Načteno: ${datasetLabel(completionState.dataset)}.`, "success");
   window.setTimeout(() => pollPaymentFeedUpdates(), 200);
@@ -1884,6 +2021,8 @@ async function saveSettings() {
     settingsState.settings = data.settings || {};
     settingsState.loaded = true;
     renderSettings(settingsState.settings);
+    resetProductImages();
+    ensureProductImagesForCurrentData();
     setSettingsMessage("Nastavení je uložené.", "success");
   } catch (error) {
     setSettingsMessage(`Nastavení se nepodařilo uložit: ${error.message}`, "error");
@@ -2748,10 +2887,70 @@ function renderCompletionFilterOptions(rows) {
   els.completionFilterShop.value = currentShop;
 }
 
+function completionProductPreviewItems(row) {
+  const items = [
+    ...workflowSortingItems(row),
+    ...completionStructuredProductItems(row),
+    ...completionTextProductItems(row),
+  ];
+  const seen = new Set();
+  return items.filter((item, index) => {
+    const key = [item.variantCode, item.productCode, item.productName, item.variant]
+      .map((value) => normalize(String(value || "")))
+      .join("|");
+    if (seen.has(key)) return false;
+    seen.add(key || `product-${index}`);
+    return true;
+  });
+}
+
+function completionProductImagesHtml(row, limit = 4) {
+  const items = completionProductPreviewItems(row).filter((item) => productImageForItem(item));
+  if (!state.settings.showImages || !items.length) return "";
+  const visible = items.slice(0, limit);
+  const hiddenCount = Math.max(0, items.length - visible.length);
+  return `
+    <div class="completion-product-images" aria-label="Obrázky produktů">
+      ${visible.map((item) => productImageHtml(item, "completion-product-image")).join("")}
+      ${hiddenCount ? `<span class="product-image-more">+${escapeHtml(hiddenCount)}</span>` : ""}
+    </div>
+  `;
+}
+
+function completionProductListHtml(row) {
+  const items = completionProductPreviewItems(row);
+  if (!items.length) return `<div class="completion-product-empty">Produkty nejsou v řádku čitelně rozepsané.</div>`;
+  return `
+    <div class="completion-product-list">
+      ${items
+        .map((item) => {
+          const code = item.variantCode || item.productCode || "-";
+          const image = productImageHtml(item, "completion-detail-product-image");
+          return `
+            <div class="completion-product-item">
+              ${image || ""}
+              <div>
+                <strong class="code">${escapeHtml(code)}</strong>
+                <span>${escapeHtml(item.productName || item.info || "Položka objednávky")}</span>
+                <small>${escapeHtml(item.variant || [item.color, item.size].filter(Boolean).join(" / ") || "Bez varianty")}</small>
+              </div>
+              <b>${escapeHtml(item.initialQuantity || item.quantity || 1)} ks</b>
+            </div>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
 function completionDetailHtml(row) {
   const editableAddress = row.streetWithNumber || [row.street, row.houseNumber].filter(Boolean).join(" ");
   return `
     <div class="completion-detail-grid">
+      <section class="completion-products-section">
+        <h3>Produkty</h3>
+        ${completionProductListHtml(row)}
+      </section>
       <section>
         <h3>Kontakt a adresa</h3>
         <div class="completion-detail-fields">
@@ -3593,9 +3792,11 @@ async function refreshWorkflowSortingCheck(row) {
   if (!row?.id || !row?.orderNumber || completionFlowKind(row) === "unknown") return row;
   try {
     const data = await fetchJson(`/api/completion/rows/${encodeURIComponent(row.id)}/sorting-check`);
+    const sortingItems = (data.rows || []).map(sortingRowToItem);
+    ensureProductImagesForCodes(collectProductImageCodesFromItems(sortingItems));
     const updatedRow = {
       ...row,
-      workflowSortingItems: (data.rows || []).map(sortingRowToItem),
+      workflowSortingItems: sortingItems,
       workflowSortingDataset: data.dataset || null,
       workflowSortingError: "",
       workflowSortingCheckedAt: new Date().toISOString(),
@@ -3643,6 +3844,7 @@ function workflowSortingCheckHtml(row) {
           return `
             <button type="button" class="workflow-sorting-item ${showRemaining && remaining > 0 ? "pending" : "done"} ${checked ? "checked" : ""}" data-action="workflow-check-item" data-check-key="${escapeHtml(checkKey)}">
               <span class="workflow-check-box" aria-hidden="true">${checked ? "OK" : ""}</span>
+              ${productImageHtml(item, "workflow-product-image") || `<span class="workflow-product-image-placeholder" aria-hidden="true"></span>`}
               <span class="workflow-product-code">${escapeHtml(item.variantCode || item.productCode || "-")}</span>
               <span class="workflow-product-name">${escapeHtml(item.productName || item.info || "Položka objednávky")}</span>
               <span class="workflow-product-meta">${escapeHtml(meta.join(" | ") || "Bez varianty")}</span>
@@ -3954,6 +4156,7 @@ function renderCompletion() {
       </td>
       <td class="completion-order-cell">
         <strong class="code">${escapeHtml(row.orderNumber || "-")}</strong>
+        ${completionProductImagesHtml(row)}
         <div class="completion-badges">${completionMainBadges(row, status)}</div>
       </td>
       <td class="completion-customer-cell">
@@ -4256,10 +4459,7 @@ function renderTable() {
     const tr = document.createElement("tr");
     tr.dataset.id = item.id;
     tr.className = item.remaining <= 0 ? "done" : "";
-    const imageCell =
-      state.settings.showImages && item.image
-        ? `<span class="image-chip" title="${escapeHtml(item.image)}">${escapeHtml(item.image)}</span>`
-        : "";
+    const imageCell = productImageHtml(item, "sorting-product-image");
 
     tr.innerHTML = `
       <td class="code">${escapeHtml(item.orderNumber)}</td>
@@ -4610,6 +4810,17 @@ els.passwordChangeForm.addEventListener("submit", (event) => {
   event.preventDefault();
   changePassword();
 });
+
+document.addEventListener(
+  "error",
+  (event) => {
+    const image = event.target;
+    if (image instanceof HTMLImageElement) {
+      image.closest(".product-image-frame")?.classList.add("broken");
+    }
+  },
+  true
+);
 
 els.authLogout.addEventListener("click", logout);
 
