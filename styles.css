@@ -438,6 +438,11 @@ select:focus {
   border-left-color: var(--accent);
 }
 
+.day-card.employee-simple {
+  min-height: 44px;
+  align-items: center;
+}
+
 .day-card.deleted {
   color: var(--muted);
   background: #f4f1f1;
