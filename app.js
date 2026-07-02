@@ -3902,6 +3902,7 @@ function workflowSortingCheckHtml(row) {
   const physicalCheck = workflowPhysicalCheck(row);
   const flowKind = completionFlowKind(row);
   const physicalItems = workflowPhysicalItems(row);
+  const checkMessage = flowKind === "stock" ? "" : check.message;
   const itemRows = physicalItems.length
     ? physicalItems
         .map((item, itemIndex) => {
@@ -3947,7 +3948,7 @@ function workflowSortingCheckHtml(row) {
     <section class="workflow-sorting-check ${check.tone}">
       <div class="workflow-sorting-head">
         <strong>${escapeHtml(check.label)}</strong>
-        <span>${escapeHtml(check.message)}</span>
+        ${checkMessage ? `<span>${escapeHtml(checkMessage)}</span>` : ""}
       </div>
       ${
         check.items.length
@@ -3973,31 +3974,9 @@ function workflowSortingCheckHtml(row) {
 
 function workflowItemsHtml(row) {
   if (!row) return "Po načtení boxu zobrazím obsah objednávky.";
-  const quantity = row.quantity || "";
-  const carrierKey = completionCarrierKey(row);
-  const deliveryLabel = row.deliveryCarrierLabel || row.shippingMethod || "Doprava neurčena";
-  const paymentKind = paymentCheckKind(row);
-  const paymentLabel = paymentCheckLabel(row);
-  const flowKind = completionFlowKind(row);
-  const flowLabel = completionFlowLabel(flowKind);
-  const parts = [
-    row.orderNumber ? `Objednávka ${row.orderNumber}` : "",
-    quantity ? `${quantity} ks` : "",
-    row.weight ? `${row.weight} kg` : "",
-    row.shippingMethod || "",
-  ].filter(Boolean);
   const note = row.note ? `<small>${escapeHtml(row.note)}</small>` : "";
   return `
-    <div class="workflow-quick-facts">
-      <span class="workflow-fact order">${escapeHtml(row.orderNumber || "-")}</span>
-      <span class="workflow-fact pieces">${escapeHtml(quantity || "-")} ks</span>
-      <span class="workflow-fact carrier ${escapeHtml(carrierKey)}">${escapeHtml(deliveryLabel)}</span>
-      <span class="workflow-fact payment ${escapeHtml(paymentKind)}">${escapeHtml(paymentLabel)}</span>
-      <span class="workflow-fact flow ${escapeHtml(flowKind)}">${escapeHtml(flowLabel)}</span>
-    </div>
-    <strong class="workflow-order-summary">${escapeHtml(parts.join(" | ") || "Objednávka")}</strong>
     ${note}
-    <small class="workflow-contact-line">${escapeHtml(row.email || "")}${row.phone ? ` | ${escapeHtml(row.phone)}` : ""}</small>
     ${workflowSortingCheckHtml(row)}
   `;
 }

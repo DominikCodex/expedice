@@ -1186,22 +1186,19 @@ select:focus {
   font-size: 26px;
 }
 
-.completion-workflow-panel[data-payment="cod"] .workflow-cod,
-.workflow-fact.payment.cod {
+.completion-workflow-panel[data-payment="cod"] .workflow-cod {
   color: #593800;
   background: #ffe18a;
   border-color: #e7bc3d;
 }
 
-.completion-workflow-panel[data-carrier="dpd"] .workflow-country,
-.workflow-fact.carrier.dpd {
+.completion-workflow-panel[data-carrier="dpd"] .workflow-country {
   color: #fff;
   background: #2455a6;
   border-color: #173f82;
 }
 
-.completion-workflow-panel[data-carrier="packeta"] .workflow-country,
-.workflow-fact.carrier.packeta {
+.completion-workflow-panel[data-carrier="packeta"] .workflow-country {
   color: #fff;
   background: #17835e;
   border-color: #0e6748;
@@ -1223,66 +1220,6 @@ select:focus {
   color: #fff;
   background: linear-gradient(135deg, #111514, #4a504d);
   border-color: #0b0d0c;
-}
-
-.workflow-quick-facts {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.workflow-fact {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  padding: 6px 10px;
-  border: 1px solid #d4e0da;
-  border-radius: 999px;
-  background: #fff;
-  color: #24362f;
-  font-size: 14px;
-  font-weight: 950;
-}
-
-.workflow-fact.order {
-  font-family: Consolas, "Courier New", monospace;
-  font-size: 17px;
-}
-
-.workflow-fact.pieces {
-  color: #103b2c;
-  background: #dff4e8;
-  border-color: #a8d8bf;
-}
-
-.workflow-fact.payment.ok,
-.workflow-fact.payment.paid {
-  color: #0f5f3c;
-  background: #e3f8ed;
-  border-color: #a9d9bf;
-}
-
-.workflow-fact.payment.unpaid,
-.workflow-fact.payment.missing,
-.workflow-fact.payment.unknown {
-  color: #7a4500;
-  background: #fff1d3;
-  border-color: #e7c16f;
-}
-
-.workflow-fact.payment.storno {
-  color: #fff;
-  background: #282d2b;
-  border-color: #111514;
-}
-
-.workflow-order-summary {
-  margin-top: 2px;
-  font-size: 18px;
-}
-
-.workflow-contact-line {
-  font-size: 13px;
 }
 
 .workflow-sorting-check {
