@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Roztřídění zboží</title>
-    <link rel="stylesheet" href="styles.css?v=ean-audit-20260702" />
+    <link rel="stylesheet" href="styles.css?v=ean-map-20260702" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=ean-audit-20260702"></script>
+    <script defer src="app.js?v=ean-map-20260702"></script>
   </head>
   <body>
     <section id="auth-view" class="auth-view">
@@ -481,6 +481,33 @@
                     </tr>
                   </thead>
                   <tbody id="eans-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="table-panel ean-map-table-panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Zdrojová mapa</p>
+                  <h2>Celá EAN mapa</h2>
+                </div>
+                <div id="eans-map-row-count" class="row-count">0 záznamů</div>
+              </div>
+              <div class="table-wrap">
+                <table class="ean-map-table">
+                  <thead>
+                    <tr>
+                      <th>EAN</th>
+                      <th>Article code</th>
+                      <th>Prefix</th>
+                      <th>Barva</th>
+                      <th>Velikost</th>
+                      <th>Popis</th>
+                      <th>Váha</th>
+                      <th>Shody v dávce</th>
+                    </tr>
+                  </thead>
+                  <tbody id="eans-map-body"></tbody>
                 </table>
               </div>
             </section>

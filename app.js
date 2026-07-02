@@ -222,6 +222,8 @@ const els = {
   eansFilterReset: document.getElementById("eans-filter-reset"),
   eansRowCount: document.getElementById("eans-row-count"),
   eansBody: document.getElementById("eans-body"),
+  eansMapRowCount: document.getElementById("eans-map-row-count"),
+  eansMapBody: document.getElementById("eans-map-body"),
   settingsView: document.getElementById("settings-view"),
   settingsSave: document.getElementById("settings-save"),
   settingsMessage: document.getElementById("settings-message"),
@@ -4545,6 +4547,12 @@ function setBestEanCandidate(target, item, entry, exact) {
   });
 }
 
+function eanEntryMatchType(entry, item) {
+  if (sameCode(item.variantCode, entry.articleCode)) return "exact";
+  if (sameCode(item.paircode, entry.prefix) || sameCode(item.productCode, entry.prefix)) return "pair";
+  return "";
+}
+
 function buildEanAuditData() {
   const itemIdsWithEan = new Set();
   const records = Object.entries(state.eanMap || {}).map(([ean, entries]) => {
@@ -4554,13 +4562,12 @@ function buildEanAuditData() {
 
     entryList.forEach((entry) => {
       state.items.forEach((item) => {
-        const exact = sameCode(item.variantCode, entry.articleCode);
-        const pair = sameCode(item.paircode, entry.prefix) || sameCode(item.productCode, entry.prefix);
-        if (!exact && !pair) return;
+        const matchType = eanEntryMatchType(entry, item);
+        if (!matchType) return;
         itemIdsWithEan.add(item.id);
-        setBestEanCandidate(allCandidateMap, item, entry, exact);
+        setBestEanCandidate(allCandidateMap, item, entry, matchType === "exact");
         if (toNumber(item.remaining, 0) > 0) {
-          setBestEanCandidate(activeCandidateMap, item, entry, exact);
+          setBestEanCandidate(activeCandidateMap, item, entry, matchType === "exact");
         }
       });
     });
@@ -4746,6 +4753,86 @@ function renderEanSummary(data, visibleRecords) {
   `;
 }
 
+function eanMapEntryHaystack(row) {
+  const entry = row.entry;
+  return normalize(
+    [
+      row.ean,
+      entry.articleCode,
+      entry.prefix,
+      entry.description,
+      entry.originalArticle,
+      entry.colorCode,
+      entry.color,
+      entry.secondColor,
+      entry.size,
+      entry.weight,
+    ].join(" ")
+  );
+}
+
+function buildEanMapRows() {
+  return Object.entries(state.eanMap || {})
+    .flatMap(([ean, entries]) => {
+      const entryList = Array.isArray(entries) ? entries : [];
+      return entryList.map((entry, index) => {
+        const matches = state.items
+          .map((item) => ({ item, matchType: eanEntryMatchType(entry, item) }))
+          .filter((match) => match.matchType);
+        const activeMatches = matches.filter((match) => toNumber(match.item.remaining, 0) > 0);
+        return {
+          ean,
+          entry,
+          index,
+          matches,
+          activeMatches,
+          exactActive: activeMatches.filter((match) => match.matchType === "exact").length,
+          pairActive: activeMatches.filter((match) => match.matchType === "pair").length,
+        };
+      });
+    })
+    .sort((a, b) => a.ean.localeCompare(b.ean) || String(a.entry.articleCode || "").localeCompare(String(b.entry.articleCode || "")));
+}
+
+function renderEanMapRow(row) {
+  const entry = row.entry;
+  const colors = uniqueCleanValues([entry.color, entry.secondColor, entry.colorCode]).join(" | ") || "-";
+  return `
+    <tr>
+      <td class="code">${escapeHtml(row.ean)}</td>
+      <td class="code">${escapeHtml(entry.articleCode || "-")}</td>
+      <td class="code">${escapeHtml(entry.prefix || "-")}</td>
+      <td>${escapeHtml(colors)}</td>
+      <td>${escapeHtml(entry.size || "-")}</td>
+      <td class="ean-map-description">
+        <strong>${escapeHtml(entry.description || "-")}</strong>
+        ${entry.originalArticle ? `<small>${escapeHtml(entry.originalArticle)}</small>` : ""}
+      </td>
+      <td>${escapeHtml(entry.weight || "-")}</td>
+      <td>
+        <strong>${escapeHtml(row.activeMatches.length)} aktivních / ${escapeHtml(row.matches.length)} celkem</strong>
+        <small>${escapeHtml(row.exactActive)} přesně | ${escapeHtml(row.pairActive)} přes prefix</small>
+      </td>
+    </tr>
+  `;
+}
+
+function renderEanMapTable() {
+  if (!els.eansMapBody) return;
+  const allRows = buildEanMapRows();
+  const query = normalize(eanFilters.search);
+  const rows = query ? allRows.filter((row) => eanMapEntryHaystack(row).includes(query)) : allRows;
+  els.eansMapRowCount.textContent =
+    rows.length === allRows.length ? `${rows.length} záznamů` : `${rows.length} z ${allRows.length} záznamů`;
+
+  if (!rows.length) {
+    els.eansMapBody.innerHTML = `<tr><td colspan="8" class="empty">EAN mapa neobsahuje žádný záznam pro aktuální hledání.</td></tr>`;
+    return;
+  }
+
+  els.eansMapBody.innerHTML = rows.map(renderEanMapRow).join("");
+}
+
 function renderEanEntryDetail(entry) {
   const meta = [
     entry.prefix ? `prefix ${entry.prefix}` : "",
@@ -4835,6 +4922,7 @@ function renderEanAudit() {
   if (!els.eansBody) return;
   const data = buildEanAuditData();
   renderEanShopFilter(data.records);
+  renderEanMapTable();
   const filtered = sortEanAuditRecords(data.records.filter(eanAuditPassesFilters));
   const visible = filtered.slice(0, EAN_AUDIT_RENDER_LIMIT);
   const hiddenCount = filtered.length - visible.length;
