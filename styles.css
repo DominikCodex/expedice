@@ -1127,9 +1127,10 @@ select:focus {
 
 .cockpit-scan-zone {
   display: grid;
-  grid-template-columns: minmax(190px, 240px) minmax(360px, 1fr) minmax(155px, 190px) auto;
+  grid-template-columns: minmax(190px, 240px) minmax(300px, 560px) minmax(220px, 300px) auto;
   gap: 12px;
   align-items: stretch;
+  justify-content: start;
 }
 
 .cockpit-zone-title {
@@ -1187,14 +1188,26 @@ select:focus {
 }
 
 .cockpit-expedition-number {
-  min-height: 74px;
+  min-height: 96px;
+  padding: 8px 16px 10px;
   background: #fff;
-  border: 2px solid #dce7e1;
+  border: 3px solid #dce7e1;
   border-radius: 12px;
+  box-shadow: 0 8px 18px rgba(22, 34, 28, 0.08);
 }
 
-.cockpit-expedition-number strong {
-  font-size: clamp(48px, 5vw, 76px);
+.cockpit-expedition-number span {
+  font-size: 12px;
+}
+
+.cockpit-expedition-number strong,
+.cockpit-expedition-number input {
+  font-size: clamp(54px, 5.8vw, 88px);
+}
+
+.cockpit-expedition-number input {
+  min-height: 62px;
+  font-weight: 950;
 }
 
 .cockpit-nav-actions {

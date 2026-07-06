@@ -4611,7 +4611,7 @@ function selectWorkflowNumberFromInput(options = {}) {
     setWorkflowMessage(`Expediční číslo ${number} v načtené kompletaci nevidím.`, "error");
     return;
   }
-  selectWorkflowRow(row, `Přepnuto na expediční číslo ${workflowExpeditionNumberText(row) || number}.`);
+  selectWorkflowRow(row);
   if (options.focusBox !== false) els.workflowBoxCode?.focus();
 }
 
@@ -4628,7 +4628,7 @@ function moveWorkflow(delta) {
   if (!sorted.length) return;
   const currentIndex = completionWorkflowState.index >= 0 ? completionWorkflowState.index : 0;
   const nextIndex = Math.max(0, Math.min(sorted.length - 1, currentIndex + delta));
-  selectWorkflowRow(sorted[nextIndex], `Expediční číslo ${workflowExpeditionNumberText(sorted[nextIndex])}.`);
+  selectWorkflowRow(sorted[nextIndex]);
 }
 
 function updateCompletionRowInState(row) {
