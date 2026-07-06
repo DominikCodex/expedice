@@ -1212,6 +1212,7 @@ function focusBarcodeInputForView(view) {
   if (!target) return;
 
   const applyFocus = () => {
+    if (view === "completion" && document.activeElement === els.workflowExpeditionNumber) return;
     if (view === "completion" && els.completionView.classList.contains("hidden")) return;
     if (view === "sorting" && els.sortingView.classList.contains("hidden")) return;
     if (!document.body.contains(target) || target.disabled) return;
@@ -3865,10 +3866,24 @@ async function testPrintAgent() {
 
 function parseWorkflowBoxCode(value) {
   const text = String(value || "").trim().toUpperCase();
-  const boxMatch = text.match(/^X\s*(\d+)\s*S$/);
-  if (boxMatch) return boxMatch[1];
+  const boxBarcodeNumber = parseWorkflowBoxBarcode(text);
+  if (boxBarcodeNumber) return boxBarcodeNumber;
   if (/^\d+$/.test(text)) return text;
   return "";
+}
+
+function parseWorkflowBoxBarcode(value) {
+  const text = String(value || "").trim().toUpperCase();
+  const boxMatch = text.match(/X\s*(\d+)\s*S/);
+  return boxMatch ? boxMatch[1] : "";
+}
+
+function focusWorkflowBoxCodeInput() {
+  if (!els.workflowBoxCode) return;
+  requestAnimationFrame(() => {
+    els.workflowBoxCode.focus({ preventScroll: true });
+    els.workflowBoxCode.select?.();
+  });
 }
 
 function workflowRowsSorted() {
@@ -4743,8 +4758,8 @@ function confirmWorkflowOrderNoteBeforePrint(row) {
   return true;
 }
 
-async function scanWorkflowBox() {
-  const number = parseWorkflowBoxCode(els.workflowBoxCode.value);
+async function scanWorkflowBox(value = els.workflowBoxCode.value, options = {}) {
+  const number = parseWorkflowBoxCode(value);
   if (!number) {
     setWorkflowMessage("Box musí být ve tvaru X16S, případně jen číslo 16.", "warning");
     return;
@@ -4771,6 +4786,9 @@ async function scanWorkflowBox() {
     sortingCheck.requiresSorting && !sortingCheck.ok ? "warning" : "success"
   );
   els.workflowBoxCode.value = "";
+  if (options.focusBox !== false) {
+    focusWorkflowBoxCodeInput();
+  }
   if (!confirmWorkflowOrderNoteBeforePrint(row)) {
     setWorkflowMessage("Automatický tisk je pozastavený, protože poznámka objednávky nebyla potvrzená.", "warning");
     return;
@@ -4787,7 +4805,14 @@ function clearWorkflowNumberInputTimer() {
 
 function selectWorkflowNumberFromInput(options = {}) {
   clearWorkflowNumberInputTimer();
-  const number = parseWorkflowBoxCode(els.workflowExpeditionNumber.value);
+  const rawValue = els.workflowExpeditionNumber.value;
+  const scannedBoxNumber = parseWorkflowBoxBarcode(rawValue);
+  if (scannedBoxNumber) {
+    scanWorkflowBox(rawValue, { focusBox: true }).catch((error) => setWorkflowMessage(`Načtení boxu selhalo: ${error.message}`, "error"));
+    return;
+  }
+
+  const number = parseWorkflowBoxCode(rawValue);
   if (!number) {
     setWorkflowExpeditionNumberText(workflowExpeditionNumberText(completionWorkflowState.row));
     setWorkflowMessage("Zadej expediční číslo, například 16.", "warning");
@@ -4801,6 +4826,7 @@ function selectWorkflowNumberFromInput(options = {}) {
   const currentNumber = workflowExpeditionNumberText(completionWorkflowState.row);
   if (currentNumber && normalizeWorkflowNumber(currentNumber) === normalizeWorkflowNumber(number)) {
     setWorkflowExpeditionNumberText(currentNumber);
+    if (options.focusBox) focusWorkflowBoxCodeInput();
     return;
   }
   const row = findWorkflowRowByNumber(number);
@@ -4810,7 +4836,7 @@ function selectWorkflowNumberFromInput(options = {}) {
     return;
   }
   selectWorkflowRow(row);
-  if (options.focusBox !== false) els.workflowBoxCode?.focus();
+  if (options.focusBox) focusWorkflowBoxCodeInput();
 }
 
 function scheduleWorkflowNumberInputSelection() {
