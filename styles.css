@@ -27,7 +27,8 @@
 body {
   margin: 0;
   min-height: 100vh;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   color: var(--text);
   background:
     linear-gradient(90deg, rgba(31, 122, 91, 0.07) 1px, transparent 1px),
@@ -146,10 +147,12 @@ button:disabled {
 }
 
 .shell {
-  width: 100vw;
+  width: 100%;
+  max-width: 100%;
   min-height: 100vh;
   margin: 0;
   padding: 12px;
+  overflow-x: hidden;
 }
 
 .topbar {
@@ -358,6 +361,7 @@ select:focus {
   gap: 12px;
   align-items: start;
   margin-top: 12px;
+  min-width: 0;
 }
 
 .module-area {
@@ -1615,7 +1619,7 @@ select:focus {
   font-size: 20px;
 }
 
-@media (max-width: 1700px), (max-height: 820px) {
+@media (max-width: 1800px), (max-height: 820px) {
   .completion-workflow-panel.warehouse-cockpit {
     gap: 9px;
     padding: 10px;
@@ -1683,7 +1687,7 @@ select:focus {
   }
 
   .workflow-grid.cockpit-main-grid {
-    grid-template-columns: minmax(300px, 0.64fr) minmax(0, 1fr);
+    grid-template-columns: minmax(280px, 0.46fr) minmax(0, 1.54fr);
     gap: 9px;
   }
 
@@ -1795,10 +1799,11 @@ select:focus {
 
   .workflow-sorting-list {
     gap: 5px;
+    overflow-x: hidden;
   }
 
   .workflow-sorting-item {
-    grid-template-columns: 34px 46px minmax(112px, 0.82fr) minmax(160px, 1.45fr) minmax(96px, 0.7fr) minmax(52px, auto) minmax(66px, auto);
+    grid-template-columns: 32px 42px minmax(96px, 0.72fr) minmax(142px, 1.45fr) minmax(88px, 0.62fr) minmax(46px, auto) minmax(56px, auto);
     gap: 6px;
     min-height: 44px;
     padding: 5px 7px;
@@ -1849,13 +1854,18 @@ select:focus {
   }
 
   .workflow-product-qty {
-    min-width: 48px;
-    padding: 5px 7px;
+    min-width: 44px;
+    padding: 5px 6px;
     font-size: 13px;
   }
 
   .workflow-product-state {
+    min-width: 0;
     font-size: 11px;
+    text-align: center;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 
   .workflow-check-action {
@@ -4134,7 +4144,7 @@ tbody tr.done {
 
 @media (max-width: 680px) {
   .shell {
-    width: 100vw;
+    width: 100%;
     min-height: 100vh;
     padding: 8px;
   }
