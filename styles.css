@@ -1301,10 +1301,10 @@ select:focus {
 }
 
 .completion-workflow-panel[data-tone="storno"] {
-  border-left-color: #202423;
+  border-left-color: #7b8580;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(237, 239, 238, 0.96)),
-    radial-gradient(circle at top right, rgba(32, 36, 35, 0.16), transparent 45%);
+    linear-gradient(135deg, rgba(255, 255, 255, 0.98), rgba(242, 244, 243, 0.96)),
+    radial-gradient(circle at top right, rgba(107, 114, 128, 0.14), transparent 45%);
 }
 
 .cockpit-scan-zone {
@@ -1492,9 +1492,9 @@ select:focus {
 }
 
 .workflow-status.storno {
-  color: #fff;
-  background: linear-gradient(135deg, #111514, #4a504d);
-  border-color: #0b0d0c;
+  color: #34423b;
+  background: #e4e8e6;
+  border-color: #aeb8b3;
 }
 
 .workflow-sorting-check {

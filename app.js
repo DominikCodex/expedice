@@ -3907,11 +3907,10 @@ function workflowStatusTone(row) {
   const paymentStatus = paymentCheckKind(row);
   if (!row) return "neutral";
   if (paymentStatus === "storno" || status.includes("storno")) return "storno";
-  if (["unpaid", "missing", "unknown"].includes(paymentStatus)) return "warning";
-  if (status.includes("error")) return "danger";
+  if (status.includes("error") || status.includes("chyba")) return "danger";
   if (status.includes("nezaplac")) return "warning";
-  if (status.includes("ok")) return "ok";
-  return "neutral";
+  if (["unpaid", "missing", "unknown"].includes(paymentStatus)) return "warning";
+  return "ok";
 }
 
 function workflowPaymentText(row) {
@@ -4655,7 +4654,7 @@ function renderWorkflow() {
   const fullName = row ? `${row.firstName || ""} ${row.lastName || ""}`.trim() : "Načti expediční box";
   const expeditionNumber = workflowExpeditionNumberText(row);
   const tone = workflowStatusTone(row);
-  let statusText = row?.completionStatus || (row ? "Rozpracováno" : "Čekám na sken boxu");
+  let statusText = row ? "OK - připraveno" : "Čekám na sken boxu";
   const isDpd = row && (row.delivery?.isDpd || normalize(row.shippingMethod || "").includes("dpd"));
   const paymentWarning = row && ["storno", "unpaid", "missing", "unknown"].includes(paymentCheckKind(row));
   if (tone === "storno") {
@@ -4663,7 +4662,7 @@ function renderWorkflow() {
   } else if (tone === "ok" && row) {
     statusText = "OK - připraveno";
   } else if (tone === "warning" && row) {
-    statusText = "POZOR - zkontrolovat";
+    statusText = "NEZAPLACENO";
   } else if (tone === "danger" && row) {
     statusText = "ERROR - řešit";
   }
