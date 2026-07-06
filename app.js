@@ -211,6 +211,7 @@ const els = {
   tabCompletion: document.getElementById("tab-completion"),
   tabEans: document.getElementById("tab-eans"),
   tabSettings: document.getElementById("tab-settings"),
+  dayRequiredView: document.getElementById("day-required-view"),
   sortingView: document.getElementById("sorting-view"),
   sortingDataset: document.getElementById("sorting-dataset"),
   sortingRefresh: document.getElementById("sorting-refresh"),
@@ -971,6 +972,68 @@ function setExpeditionDaySummary(html, options = {}) {
   els.expeditionDaySummary.innerHTML = visible ? html : "";
 }
 
+function hasSelectedExpeditionDay() {
+  return Boolean(expeditionState.day?.date);
+}
+
+function activeModuleView() {
+  if (els.tabCompletion?.classList.contains("active")) return "completion";
+  if (els.tabEans?.classList.contains("active")) return "eans";
+  if (els.tabSettings?.classList.contains("active")) return "settings";
+  return "sorting";
+}
+
+function clearSelectedExpeditionDayData(options = {}) {
+  expeditionState.day = null;
+  sortingState.datasets = [];
+  sortingState.dataset = null;
+  sortingState.loaded = false;
+  completionState.datasets = [];
+  completionState.dataset = null;
+  completionState.rows = [];
+  completionState.loaded = false;
+  completionState.paymentUpdatesSince = null;
+  completionState.paymentPollInFlight = false;
+  completionWorkflowState.row = null;
+  completionWorkflowState.index = -1;
+  completionWorkflowState.checkedItemKeys = new Set();
+  expandedCompletionRows.clear();
+  stopWorkflowSortingAutoRefresh();
+
+  state.items = [];
+  state.history = [];
+  activeCandidates = [];
+  pendingAdjustments.clear();
+  zeroRowsKeptUntilRefresh.clear();
+  scanInProgress = false;
+
+  els.scanResult?.classList.add("hidden");
+  els.candidatesPanel?.classList.add("hidden");
+  if (els.expeditionDeleteDay) els.expeditionDeleteDay.disabled = true;
+  hidePacketaDryRunResult();
+  setMessage("Vyber expediční den vlevo.", "neutral");
+  setCompletionMessage("Vyber expediční den vlevo.", "neutral");
+  setWorkflowMessage("Vyber expediční den vlevo.", "neutral");
+
+  if (options.render === false) return;
+  renderSortingOptions();
+  renderCompletionOptions();
+  renderAll();
+  renderWorkflow();
+  renderCompletion();
+  renderDayRequiredGuard();
+}
+
+function renderDayRequiredGuard(view = activeModuleView()) {
+  const guarded = (view === "sorting" || view === "completion") && !hasSelectedExpeditionDay();
+  els.dayRequiredView?.classList.toggle("hidden", !guarded);
+  els.sortingView.classList.toggle("hidden", view !== "sorting" || guarded);
+  els.completionView.classList.toggle("hidden", view !== "completion" || guarded);
+  els.eansView?.classList.toggle("hidden", view !== "eans");
+  els.settingsView.classList.toggle("hidden", view !== "settings");
+  return guarded;
+}
+
 function focusBarcodeInputForView(view) {
   const target = view === "completion" ? els.workflowBoxCode : view === "sorting" ? els.eanInput : null;
   if (!target) return;
@@ -999,16 +1062,14 @@ function switchView(view, options = {}) {
   const completion = view === "completion";
   const eans = view === "eans";
   const settings = view === "settings";
-  els.sortingView.classList.toggle("hidden", completion || eans || settings);
-  els.completionView.classList.toggle("hidden", !completion);
-  els.eansView?.classList.toggle("hidden", !eans);
-  els.settingsView.classList.toggle("hidden", !settings);
   els.tabSorting.classList.toggle("active", !completion && !eans && !settings);
   els.tabCompletion.classList.toggle("active", completion);
   els.tabEans?.classList.toggle("active", eans);
   els.tabSettings.classList.toggle("active", settings);
 
-  if (completion && !completionState.loaded) {
+  const dayGuarded = renderDayRequiredGuard(view);
+
+  if (completion && !dayGuarded && !completionState.loaded) {
     loadCompletionDatasets();
   }
 
@@ -1024,7 +1085,9 @@ function switchView(view, options = {}) {
     loadUsers();
   }
 
-  focusBarcodeInputForView(completion ? "completion" : !eans && !settings ? "sorting" : "");
+  if (!dayGuarded) {
+    focusBarcodeInputForView(completion ? "completion" : !eans && !settings ? "sorting" : "");
+  }
 
   if (options.updateRoute !== false) {
     setRouteForView(view, Boolean(options.replaceRoute));
@@ -1094,24 +1157,24 @@ async function loadExpeditionDays(preferredDate = "") {
     expeditionState.loaded = true;
     renderExpeditionDayOptions();
 
+    if (!expeditionState.days.length) {
+      clearSelectedExpeditionDayData();
+      setExpeditionDaySummary(`<span>Online zatím neobsahuje žádný expediční den.</span>`, { employeeVisible: true });
+      return;
+    }
+
     const lockedDate = preferredEmployeeLockedDate();
     const selectedDate =
       lockedDate ||
       preferredDate ||
-      expeditionState.day?.date ||
-      expeditionState.days[0]?.date ||
+      (expeditionState.day?.date && expeditionState.days.some((day) => day.date === expeditionState.day.date)
+        ? expeditionState.day.date
+        : "") ||
       "";
 
     if (!selectedDate) {
-      sortingState.datasets = [];
-      sortingState.dataset = null;
-      completionState.datasets = [];
-      completionState.dataset = null;
-      completionState.rows = [];
-      if (els.expeditionDeleteDay) els.expeditionDeleteDay.disabled = true;
-      renderSortingOptions();
-      renderCompletionOptions();
-      renderCompletion();
+      clearSelectedExpeditionDayData();
+      setExpeditionDaySummary(`<span>Vyber expediční den vlevo.</span>`, { employeeVisible: false });
       return;
     }
 
@@ -1123,13 +1186,22 @@ async function loadExpeditionDays(preferredDate = "") {
 }
 
 async function loadExpeditionDay(dayDate) {
-  if (!dayDate) return;
+  if (!dayDate) {
+    clearSelectedExpeditionDayData();
+    return;
+  }
   const data = await fetchJson(`/api/expedition-days/${encodeURIComponent(dayDate)}/full${includeInactiveQuery()}`);
   expeditionState.day = data.day || null;
   sortingState.datasets = data.sorting || [];
   completionState.datasets = data.completion || [];
   sortingState.loaded = true;
   completionState.loaded = true;
+
+  if (!expeditionState.day?.date) {
+    clearSelectedExpeditionDayData();
+    setExpeditionDaySummary(`<span>Den není načtený.</span>`, { employeeVisible: false });
+    return;
+  }
 
   renderExpeditionDayOptions();
   const deleted = expeditionState.day?.status && expeditionState.day.status !== "active";
@@ -1169,6 +1241,12 @@ async function loadExpeditionDay(dayDate) {
     renderWorkflow();
     renderCompletion();
     setCompletionMessage("Pro vybraný expediční den není nahraná kompletace.", "warning");
+  }
+
+  const view = activeModuleView();
+  const guarded = renderDayRequiredGuard(view);
+  if (!guarded && (view === "sorting" || view === "completion")) {
+    focusBarcodeInputForView(view);
   }
 }
 
@@ -1214,6 +1292,11 @@ function applySortingDataset(dataset, rows) {
 }
 
 async function loadSortingDataset(datasetId) {
+  if (!hasSelectedExpeditionDay()) {
+    clearSelectedExpeditionDayData();
+    setMessage("Nejdřív vyber expediční den vlevo.", "warning");
+    return;
+  }
   if (!datasetId) return;
   setMessage("Načítám vybrané roztřídění...", "neutral");
   try {
@@ -1313,7 +1396,11 @@ async function loadCompletionDatasets() {
     await loadExpeditionDay(expeditionState.day.date);
     return;
   }
+  clearSelectedExpeditionDayData();
   await loadExpeditionDays();
+  if (!hasSelectedExpeditionDay()) {
+    setCompletionMessage("Nejdřív vyber expediční den vlevo.", "warning");
+  }
 }
 
 function applyCompletionDataset(dataset, rows) {
@@ -5755,6 +5842,7 @@ els.expeditionDeleteDay?.addEventListener("click", deleteCurrentExpeditionDay);
 els.expeditionDayLockChange?.addEventListener("click", () => {
   removeEmployeeDayLock();
   employeeDayLockState.choosing = true;
+  clearSelectedExpeditionDayData();
   renderExpeditionDayOptions();
   setExpeditionDaySummary("", { employeeVisible: false });
 });
