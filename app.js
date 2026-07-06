@@ -4694,6 +4694,9 @@ function renderWorkflow() {
   if (sortingCheck.requiresSorting && !sortingCheck.ok) warnings.push(sortingCheck.message);
   els.workflowWarning.classList.toggle("hidden", !warnings.length);
   els.workflowWarning.textContent = warnings.join(" | ");
+  if (workflowPanel) {
+    workflowPanel.classList.toggle("has-workflow-warning", warnings.length > 0);
+  }
 
   const disabled = !row;
   [

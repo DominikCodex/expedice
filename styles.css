@@ -2080,6 +2080,42 @@ html[data-completion-density="ultra"] .completion-workflow-panel.warehouse-cockp
   align-content: start;
 }
 
+.completion-workflow-panel.warehouse-cockpit .cockpit-control-card > .cockpit-zone-title {
+  order: 1;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-actions.cockpit-actions {
+  order: 2;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-status {
+  order: 3;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-items {
+  order: 4;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-warning {
+  order: 5;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-note {
+  order: 6;
+}
+
+.completion-workflow-panel.warehouse-cockpit.has-workflow-warning .workflow-warning {
+  order: 3;
+}
+
+.completion-workflow-panel.warehouse-cockpit.has-workflow-warning .workflow-items {
+  order: 4;
+}
+
+.completion-workflow-panel.warehouse-cockpit.has-workflow-warning .workflow-status {
+  order: 5;
+}
+
 .completion-workflow-panel.warehouse-cockpit .cockpit-order-card > strong {
   padding: clamp(6px, 0.65cqw, 10px);
   font-size: clamp(24px, 2.45cqw, 42px);
