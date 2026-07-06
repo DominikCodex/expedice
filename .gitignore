@@ -3,6 +3,7 @@ __pycache__/
 .env
 .venv/
 venv/
+.codex-playwright/
 print-agent/build/
 print-agent/dist/
 print-agent/bin/
