@@ -68,6 +68,7 @@ const completionWorkflowState = {
   sortingRefreshTimer: null,
   sortingRefreshRowId: null,
   sortingRefreshInFlight: false,
+  expeditionNumberInputTimer: null,
 };
 const workflowAutoPrintedRows = new Set();
 
@@ -4579,7 +4580,15 @@ async function scanWorkflowBox() {
   await autoPrintWorkflowDocuments(row, number);
 }
 
-function selectWorkflowNumberFromInput() {
+function clearWorkflowNumberInputTimer() {
+  if (completionWorkflowState.expeditionNumberInputTimer) {
+    window.clearTimeout(completionWorkflowState.expeditionNumberInputTimer);
+  }
+  completionWorkflowState.expeditionNumberInputTimer = null;
+}
+
+function selectWorkflowNumberFromInput(options = {}) {
+  clearWorkflowNumberInputTimer();
   const number = parseWorkflowBoxCode(els.workflowExpeditionNumber.value);
   if (!number) {
     setWorkflowExpeditionNumberText(workflowExpeditionNumberText(completionWorkflowState.row));
@@ -4603,7 +4612,15 @@ function selectWorkflowNumberFromInput() {
     return;
   }
   selectWorkflowRow(row, `Přepnuto na expediční číslo ${workflowExpeditionNumberText(row) || number}.`);
-  els.workflowBoxCode?.focus();
+  if (options.focusBox !== false) els.workflowBoxCode?.focus();
+}
+
+function scheduleWorkflowNumberInputSelection() {
+  clearWorkflowNumberInputTimer();
+  if (!String(els.workflowExpeditionNumber.value || "").trim()) return;
+  completionWorkflowState.expeditionNumberInputTimer = window.setTimeout(() => {
+    selectWorkflowNumberFromInput();
+  }, 500);
 }
 
 function moveWorkflow(delta) {
@@ -6020,10 +6037,12 @@ els.workflowExpeditionNumber.addEventListener("keydown", (event) => {
     selectWorkflowNumberFromInput();
   } else if (event.key === "Escape") {
     event.preventDefault();
+    clearWorkflowNumberInputTimer();
     setWorkflowExpeditionNumberText(workflowExpeditionNumberText(completionWorkflowState.row));
     els.workflowBoxCode?.focus();
   }
 });
+els.workflowExpeditionNumber.addEventListener("input", scheduleWorkflowNumberInputSelection);
 els.workflowExpeditionNumber.addEventListener("change", selectWorkflowNumberFromInput);
 els.workflowExpeditionNumber.addEventListener("focus", () => {
   els.workflowExpeditionNumber.select?.();
