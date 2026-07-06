@@ -103,6 +103,7 @@ Private Function ExpediceNajdiSumatraPDF() As String
     ExpediceAddCandidate candidates, Environ$("SUMATRA_PDF_EXE")
     ExpediceAddCandidate candidates, ThisWorkbook.Path & "\SumatraPDF.exe"
     ExpediceAddCandidate candidates, ThisWorkbook.Path & "\bin\SumatraPDF.exe"
+    ExpediceAddWorkbookTreeSumatraCandidates candidates
     ExpediceAddCandidate candidates, Environ$("LOCALAPPDATA") & "\ExpedicePrintAgentV2\bin\SumatraPDF.exe"
     ExpediceAddCandidate candidates, Environ$("LOCALAPPDATA") & "\ExpedicePrintAgent\bin\SumatraPDF.exe"
     ExpediceAddCandidate candidates, Environ$("ProgramFiles") & "\SumatraPDF\SumatraPDF.exe"
@@ -117,13 +118,45 @@ Private Function ExpediceNajdiSumatraPDF() As String
     Next candidate
 
     Err.Raise vbObjectError + 522, "ExpediceNajdiSumatraPDF", _
-        "SumatraPDF.exe nebyla nalezena. Dej ji vedle sesitu, do podslozky bin, nebo vypln EXPEDICE_SUMATRA_EXE."
+        "SumatraPDF.exe nebyla nalezena. Dej ji do Expedice\Adresy, vedle sesitu, do podslozky bin, nebo vypln EXPEDICE_SUMATRA_EXE."
 End Function
+
+Private Sub ExpediceAddWorkbookTreeSumatraCandidates(ByVal candidates As Collection)
+    Dim folderPath As String
+    folderPath = ThisWorkbook.Path
+
+    Do While Len(folderPath) > 0
+        ExpediceAddCandidate candidates, folderPath & "\Expedice\Adresy\SumatraPDF.exe"
+        ExpediceAddCandidate candidates, folderPath & "\Adresy\SumatraPDF.exe"
+
+        Dim parentPath As String
+        parentPath = ExpediceParentFolder(folderPath)
+        If Len(parentPath) = 0 Or parentPath = folderPath Then Exit Do
+        folderPath = parentPath
+    Loop
+End Sub
 
 Private Sub ExpediceAddCandidate(ByVal candidates As Collection, ByVal path As String)
     path = Trim$(path)
     If Len(path) > 0 Then candidates.Add path
 End Sub
+
+Private Function ExpediceParentFolder(ByVal folderPath As String) As String
+    folderPath = Trim$(folderPath)
+    Do While Len(folderPath) > 3 And Right$(folderPath, 1) = "\"
+        folderPath = Left$(folderPath, Len(folderPath) - 1)
+    Loop
+
+    Dim separatorPosition As Long
+    separatorPosition = InStrRev(folderPath, "\")
+    If separatorPosition <= 0 Then
+        ExpediceParentFolder = ""
+    ElseIf separatorPosition <= 3 Then
+        ExpediceParentFolder = Left$(folderPath, separatorPosition)
+    Else
+        ExpediceParentFolder = Left$(folderPath, separatorPosition - 1)
+    End If
+End Function
 
 Private Function ExpediceSumatraCommand(ByVal sumatraPath As String, ByVal pdfPath As String, ByVal printer As String, ByVal copies As Long) As String
     Dim command As String
