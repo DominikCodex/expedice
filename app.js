@@ -1251,6 +1251,10 @@ async function loadExpeditionDay(dayDate) {
 }
 
 function sortingRowToItem(row) {
+  const initialQuantity =
+    workflowQuantityFromValue(row.initialQuantity) ||
+    workflowQuantityFromValue(row.quantity) ||
+    workflowQuantityFromValue(row.remaining);
   return normalizeItem({
     id: `online-${row.id}`,
     sourceRow: row.rowNumber || "",
@@ -1258,7 +1262,7 @@ function sortingRowToItem(row) {
     variantCode: row.variantCode || "",
     variant: row.variant || "",
     remaining: row.remaining ?? row.quantity ?? 0,
-    initialQuantity: row.initialQuantity || row.quantity || row.remaining || 0,
+    initialQuantity,
     orderNumber: row.orderNumber || "",
     weight: row.weight || "",
     sequence: row.sequence || "",
@@ -3826,6 +3830,8 @@ function workflowSortingCheck(row) {
   const sortingDataset = row.workflowSortingDataset || sortingState.dataset;
   const remainingTotal = items.reduce((total, item) => total + Math.max(0, Math.trunc(toNumber(item.remaining, 0))), 0);
   const initialTotal = items.reduce((total, item) => {
+    const lineQuantity = workflowItemLineQuantity(item);
+    if (lineQuantity) return total + lineQuantity;
     const initial = toNumber(item.initialQuantity, NaN);
     const fallback = toNumber(item.quantity, toNumber(item.remaining, 0));
     return total + Math.max(0, Math.trunc(Number.isFinite(initial) ? initial : fallback));
@@ -3906,6 +3912,22 @@ function normalizeWorkflowPhysicalItem(item, index, fallbackRow = null) {
   const color = item.color || item.colour || item.barva || item["Barva"] || "";
   const size = item.size || item.velikost || item["Velikost"] || "";
   const variant = item.variant || item.variantName || item.varianta || [color, size].filter(Boolean).join(" / ");
+  const hasSortingContext =
+    item.lineQuantity !== undefined ||
+    item.sortingInitialQuantity !== undefined ||
+    item.remaining !== undefined ||
+    item.datasetRowId !== undefined;
+  const itemQuantity =
+    workflowQuantityFromValue(item.lineQuantity) ||
+    workflowQuantityFromValue(item.initialQuantity) ||
+    workflowQuantityFromValue(item.quantity) ||
+    workflowQuantityFromValue(item.quantityText) ||
+    workflowQuantityFromValue(item.mnozstvi) ||
+    workflowQuantityFromValue(item["Množství"]) ||
+    workflowQuantityFromValue(item.pocet) ||
+    workflowQuantityFromValue(item["Počet"]) ||
+    workflowQuantityFromValue(item.count) ||
+    workflowQuantityFromValue(item.qty);
   return {
     ...item,
     datasetRowId: item.datasetRowId || item.id || `physical-${fallbackRow?.id || fallbackRow?.orderNumber || "row"}-${index}`,
@@ -3924,7 +3946,7 @@ function normalizeWorkflowPhysicalItem(item, index, fallbackRow = null) {
       item.description ||
       fallbackRow?.note ||
       "Položka objednávky",
-    initialQuantity: item.initialQuantity || item.quantity || item.quantityText || item.mnozstvi || item["Množství"] || item.count || fallbackRow?.quantity || 1,
+    initialQuantity: itemQuantity || (hasSortingContext ? 1 : fallbackRow?.quantity || 1),
     remaining: item.remaining ?? null,
     physicalOnly: Boolean(item.physicalOnly),
   };
@@ -4089,6 +4111,27 @@ function workflowItemQuantity(item) {
   return 0;
 }
 
+function workflowItemLineQuantity(item) {
+  const fields = [
+    item?.lineQuantity,
+    item?.sortingInitialQuantity,
+    item?.initialQuantity,
+    item?.quantity,
+    item?.quantityText,
+    item?.mnozstvi,
+    item?.["Množství"],
+    item?.pocet,
+    item?.["Počet"],
+    item?.count,
+    item?.qty,
+  ];
+  for (const value of fields) {
+    const quantity = workflowQuantityFromValue(value);
+    if (quantity > 0) return quantity;
+  }
+  return 0;
+}
+
 function workflowItemCodeKeys(item) {
   const keys = new Set();
   addProductImageCode(keys, item?.variantCode);
@@ -4112,21 +4155,36 @@ function completionOrderQuantityMap(row) {
 function applyCompletionOrderQuantitiesToSortingItems(row, items) {
   const quantityByCode = completionOrderQuantityMap(row);
   const sortingItems = items || [];
+  const codeCounts = new Map();
+  sortingItems.forEach((item) => {
+    workflowItemCodeKeys(item).forEach((code) => {
+      codeCounts.set(code, (codeCounts.get(code) || 0) + 1);
+    });
+  });
+
+  const enrichWithLineQuantity = (item, lineQuantity) => ({
+    ...item,
+    sortingInitialQuantity: item.sortingInitialQuantity || item.initialQuantity || item.quantity || "",
+    lineQuantity,
+    displayQuantity: lineQuantity,
+    orderQuantity: undefined,
+  });
+
   if (!quantityByCode.size) {
     const orderTotal = workflowQuantityFromValue(row?.quantity || row?.amount);
     if (orderTotal > 0 && sortingItems.length === orderTotal) {
-      return sortingItems.map((item) => ({
-        ...item,
-        sortingInitialQuantity: item.initialQuantity || item.quantity || "",
-        initialQuantity: 1,
-        quantity: 1,
-        orderQuantity: 1,
-      }));
+      return sortingItems.map((item) => enrichWithLineQuantity(item, workflowItemLineQuantity(item) || 1));
     }
-    return sortingItems;
+    return sortingItems.map((item) => {
+      const lineQuantity = workflowItemLineQuantity(item);
+      return lineQuantity ? enrichWithLineQuantity(item, lineQuantity) : item;
+    });
   }
   return sortingItems.map((item) => {
-    const matchedCode = workflowItemCodeKeys(item).find((code) => quantityByCode.has(code));
+    const lineQuantity = workflowItemLineQuantity(item);
+    if (lineQuantity) return enrichWithLineQuantity(item, lineQuantity);
+
+    const matchedCode = workflowItemCodeKeys(item).find((code) => quantityByCode.has(code) && (codeCounts.get(code) || 0) === 1);
     if (!matchedCode) return item;
     const orderQuantity = quantityByCode.get(matchedCode);
     if (!orderQuantity) return item;
@@ -4135,7 +4193,8 @@ function applyCompletionOrderQuantitiesToSortingItems(row, items) {
       sortingInitialQuantity: item.initialQuantity || item.quantity || "",
       initialQuantity: orderQuantity,
       quantity: orderQuantity,
-      orderQuantity,
+      lineQuantity: orderQuantity,
+      displayQuantity: orderQuantity,
     };
   });
 }
@@ -4309,7 +4368,7 @@ function workflowSortingCheckHtml(row) {
           const hasRemaining = item.remaining !== null && item.remaining !== undefined && item.remaining !== "";
           const showRemaining = flowKind === "sorting" && hasRemaining;
           const remaining = hasRemaining ? Math.max(0, Math.trunc(toNumber(item.remaining, 0))) : null;
-          const initial = workflowItemQuantity(item) || 1;
+          const initial = workflowItemLineQuantity(item) || workflowItemQuantity(item) || 1;
           const sortingInitial = workflowQuantityFromValue(item.sortingInitialQuantity);
           const quantityTitle =
             sortingInitial && sortingInitial !== initial
