@@ -2597,6 +2597,35 @@ def product_image_cache():
         return {**PRODUCT_IMAGE_CACHE, "configured": True, "stale": False}
 
 
+def strict_positive_integer_text(value):
+    text = clean_text(value).strip().replace(",", ".")
+    if not re.fullmatch(r"\d+(?:\.0+)?", text):
+        return ""
+    number = int(float(text))
+    return str(number) if number > 0 else ""
+
+
+def sorting_initial_quantity_from_cells(cells, variant_code):
+    if not isinstance(cells, list):
+        return ""
+    target = clean_text(variant_code).strip().upper()
+    if not target:
+        return ""
+    for index, cell in enumerate(cells[:-1]):
+        if clean_text(cell).strip().upper() != target:
+            continue
+        quantity = strict_positive_integer_text(cells[index + 1])
+        if quantity:
+            return quantity
+    return ""
+
+
+def sorting_initial_quantity_from_item(item):
+    if not isinstance(item, dict):
+        return ""
+    return sorting_initial_quantity_from_cells(item.get("cells"), item.get("variantCode"))
+
+
 def row_to_api(row):
     return {
         "id": row["id"],
@@ -2611,7 +2640,7 @@ def row_to_api(row):
         "weight": row["weight"],
         "sequence": row["sequence"],
         "info": row["info"],
-        "initialQuantity": row["initial_quantity_text"],
+        "initialQuantity": row["initial_quantity_text"] or sorting_initial_quantity_from_cells(row["cells"], row["variant_code"]),
         "paircode": row["paircode"],
         "history": row["history"],
         "cells": row["cells"],
@@ -3500,6 +3529,7 @@ def upload_dataset():
                     insert_completion_row(cur, dataset["id"], item, row_shop_code)
                     continue
                 quantity = clean_text(item.get("quantity"))
+                initial_quantity = clean_text(item.get("initialQuantity")) or sorting_initial_quantity_from_item(item)
                 cur.execute(
                     """
                     INSERT INTO dataset_rows (
@@ -3522,7 +3552,7 @@ def upload_dataset():
                         clean_text(item.get("weight")),
                         clean_text(item.get("sequence")),
                         clean_text(item.get("info")),
-                        clean_text(item.get("initialQuantity")),
+                        initial_quantity,
                         clean_text(item.get("paircode")),
                         clean_text(item.get("history")),
                         Json(item.get("cells") if isinstance(item.get("cells"), list) else []),

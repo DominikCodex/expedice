@@ -4390,21 +4390,23 @@ function applyCompletionOrderQuantitiesToSortingItems(row, items) {
     });
   }
   return sortingItems.map((item) => {
-    const lineQuantity = workflowItemLineQuantity(item);
-    if (lineQuantity) return enrichWithLineQuantity(item, lineQuantity);
-
     const matchedCode = workflowItemCodeKeys(item).find((code) => quantityByCode.has(code) && (codeCounts.get(code) || 0) === 1);
-    if (!matchedCode) return item;
-    const orderQuantity = quantityByCode.get(matchedCode);
-    if (!orderQuantity) return item;
-    return {
-      ...item,
-      sortingInitialQuantity: item.initialQuantity || item.quantity || "",
-      initialQuantity: orderQuantity,
-      quantity: orderQuantity,
-      lineQuantity: orderQuantity,
-      displayQuantity: orderQuantity,
-    };
+    if (matchedCode) {
+      const orderQuantity = quantityByCode.get(matchedCode);
+      if (orderQuantity) {
+        return {
+          ...item,
+          sortingInitialQuantity: item.initialQuantity || item.quantity || "",
+          initialQuantity: orderQuantity,
+          quantity: orderQuantity,
+          lineQuantity: orderQuantity,
+          displayQuantity: orderQuantity,
+        };
+      }
+    }
+
+    const lineQuantity = workflowItemLineQuantity(item);
+    return lineQuantity ? enrichWithLineQuantity(item, lineQuantity) : item;
   });
 }
 
