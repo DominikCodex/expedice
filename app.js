@@ -4474,9 +4474,7 @@ function renderWorkflow() {
     workflowPanel.dataset.payment = row ? paymentCheckKind(row) : "";
   }
   els.workflowItems.innerHTML = workflowItemsHtml(row);
-  els.workflowNote.textContent = [row?.completionStatus ? `Stav kompletace: ${row.completionStatus}` : "", row?.paymentCheckSourceStatus ? `Feed: ${row.paymentCheckSourceStatus}` : ""]
-    .filter(Boolean)
-    .join(" | ");
+  els.workflowNote.textContent = row?.completionStatus ? `Stav kompletace: ${row.completionStatus}` : "";
   const warnings = [];
   const sortingCheck = workflowSortingCheck(row);
   if (paymentWarning) warnings.push(`${paymentCheckLabel(row)}: ${row.paymentCheckMessage || "zkontroluj objednávku před odesláním"}`);
