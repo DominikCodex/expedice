@@ -3684,12 +3684,29 @@ function workflowRowsSorted() {
     .sort((a, b) => toNumber(a.expeditionNumber || a.expeditionOrderCode, 0) - toNumber(b.expeditionNumber || b.expeditionOrderCode, 0));
 }
 
+function normalizeWorkflowNumber(number) {
+  return String(number || "").replace(/^0+/, "");
+}
+
 function findWorkflowRowByNumber(number) {
-  const normalized = String(number || "").replace(/^0+/, "");
+  const normalized = normalizeWorkflowNumber(number);
   return workflowRowsSorted().find((row) => {
-    const expeditionNumber = String(row.expeditionNumber || row.expeditionOrderCode || "").replace(/^0+/, "");
+    const expeditionNumber = normalizeWorkflowNumber(row.expeditionNumber || row.expeditionOrderCode);
     return expeditionNumber === normalized;
   });
+}
+
+function workflowExpeditionNumberText(row) {
+  return row?.expeditionNumber || row?.expeditionOrderCode || "";
+}
+
+function setWorkflowExpeditionNumberText(value) {
+  if (!els.workflowExpeditionNumber) return;
+  if ("value" in els.workflowExpeditionNumber) {
+    els.workflowExpeditionNumber.value = value || "";
+  } else {
+    els.workflowExpeditionNumber.textContent = value || "-";
+  }
 }
 
 function workflowStatusTone(row) {
@@ -4441,7 +4458,7 @@ function workflowItemsHtml(row) {
 function renderWorkflow() {
   const row = completionWorkflowState.row;
   const fullName = row ? `${row.firstName || ""} ${row.lastName || ""}`.trim() : "Načti expediční box";
-  const expeditionNumber = row?.expeditionNumber || row?.expeditionOrderCode || "-";
+  const expeditionNumber = workflowExpeditionNumberText(row);
   const tone = workflowStatusTone(row);
   let statusText = row?.completionStatus || (row ? "Rozpracováno" : "Čekám na sken boxu");
   const isDpd = row && (row.delivery?.isDpd || normalize(row.shippingMethod || "").includes("dpd"));
@@ -4456,7 +4473,7 @@ function renderWorkflow() {
     statusText = "ERROR - řešit";
   }
 
-  els.workflowExpeditionNumber.textContent = expeditionNumber;
+  setWorkflowExpeditionNumberText(expeditionNumber);
   els.workflowCustomerName.textContent = fullName || "-";
   els.workflowStreet.textContent = row?.streetWithNumber || row?.street || "-";
   els.workflowCity.textContent = [row?.city, row?.zipCode].filter(Boolean).join(", ") || "-";
@@ -4562,12 +4579,39 @@ async function scanWorkflowBox() {
   await autoPrintWorkflowDocuments(row, number);
 }
 
+function selectWorkflowNumberFromInput() {
+  const number = parseWorkflowBoxCode(els.workflowExpeditionNumber.value);
+  if (!number) {
+    setWorkflowExpeditionNumberText(workflowExpeditionNumberText(completionWorkflowState.row));
+    setWorkflowMessage("Zadej expediční číslo, například 16.", "warning");
+    return;
+  }
+  if (!completionState.rows.length) {
+    setWorkflowExpeditionNumberText(workflowExpeditionNumberText(completionWorkflowState.row));
+    setWorkflowMessage("Nejdřív načti kompletaci pro expediční den.", "warning");
+    return;
+  }
+  const currentNumber = workflowExpeditionNumberText(completionWorkflowState.row);
+  if (currentNumber && normalizeWorkflowNumber(currentNumber) === normalizeWorkflowNumber(number)) {
+    setWorkflowExpeditionNumberText(currentNumber);
+    return;
+  }
+  const row = findWorkflowRowByNumber(number);
+  if (!row) {
+    setWorkflowExpeditionNumberText(workflowExpeditionNumberText(completionWorkflowState.row));
+    setWorkflowMessage(`Expediční číslo ${number} v načtené kompletaci nevidím.`, "error");
+    return;
+  }
+  selectWorkflowRow(row, `Přepnuto na expediční číslo ${workflowExpeditionNumberText(row) || number}.`);
+  els.workflowBoxCode?.focus();
+}
+
 function moveWorkflow(delta) {
   const sorted = workflowRowsSorted();
   if (!sorted.length) return;
   const currentIndex = completionWorkflowState.index >= 0 ? completionWorkflowState.index : 0;
   const nextIndex = Math.max(0, Math.min(sorted.length - 1, currentIndex + delta));
-  selectWorkflowRow(sorted[nextIndex], `Expediční číslo ${sorted[nextIndex].expeditionNumber || sorted[nextIndex].expeditionOrderCode}.`);
+  selectWorkflowRow(sorted[nextIndex], `Expediční číslo ${workflowExpeditionNumberText(sorted[nextIndex])}.`);
 }
 
 function updateCompletionRowInState(row) {
@@ -5969,6 +6013,20 @@ els.workflowBoxCode.addEventListener("input", () => {
   if (/^x\s*\d+\s*s$/i.test(code)) {
     scanWorkflowBox().catch((error) => setWorkflowMessage(`Načtení boxu selhalo: ${error.message}`, "error"));
   }
+});
+els.workflowExpeditionNumber.addEventListener("keydown", (event) => {
+  if (event.key === "Enter") {
+    event.preventDefault();
+    selectWorkflowNumberFromInput();
+  } else if (event.key === "Escape") {
+    event.preventDefault();
+    setWorkflowExpeditionNumberText(workflowExpeditionNumberText(completionWorkflowState.row));
+    els.workflowBoxCode?.focus();
+  }
+});
+els.workflowExpeditionNumber.addEventListener("change", selectWorkflowNumberFromInput);
+els.workflowExpeditionNumber.addEventListener("focus", () => {
+  els.workflowExpeditionNumber.select?.();
 });
 els.workflowPrev.addEventListener("click", () => moveWorkflow(-1));
 els.workflowNext.addEventListener("click", () => moveWorkflow(1));

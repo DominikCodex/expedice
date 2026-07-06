@@ -709,11 +709,27 @@ select:focus {
   text-transform: uppercase;
 }
 
-.workflow-expedition-number strong {
+.workflow-expedition-number strong,
+.workflow-expedition-number input {
   color: #000;
   font-family: Georgia, "Times New Roman", serif;
   font-size: 34px;
   line-height: 1;
+}
+
+.workflow-expedition-number input {
+  width: 100%;
+  min-height: 38px;
+  padding: 0;
+  text-align: center;
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+}
+
+.workflow-expedition-number input:focus {
+  outline: 2px solid rgba(29, 139, 95, 0.35);
+  outline-offset: 2px;
 }
 
 .workflow-grid {
