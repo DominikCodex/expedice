@@ -217,6 +217,7 @@ const els = {
   expeditionTrashToggle: document.getElementById("expedition-trash-toggle"),
   expeditionShowInactive: document.getElementById("show-inactive-datasets"),
   expeditionDaySummary: document.getElementById("expedition-day-summary"),
+  expeditionBatchReport: document.getElementById("expedition-batch-report"),
   tabSorting: document.getElementById("tab-sorting"),
   tabCompletion: document.getElementById("tab-completion"),
   tabEans: document.getElementById("tab-eans"),
@@ -1025,6 +1026,88 @@ function datasetInfoHtml(dataset) {
   `;
 }
 
+function countUniqueOrders(rows) {
+  const orders = new Set();
+  let fallback = 0;
+  (rows || []).forEach((row) => {
+    const orderNumber = String(row?.orderNumber || "").trim();
+    if (orderNumber) {
+      orders.add(orderNumber);
+    } else {
+      fallback += 1;
+    }
+  });
+  return orders.size + fallback;
+}
+
+function batchReportMetricHtml(label, value, tone = "") {
+  return `
+    <div class="batch-report-metric ${escapeHtml(tone)}">
+      <strong>${escapeHtml(value)}</strong>
+      <span>${escapeHtml(label)}</span>
+    </div>
+  `;
+}
+
+function renderExpeditionBatchReport() {
+  if (!els.expeditionBatchReport) return;
+  if (!hasSelectedExpeditionDay()) {
+    els.expeditionBatchReport.classList.add("hidden");
+    els.expeditionBatchReport.innerHTML = "";
+    return;
+  }
+
+  const rows = completionState.rows || [];
+  const flowCounts = completionFlowCounts(rows);
+  const pieces = rows.reduce((total, row) => total + (workflowQuantityFromValue(row?.quantity || row?.amount) || 0), 0);
+  const addressRows = rows.filter((row) => completionRequiresAddressValidation(row));
+  const addressErrors = addressRows.filter((row) => completionAddressHasError(row)).length;
+  const paymentWarnings = rows.filter((row) => ["warning", "danger"].includes(paymentCheckTone(row))).length;
+  const statusErrors = rows.filter((row) => normalize(row?.completionStatus || "").includes("error")).length;
+  const sortingRows = state.items || [];
+  const sortingRemaining = sortingRows.reduce((total, item) => total + Math.max(0, Math.trunc(toNumber(item.remaining, 0))), 0);
+  const completionDataset = completionState.dataset;
+  const sortingDataset = sortingState.dataset;
+  const hasCompletionRows = rows.length > 0;
+
+  const title = completionDataset
+    ? `${completionDataset.batchName || completionDataset.datasetDate || "Kompletace"} ${completionDataset.datasetTime || ""}`.trim()
+    : "Kompletace není načtená";
+  const rowsFallback = completionDataset?.rowsCount || 0;
+  const ordersValue = hasCompletionRows ? countUniqueOrders(rows) : rowsFallback || "-";
+  const piecesValue = hasCompletionRows ? pieces : "-";
+
+  const notes = [];
+  if (completionDataset) {
+    notes.push(`${completionDataset.shopName || completionDataset.shopCode || "e-shop neurčen"} | ${completionDataset.rowsCount || rows.length || 0} řádků`);
+  }
+  if (sortingDataset) {
+    notes.push(`Roztřídění: ${sortingRows.length || sortingDataset.rowsCount || 0} řádků, zbývá ${sortingRemaining} ks`);
+  }
+  if (statusErrors) notes.push(`Error stav: ${statusErrors}`);
+  if (flowCounts.unknown) notes.push(`Neurčený typ práce: ${flowCounts.unknown}`);
+  if (!completionDataset && !sortingDataset) {
+    notes.push("Pro vybraný den zatím není načtená aktivní dávka.");
+  }
+
+  els.expeditionBatchReport.innerHTML = `
+    <div class="batch-report-head">
+      <span>Report vybrané várky</span>
+      <strong>${escapeHtml(title)}</strong>
+    </div>
+    <div class="batch-report-grid">
+      ${batchReportMetricHtml("Objednávek", ordersValue)}
+      ${batchReportMetricHtml("Kusů", piecesValue)}
+      ${batchReportMetricHtml("Skladovek", hasCompletionRows ? flowCounts.stock : "-")}
+      ${batchReportMetricHtml("Z roztřídění", hasCompletionRows ? flowCounts.sorting : "-")}
+      ${batchReportMetricHtml("Chybné adresy", hasCompletionRows ? addressErrors : "-", addressErrors ? "danger" : "")}
+      ${batchReportMetricHtml("Platby k řešení", hasCompletionRows ? paymentWarnings : "-", paymentWarnings ? "warning" : "")}
+    </div>
+    <p class="batch-report-note">${notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</p>
+  `;
+  els.expeditionBatchReport.classList.remove("hidden");
+}
+
 function expeditionQuery(params = {}) {
   const query = new URLSearchParams();
   if (isAdmin() && expeditionState.showInactive) query.set("includeDeleted", "1");
@@ -1081,6 +1164,7 @@ function clearSelectedExpeditionDayData(options = {}) {
   els.scanResult?.classList.add("hidden");
   els.candidatesPanel?.classList.add("hidden");
   if (els.expeditionDeleteDay) els.expeditionDeleteDay.disabled = true;
+  renderExpeditionBatchReport();
   hidePacketaDryRunResult();
   setMessage("Vyber expediční den vlevo.", "neutral");
   setCompletionMessage("Vyber expediční den vlevo.", "neutral");
@@ -1267,6 +1351,14 @@ async function loadExpeditionDay(dayDate) {
   completionState.datasets = data.completion || [];
   sortingState.loaded = true;
   completionState.loaded = true;
+  sortingState.dataset = null;
+  completionState.dataset = null;
+  completionState.rows = [];
+  completionWorkflowState.row = null;
+  completionWorkflowState.index = -1;
+  completionWorkflowState.checkedItemKeys = new Set();
+  expandedCompletionRows.clear();
+  stopWorkflowSortingAutoRefresh();
 
   if (!expeditionState.day?.date) {
     clearSelectedExpeditionDayData();
@@ -1292,6 +1384,7 @@ async function loadExpeditionDay(dayDate) {
 
   renderSortingOptions();
   renderCompletionOptions();
+  renderExpeditionBatchReport();
 
   if (data.activeSorting?.dataset) {
     applySortingDataset(data.activeSorting.dataset, data.activeSorting.rows || []);
@@ -1309,6 +1402,7 @@ async function loadExpeditionDay(dayDate) {
     completionWorkflowState.row = null;
     completionWorkflowState.index = -1;
     renderCompletionOptions();
+    renderExpeditionBatchReport();
     renderWorkflow();
     renderCompletion();
     setCompletionMessage("Pro vybraný expediční den není nahraná kompletace.", "warning");
@@ -1360,6 +1454,7 @@ function applySortingDataset(dataset, rows) {
   activeCandidates = [];
   saveState();
   renderSortingOptions();
+  renderExpeditionBatchReport();
   renderAll();
   ensureProductImagesForCodes(collectProductImageCodesFromItems(nextItems));
   setMessage(`Načteno roztřídění: ${datasetLabel(sortingState.dataset)}.`, "success");
@@ -1487,6 +1582,7 @@ function applyCompletionDataset(dataset, rows) {
   expandedCompletionRows.clear();
   hidePacketaDryRunResult();
   renderCompletionOptions();
+  renderExpeditionBatchReport();
   renderWorkflow();
   renderCompletion();
   ensureProductImagesForCodes(collectCompletionProductImageCodes(completionState.rows));
@@ -4775,6 +4871,7 @@ function openWorkflowOrder() {
 
 function renderCompletion() {
   const allRows = completionState.rows;
+  renderExpeditionBatchReport();
   renderCompletionFilterOptions(allRows);
   const rows = filteredCompletionRows();
   els.completionRowCount.textContent = `${rows.length} / ${allRows.length} řádků`;

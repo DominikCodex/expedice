@@ -473,6 +473,88 @@ select:focus {
   font-weight: 700;
 }
 
+.batch-report {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  color: #173529;
+  background: #fff;
+  border: 1px solid #d5e5dd;
+  border-left: 5px solid var(--accent);
+  border-radius: 8px;
+}
+
+.batch-report-head {
+  display: grid;
+  gap: 2px;
+}
+
+.batch-report-head span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 950;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.batch-report-head strong {
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.2;
+}
+
+.batch-report-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.batch-report-metric {
+  display: grid;
+  gap: 1px;
+  min-height: 48px;
+  align-content: center;
+  padding: 7px;
+  background: #f6faf8;
+  border: 1px solid #dfe9e4;
+  border-radius: 7px;
+}
+
+.batch-report-metric strong {
+  color: var(--accent-dark);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.batch-report-metric span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.batch-report-metric.warning strong {
+  color: var(--warning);
+}
+
+.batch-report-metric.danger strong {
+  color: var(--danger);
+}
+
+.batch-report-note {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-top: 2px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.35;
+}
+
+.batch-report-note span {
+  display: block;
+}
+
 .tab-button {
   min-width: 150px;
   color: var(--text);
