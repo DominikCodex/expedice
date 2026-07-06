@@ -162,6 +162,13 @@ const UI_FONT_OPTIONS = {
   },
 };
 
+const COMPLETION_DENSITY_OPTIONS = {
+  auto: "Automaticky",
+  comfortable: "Pohodlné",
+  warehouse: "Skladové",
+  ultra: "Ultra kompaktní",
+};
+
 const usersState = {
   users: [],
   loaded: false,
@@ -291,6 +298,7 @@ const els = {
   settingsSave: document.getElementById("settings-save"),
   settingsMessage: document.getElementById("settings-message"),
   settingsUiFont: document.getElementById("settings-ui-font"),
+  settingsCompletionDensity: document.getElementById("settings-completion-density"),
   settingsUiFontPreview: document.getElementById("settings-ui-font-preview"),
   settingsStatusFont: document.getElementById("settings-status-font"),
   settingsStatusProductFeed: document.getElementById("settings-status-product-feed"),
@@ -362,18 +370,28 @@ function uiFontKey(value) {
   return UI_FONT_OPTIONS[value] ? value : "system";
 }
 
+function completionDensityKey(value) {
+  return COMPLETION_DENSITY_OPTIONS[value] ? value : "auto";
+}
+
 function applyAppearanceSettings(settings = {}) {
   const appearance = settings.appearance || {};
   const fontKey = uiFontKey(appearance.font);
+  const densityKey = completionDensityKey(appearance.completionDensity);
   const font = UI_FONT_OPTIONS[fontKey];
   document.documentElement.style.setProperty("--app-font-family", font.stack);
   document.documentElement.dataset.uiFont = fontKey;
+  document.documentElement.dataset.completionDensity = densityKey;
   if (els.settingsUiFont) {
     els.settingsUiFont.value = fontKey;
   }
+  if (els.settingsCompletionDensity) {
+    els.settingsCompletionDensity.value = densityKey;
+  }
   if (els.settingsUiFontPreview) {
     els.settingsUiFontPreview.style.fontFamily = font.stack;
-    els.settingsUiFontPreview.textContent = `${font.label}: Přehledné roztřídění 03019-MBH-LXL-UPE`;
+    els.settingsUiFontPreview.textContent =
+      `${font.label} / ${COMPLETION_DENSITY_OPTIONS[densityKey]}: Přehledné roztřídění 03019-MBH-LXL-UPE`;
   }
 }
 
@@ -2292,6 +2310,7 @@ function storedCount(items) {
 function renderSettingsOverview(settings, context = {}) {
   const appearance = settings.appearance || {};
   const fontKey = uiFontKey(appearance.font);
+  const densityKey = completionDensityKey(appearance.completionDensity);
   const productFeed = context.productFeed || settings.productFeed || {};
   const paymentIveronika = context.paymentIveronika || {};
   const paymentIveronikaSk = context.paymentIveronikaSk || {};
@@ -2304,7 +2323,11 @@ function renderSettingsOverview(settings, context = {}) {
   const dpdGalantra = context.dpdGalantra || {};
   const printAgent = context.printAgent || settings.printAgent || {};
 
-  setSettingsStatus(els.settingsStatusFont, UI_FONT_OPTIONS[fontKey].label, "ok");
+  setSettingsStatus(
+    els.settingsStatusFont,
+    `${UI_FONT_OPTIONS[fontKey].label} / ${COMPLETION_DENSITY_OPTIONS[densityKey]}`,
+    "ok"
+  );
   setSettingsStatus(
     els.settingsStatusProductFeed,
     productFeed.hasUrl
@@ -2502,6 +2525,7 @@ function collectSettings() {
   return {
     appearance: {
       font: uiFontKey(els.settingsUiFont?.value),
+      completionDensity: completionDensityKey(els.settingsCompletionDensity?.value),
     },
     mapy: {
       apiKey: els.settingsMapyKey.value.trim(),
@@ -4583,7 +4607,6 @@ function workflowSortingCheckHtml(row) {
               <span class="workflow-product-meta">${escapeHtml(meta.join(" | ") || "Bez varianty")}</span>
               <strong class="workflow-product-qty"${quantityTitle}>${escapeHtml(initial)} ks</strong>
               <strong class="workflow-product-state">${showRemaining ? `${escapeHtml(remaining)} zbývá` : "ke kontrole"}</strong>
-              <strong class="workflow-check-action">${checked ? "Zkontrolováno" : "Klik = zkontrolovat"}</strong>
             </button>
           `;
         })
@@ -6154,8 +6177,24 @@ window.addEventListener("popstate", () => {
 });
 els.settingsSave.addEventListener("click", saveSettings);
 els.settingsUiFont?.addEventListener("change", () => {
-  applyAppearanceSettings({ appearance: { font: els.settingsUiFont.value } });
-  setSettingsStatus(els.settingsStatusFont, UI_FONT_OPTIONS[uiFontKey(els.settingsUiFont.value)].label, "ok");
+  const fontKey = uiFontKey(els.settingsUiFont.value);
+  const densityKey = completionDensityKey(els.settingsCompletionDensity?.value);
+  applyAppearanceSettings({ appearance: { font: fontKey, completionDensity: densityKey } });
+  setSettingsStatus(
+    els.settingsStatusFont,
+    `${UI_FONT_OPTIONS[fontKey].label} / ${COMPLETION_DENSITY_OPTIONS[densityKey]}`,
+    "ok"
+  );
+});
+els.settingsCompletionDensity?.addEventListener("change", () => {
+  const fontKey = uiFontKey(els.settingsUiFont?.value);
+  const densityKey = completionDensityKey(els.settingsCompletionDensity.value);
+  applyAppearanceSettings({ appearance: { font: fontKey, completionDensity: densityKey } });
+  setSettingsStatus(
+    els.settingsStatusFont,
+    `${UI_FONT_OPTIONS[fontKey].label} / ${COMPLETION_DENSITY_OPTIONS[densityKey]}`,
+    "ok"
+  );
 });
 els.productFeedTest.addEventListener("click", testProductFeed);
 els.usersRefresh.addEventListener("click", loadUsers);

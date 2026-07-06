@@ -158,9 +158,10 @@ button:disabled {
 .topbar {
   display: grid;
   grid-template-columns: minmax(280px, 1fr) auto auto;
-  gap: 16px;
+  gap: 10px;
   align-items: center;
-  padding: 16px;
+  min-height: 56px;
+  padding: 8px 10px;
   background: var(--surface);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -183,7 +184,8 @@ h2 {
 }
 
 h1 {
-  font-size: 26px;
+  font-size: clamp(20px, 1.5vw, 24px);
+  line-height: 1.08;
 }
 
 h2 {
@@ -192,13 +194,13 @@ h2 {
 
 .metrics {
   display: grid;
-  grid-template-columns: repeat(4, minmax(98px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(4, minmax(78px, 1fr));
+  gap: 6px;
 }
 
 .metrics div {
-  min-width: 98px;
-  padding: 10px 12px;
+  min-width: 78px;
+  padding: 6px 8px;
   background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: 7px;
@@ -206,7 +208,8 @@ h2 {
 
 .metrics span {
   display: block;
-  font-size: 23px;
+  font-size: 20px;
+  line-height: 1;
   font-weight: 800;
 }
 
@@ -243,11 +246,11 @@ h2 {
 
 .user-panel {
   display: flex;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   justify-content: flex-end;
-  min-width: 230px;
-  padding: 8px 10px;
+  min-width: 0;
+  padding: 5px 6px;
   background: var(--surface-2);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -260,12 +263,16 @@ h2 {
 }
 
 .user-panel button {
-  min-height: 32px;
-  padding: 5px 8px;
+  min-height: 28px;
+  padding: 4px 8px;
 }
 
 .metrics small {
+  display: block;
+  margin-top: 2px;
   color: var(--muted);
+  font-size: 11px;
+  line-height: 1.05;
 }
 
 .control-strip {
@@ -1906,6 +1913,434 @@ select:focus {
   .workflow-product-state,
   .workflow-check-action {
     justify-self: stretch;
+  }
+}
+
+.completion-workflow-panel.warehouse-cockpit {
+  --cockpit-gap: clamp(6px, 0.75cqw, 12px);
+  --cockpit-pad: clamp(8px, 0.8cqw, 14px);
+  --cockpit-title-min: clamp(50px, 4.6cqw, 68px);
+  --cockpit-title-dot: clamp(30px, 2.7cqw, 38px);
+  --cockpit-action-min: 128px;
+  --cockpit-action-height: clamp(34px, 3.1cqw, 44px);
+  --cockpit-status-min: clamp(42px, 4.5cqw, 58px);
+  --cockpit-status-font: clamp(24px, 3.2cqw, 46px);
+  --cockpit-item-image: clamp(38px, 4cqw, 60px);
+  --cockpit-item-min: clamp(44px, 4.6cqw, 56px);
+  --cockpit-item-pad-y: clamp(5px, 0.55cqw, 8px);
+  --cockpit-item-pad-x: clamp(6px, 0.7cqw, 10px);
+  --cockpit-check-size: clamp(26px, 2.6cqw, 32px);
+  --cockpit-code-font: clamp(12px, 1.1cqw, 16px);
+  --cockpit-name-font: clamp(12px, 1.06cqw, 15px);
+  --cockpit-meta-font: clamp(10px, 0.95cqw, 13px);
+  container-type: inline-size;
+  gap: var(--cockpit-gap);
+  padding: var(--cockpit-pad);
+  overflow: hidden;
+}
+
+html[data-completion-density="comfortable"] .completion-workflow-panel.warehouse-cockpit {
+  --cockpit-gap: clamp(8px, 0.85cqw, 14px);
+  --cockpit-pad: clamp(10px, 0.95cqw, 16px);
+  --cockpit-title-min: clamp(58px, 5.4cqw, 78px);
+  --cockpit-action-min: 150px;
+  --cockpit-action-height: clamp(40px, 3.6cqw, 52px);
+  --cockpit-status-min: clamp(52px, 5.2cqw, 72px);
+  --cockpit-status-font: clamp(28px, 3.6cqw, 54px);
+  --cockpit-item-image: clamp(44px, 4.4cqw, 66px);
+  --cockpit-item-min: clamp(52px, 5cqw, 66px);
+}
+
+html[data-completion-density="warehouse"] .completion-workflow-panel.warehouse-cockpit {
+  --cockpit-gap: clamp(5px, 0.65cqw, 10px);
+  --cockpit-pad: clamp(7px, 0.7cqw, 12px);
+  --cockpit-title-min: clamp(46px, 4.1cqw, 60px);
+  --cockpit-action-min: 118px;
+  --cockpit-action-height: clamp(32px, 2.9cqw, 40px);
+  --cockpit-status-min: clamp(38px, 3.8cqw, 50px);
+  --cockpit-status-font: clamp(22px, 2.8cqw, 38px);
+  --cockpit-item-image: clamp(38px, 3.6cqw, 54px);
+  --cockpit-item-min: clamp(44px, 4.2cqw, 54px);
+}
+
+html[data-completion-density="ultra"] .completion-workflow-panel.warehouse-cockpit {
+  --cockpit-gap: clamp(4px, 0.55cqw, 8px);
+  --cockpit-pad: clamp(6px, 0.6cqw, 10px);
+  --cockpit-title-min: clamp(40px, 3.6cqw, 52px);
+  --cockpit-title-dot: clamp(24px, 2.2cqw, 30px);
+  --cockpit-action-min: 104px;
+  --cockpit-action-height: clamp(29px, 2.6cqw, 36px);
+  --cockpit-status-min: clamp(34px, 3.2cqw, 44px);
+  --cockpit-status-font: clamp(20px, 2.45cqw, 32px);
+  --cockpit-item-image: clamp(34px, 3.1cqw, 46px);
+  --cockpit-item-min: clamp(40px, 3.8cqw, 48px);
+  --cockpit-code-font: clamp(11px, 1cqw, 14px);
+  --cockpit-name-font: clamp(11px, 1cqw, 14px);
+  --cockpit-meta-font: clamp(9px, 0.9cqw, 11px);
+}
+
+.completion-workflow-panel.warehouse-cockpit,
+.completion-workflow-panel.warehouse-cockpit * {
+  min-width: 0;
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-scan-zone {
+  grid-template-columns: minmax(150px, 0.42fr) minmax(220px, 1fr) minmax(150px, 0.44fr) minmax(132px, 0.36fr);
+  gap: var(--cockpit-gap);
+  justify-content: stretch;
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-zone-title {
+  min-height: var(--cockpit-title-min);
+  padding: clamp(6px, 0.65cqw, 10px);
+  gap: clamp(6px, 0.65cqw, 10px);
+  border-radius: 10px;
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-zone-title > span {
+  flex-basis: var(--cockpit-title-dot);
+  width: var(--cockpit-title-dot);
+  height: var(--cockpit-title-dot);
+  font-size: clamp(13px, 1.35cqw, 18px);
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-zone-title p {
+  font-size: clamp(9px, 0.8cqw, 11px);
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-zone-title strong {
+  font-size: clamp(14px, 1.25cqw, 18px);
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-scan-field,
+.completion-workflow-panel.warehouse-cockpit .cockpit-expedition-number,
+.completion-workflow-panel.warehouse-cockpit .cockpit-nav-actions button {
+  min-height: var(--cockpit-title-min);
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-scan-field input {
+  height: clamp(36px, 3.6cqw, 46px);
+  font-size: clamp(20px, 2cqw, 28px);
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-expedition-number {
+  padding: clamp(4px, 0.55cqw, 8px) clamp(8px, 0.8cqw, 14px);
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-expedition-number input {
+  min-height: clamp(34px, 3.8cqw, 58px);
+  font-size: clamp(38px, 4.6cqw, 76px);
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-nav-actions {
+  gap: clamp(4px, 0.55cqw, 8px);
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-nav-actions button {
+  font-size: clamp(12px, 1cqw, 15px);
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-grid.cockpit-main-grid {
+  grid-template-columns: minmax(250px, 0.42fr) minmax(0, 1.58fr);
+  gap: var(--cockpit-gap);
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-order-card,
+.completion-workflow-panel.warehouse-cockpit .cockpit-control-card {
+  gap: var(--cockpit-gap);
+  min-height: 0;
+  padding: var(--cockpit-pad);
+  border-radius: 12px;
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-control-card {
+  container-type: inline-size;
+  align-content: start;
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-order-card > strong {
+  padding: clamp(6px, 0.65cqw, 10px);
+  font-size: clamp(24px, 2.45cqw, 42px);
+  line-height: 1.04;
+  overflow-wrap: anywhere;
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-order-card > span,
+.completion-workflow-panel.warehouse-cockpit .cockpit-order-card .workflow-order-line {
+  padding: clamp(6px, 0.65cqw, 10px);
+  font-size: clamp(14px, 1.3cqw, 20px);
+  line-height: 1.15;
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-order-card .workflow-order-line {
+  grid-template-columns: minmax(90px, auto) minmax(0, 1fr);
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-order-card .workflow-order-line b {
+  font-size: clamp(15px, 1.35cqw, 22px);
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-order-card .workflow-pieces {
+  padding: clamp(6px, 0.65cqw, 10px);
+  font-size: clamp(34px, 4.2cqw, 68px);
+}
+
+.completion-workflow-panel.warehouse-cockpit .cockpit-order-card .workflow-cod,
+.completion-workflow-panel.warehouse-cockpit .cockpit-order-card .workflow-country {
+  padding: clamp(6px, 0.65cqw, 10px);
+  font-size: clamp(15px, 1.45cqw, 24px);
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-actions.cockpit-actions {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, var(--cockpit-action-min)), 1fr));
+  gap: clamp(5px, 0.55cqw, 8px);
+  margin-bottom: 0;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-actions.cockpit-actions button {
+  min-height: var(--cockpit-action-height);
+  padding: clamp(4px, 0.45cqw, 7px) clamp(6px, 0.65cqw, 10px);
+  gap: clamp(4px, 0.45cqw, 8px);
+  font-size: clamp(11px, 0.92cqw, 14px);
+  line-height: 1.05;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-action-icon {
+  flex-basis: clamp(16px, 1.45cqw, 22px);
+  width: clamp(16px, 1.45cqw, 22px);
+  height: clamp(16px, 1.45cqw, 22px);
+  background-size: clamp(13px, 1.2cqw, 18px) clamp(13px, 1.2cqw, 18px);
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-status {
+  display: grid;
+  min-height: var(--cockpit-status-min);
+  place-items: center;
+  padding: clamp(4px, 0.55cqw, 8px) clamp(6px, 0.8cqw, 12px);
+  font-size: var(--cockpit-status-font);
+  line-height: 1;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-items {
+  gap: clamp(4px, 0.55cqw, 8px);
+  min-height: 0;
+  max-height: clamp(260px, calc(100dvh - 300px), 620px);
+  padding: clamp(6px, 0.65cqw, 10px);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-sorting-check {
+  gap: clamp(4px, 0.55cqw, 8px);
+  margin-top: 0;
+  padding: clamp(6px, 0.65cqw, 10px);
+  border-radius: 10px;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-sorting-head {
+  gap: 1px;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-sorting-head strong {
+  font-size: clamp(17px, 1.45cqw, 22px);
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-sorting-head span {
+  font-size: clamp(10px, 0.9cqw, 12px);
+  line-height: 1.18;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-sorting-list {
+  gap: clamp(4px, 0.5cqw, 7px);
+  overflow-x: hidden;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-sorting-item {
+  grid-template-columns:
+    var(--cockpit-check-size)
+    var(--cockpit-item-image)
+    minmax(84px, 0.72fr)
+    minmax(130px, 1.45fr)
+    minmax(84px, 0.68fr)
+    minmax(42px, auto)
+    minmax(54px, auto);
+  gap: clamp(5px, 0.55cqw, 8px);
+  min-height: var(--cockpit-item-min);
+  padding: var(--cockpit-item-pad-y) var(--cockpit-item-pad-x);
+  border-left-width: 4px;
+  border-radius: 8px;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-check-box {
+  width: var(--cockpit-check-size);
+  height: var(--cockpit-check-size);
+  border-radius: 7px;
+  font-size: clamp(8px, 0.75cqw, 10px);
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-product-image,
+.completion-workflow-panel.warehouse-cockpit .workflow-product-image-placeholder {
+  width: var(--cockpit-item-image);
+  height: var(--cockpit-item-image);
+  border-radius: 7px;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-product-code,
+.completion-workflow-panel.warehouse-cockpit .workflow-product-name,
+.completion-workflow-panel.warehouse-cockpit .workflow-product-meta {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-product-code {
+  -webkit-line-clamp: 2;
+  font-size: var(--cockpit-code-font);
+  line-height: 1.12;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-product-name {
+  -webkit-line-clamp: 2;
+  font-size: var(--cockpit-name-font);
+  line-height: 1.14;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-product-meta {
+  -webkit-line-clamp: 2;
+  font-size: var(--cockpit-meta-font);
+  line-height: 1.14;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-product-qty {
+  min-width: clamp(42px, 3.6cqw, 58px);
+  padding: clamp(4px, 0.45cqw, 7px) clamp(6px, 0.6cqw, 10px);
+  font-size: clamp(12px, 1.05cqw, 16px);
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-product-state {
+  justify-self: center;
+  color: #52675d;
+  font-size: clamp(10px, 0.9cqw, 12px);
+  line-height: 1.05;
+  text-align: center;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-check-action {
+  display: none;
+}
+
+.completion-workflow-panel.warehouse-cockpit .workflow-warning {
+  padding: clamp(6px, 0.65cqw, 10px);
+  font-size: clamp(17px, 1.5cqw, 24px);
+}
+
+@container (max-width: 1120px) {
+  .completion-workflow-panel.warehouse-cockpit .workflow-grid.cockpit-main-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit .cockpit-order-card {
+    grid-template-columns: minmax(180px, 1.45fr) minmax(130px, 0.9fr) minmax(130px, 0.9fr) minmax(110px, 0.7fr);
+    align-items: stretch;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit .cockpit-order-card .cockpit-zone-title {
+    grid-column: 1 / -1;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit #workflow-customer-name {
+    grid-column: 1 / 3;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit #workflow-street {
+    grid-column: 3 / 4;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit #workflow-city {
+    grid-column: 4 / 5;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit .workflow-order-line {
+    grid-column: 1 / 3;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit .workflow-pieces {
+    grid-column: 3 / 4;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit .workflow-cod {
+    grid-column: 4 / 5;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit .workflow-country {
+    grid-column: 1 / -1;
+  }
+}
+
+@container (max-width: 900px) {
+  .completion-workflow-panel.warehouse-cockpit .cockpit-scan-zone {
+    grid-template-columns: minmax(150px, 0.7fr) minmax(220px, 1.3fr) minmax(132px, 0.58fr);
+  }
+
+  .completion-workflow-panel.warehouse-cockpit .cockpit-nav-actions {
+    grid-column: 1 / -1;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .completion-workflow-panel.warehouse-cockpit .workflow-actions.cockpit-actions {
+    grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  }
+}
+
+@container (max-width: 760px) {
+  .completion-workflow-panel.warehouse-cockpit .cockpit-scan-zone,
+  .completion-workflow-panel.warehouse-cockpit .cockpit-order-card {
+    grid-template-columns: 1fr;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit #workflow-customer-name,
+  .completion-workflow-panel.warehouse-cockpit #workflow-street,
+  .completion-workflow-panel.warehouse-cockpit #workflow-city,
+  .completion-workflow-panel.warehouse-cockpit .workflow-order-line,
+  .completion-workflow-panel.warehouse-cockpit .workflow-pieces,
+  .completion-workflow-panel.warehouse-cockpit .workflow-cod,
+  .completion-workflow-panel.warehouse-cockpit .workflow-country {
+    grid-column: auto;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit .workflow-sorting-item {
+    grid-template-columns: var(--cockpit-check-size) var(--cockpit-item-image) minmax(0, 1fr) auto;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit .workflow-product-code {
+    grid-column: 3;
+    grid-row: 1;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit .workflow-product-name {
+    grid-column: 3;
+    grid-row: 2;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit .workflow-product-meta {
+    grid-column: 3;
+    grid-row: 3;
+    -webkit-line-clamp: 1;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit .workflow-product-qty {
+    grid-column: 4;
+    grid-row: 1 / span 2;
+    align-self: center;
+  }
+
+  .completion-workflow-panel.warehouse-cockpit .workflow-product-state {
+    grid-column: 4;
+    grid-row: 3;
   }
 }
 

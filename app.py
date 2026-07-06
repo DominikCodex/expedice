@@ -51,6 +51,8 @@ PRODUCT_FEED_MIN_DOWNLOAD_MB = 50
 PRODUCT_FEED_MAX_DOWNLOAD_MB = 1024
 APP_UI_FONT_DEFAULT = "system"
 APP_UI_FONT_CHOICES = {"system", "segoe", "aptos", "inter", "arial", "verdana", "tahoma", "roboto", "lexend", "georgia"}
+APP_COMPLETION_DENSITY_DEFAULT = "auto"
+APP_COMPLETION_DENSITY_CHOICES = {"auto", "comfortable", "warehouse", "ultra"}
 PRODUCT_IMAGE_CACHE_SECONDS = 12 * 60 * 60
 PRODUCT_IMAGE_REQUEST_CODE_LIMIT = 10000
 PRODUCT_IMAGE_CACHE_LOCK = threading.Lock()
@@ -1997,6 +1999,7 @@ def default_settings():
     return {
         "appearance": {
             "font": ui_font,
+            "completionDensity": APP_COMPLETION_DENSITY_DEFAULT,
         },
         "mapy": {
             "apiKey": os.environ.get("MAPY_API_KEY", ""),
@@ -2123,6 +2126,10 @@ def normalize_appearance_settings(settings):
     if font not in APP_UI_FONT_CHOICES:
         font = APP_UI_FONT_DEFAULT
     normalized["font"] = font
+    completion_density = clean_text(source.get("completionDensity") or APP_COMPLETION_DENSITY_DEFAULT).strip().lower()
+    if completion_density not in APP_COMPLETION_DENSITY_CHOICES:
+        completion_density = APP_COMPLETION_DENSITY_DEFAULT
+    normalized["completionDensity"] = completion_density
     return normalized
 
 
