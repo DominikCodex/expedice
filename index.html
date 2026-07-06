@@ -4,11 +4,21 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Roztřídění zboží</title>
-    <link rel="stylesheet" href="styles.css?v=ean-weight-20260702" />
+    <link rel="stylesheet" href="styles.css?v=global-progress-20260706" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=ean-sequential-scan-20260702"></script>
+    <script defer src="app.js?v=global-progress-20260706"></script>
   </head>
   <body>
+    <aside id="global-progress" class="global-progress hidden" role="status" aria-live="polite" aria-atomic="true">
+      <div class="global-progress-text">
+        <strong id="global-progress-label">Načítám data...</strong>
+        <span id="global-progress-detail">Chvilku strpení.</span>
+      </div>
+      <div class="global-progress-track" aria-hidden="true">
+        <span></span>
+      </div>
+    </aside>
+
     <section id="auth-view" class="auth-view">
       <div class="auth-card">
         <div class="auth-brand">

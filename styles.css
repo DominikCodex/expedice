@@ -659,6 +659,72 @@ select:focus {
   border-color: #e6b9b9;
 }
 
+.global-progress {
+  position: fixed;
+  top: 18px;
+  left: 50%;
+  z-index: 1000;
+  display: grid;
+  width: min(420px, calc(100vw - 28px));
+  gap: 8px;
+  padding: 12px 14px;
+  color: #10251d;
+  background: rgba(255, 255, 255, 0.98);
+  border: 1px solid #bddbce;
+  border-left: 5px solid var(--accent);
+  border-radius: 10px;
+  box-shadow: 0 18px 48px rgba(22, 34, 28, 0.18);
+  transform: translateX(-50%);
+  pointer-events: none;
+}
+
+.global-progress-text {
+  display: grid;
+  gap: 2px;
+}
+
+.global-progress-text strong {
+  font-size: 15px;
+  font-weight: 950;
+}
+
+.global-progress-text span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.global-progress-track {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  background: #e7f2ed;
+  border-radius: 999px;
+}
+
+.global-progress-track span {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 42%;
+  background: linear-gradient(90deg, #0f6a4d, #2ca879);
+  border-radius: inherit;
+  animation: global-progress-slide 1s ease-in-out infinite;
+}
+
+@keyframes global-progress-slide {
+  0% {
+    transform: translateX(-110%);
+  }
+
+  50% {
+    transform: translateX(75%);
+  }
+
+  100% {
+    transform: translateX(245%);
+  }
+}
+
 .hidden {
   display: none !important;
 }

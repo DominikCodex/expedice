@@ -3,6 +3,7 @@ const MAX_HISTORY = 500;
 const EAN_AUDIT_RENDER_LIMIT = 500;
 const EMPLOYEE_DAY_LOCK_KEY = "expedition-employee-day-lock-v1";
 const EMPLOYEE_DAY_LOCK_MS = 10 * 60 * 60 * 1000;
+const GLOBAL_PROGRESS_DELAY_MS = 300;
 
 const seed = window.SORTING_SEED || { items: [], eanMap: {}, summary: {} };
 
@@ -91,6 +92,11 @@ const authState = {
   appStarted: false,
 };
 
+const globalProgressState = {
+  nextId: 1,
+  active: new Map(),
+};
+
 const VIEW_ROUTES = {
   sorting: "/roztrideni",
   completion: "/kompletace",
@@ -166,6 +172,9 @@ const employeeDayLockState = {
 };
 
 const els = {
+  globalProgress: document.getElementById("global-progress"),
+  globalProgressLabel: document.getElementById("global-progress-label"),
+  globalProgressDetail: document.getElementById("global-progress-detail"),
   appShell: document.getElementById("app-shell"),
   authView: document.getElementById("auth-view"),
   loginForm: document.getElementById("login-form"),
@@ -558,30 +567,91 @@ function setSettingsMessage(text, type = "neutral") {
   els.settingsMessage.textContent = text;
 }
 
+function progressLabelForRequest(path, options = {}) {
+  const method = String(options.method || "GET").toUpperCase();
+  const text = String(path || "");
+  if (text.includes("/api/expedition-days")) return "Načítám expediční dny...";
+  if (text.includes("/api/datasets")) return "Načítám dávku...";
+  if (text.includes("/api/settings")) return method === "GET" ? "Načítám nastavení..." : "Ukládám nastavení...";
+  if (text.includes("/api/product-feed/check")) return "Ověřuji produktový feed...";
+  if (text.includes("/api/product-images")) return "Načítám obrázky produktů...";
+  if (text.includes("/api/payment-feeds/sync")) return "Páruji platby...";
+  if (text.includes("/api/address/validate")) return "Ověřuji adresu...";
+  if (text.includes("/api/packeta")) return "Komunikuji se Zásilkovnou...";
+  if (text.includes("/api/dpd")) return "Komunikuji s DPD...";
+  if (text.includes("/api/labels")) return "Připravuji štítky...";
+  if (text.includes("/api/users")) return "Načítám uživatele...";
+  if (method !== "GET") return "Zpracovávám požadavek...";
+  return "Načítám data...";
+}
+
+function renderGlobalProgress() {
+  if (!els.globalProgress) return;
+  const visible = Array.from(globalProgressState.active.values()).filter((entry) => entry.visible);
+  els.globalProgress.classList.toggle("hidden", !visible.length);
+  if (!visible.length) return;
+
+  const latest = visible[visible.length - 1];
+  els.globalProgressLabel.textContent = latest.label || "Načítám data...";
+  els.globalProgressDetail.textContent = visible.length > 1 ? `Běží ${visible.length} požadavky.` : "Chvilku strpení.";
+}
+
+function beginGlobalProgress(label) {
+  const id = globalProgressState.nextId++;
+  const entry = {
+    id,
+    label,
+    visible: false,
+    timer: window.setTimeout(() => {
+      const current = globalProgressState.active.get(id);
+      if (!current) return;
+      current.visible = true;
+      renderGlobalProgress();
+    }, GLOBAL_PROGRESS_DELAY_MS),
+  };
+  globalProgressState.active.set(id, entry);
+  return id;
+}
+
+function endGlobalProgress(id) {
+  if (!id) return;
+  const entry = globalProgressState.active.get(id);
+  if (!entry) return;
+  window.clearTimeout(entry.timer);
+  globalProgressState.active.delete(id);
+  renderGlobalProgress();
+}
+
 async function fetchJson(path, options = {}) {
-  const headers = options.body
-    ? { "Content-Type": "application/json", ...(options.headers || {}) }
-    : options.headers || {};
-  const response = await fetch(path, { cache: "no-store", ...options, headers });
-  if (!response.ok) {
-    let message = `API vrátilo chybu ${response.status}`;
-    let errorData = null;
-    try {
-      const data = await response.json();
-      errorData = data;
-      message = data.error || message;
-    } catch {
-      // Keep fallback message.
+  const { progress = true, progressLabel = "", headers: customHeaders, ...fetchOptions } = options;
+  const headers = fetchOptions.body
+    ? { "Content-Type": "application/json", ...(customHeaders || {}) }
+    : customHeaders || {};
+  const progressId = progress ? beginGlobalProgress(progressLabel || progressLabelForRequest(path, fetchOptions)) : null;
+  try {
+    const response = await fetch(path, { cache: "no-store", ...fetchOptions, headers });
+    if (!response.ok) {
+      let message = `API vrátilo chybu ${response.status}`;
+      let errorData = null;
+      try {
+        const data = await response.json();
+        errorData = data;
+        message = data.error || message;
+      } catch {
+        // Keep fallback message.
+      }
+      if (response.status === 401) {
+        showLogin("Přihlášení vypršelo nebo je potřeba se znovu přihlásit.");
+      }
+      const error = new Error(message);
+      error.status = response.status;
+      error.data = errorData;
+      throw error;
     }
-    if (response.status === 401) {
-      showLogin("Přihlášení vypršelo nebo je potřeba se znovu přihlásit.");
-    }
-    const error = new Error(message);
-    error.status = response.status;
-    error.data = errorData;
-    throw error;
+    return response.json();
+  } finally {
+    endGlobalProgress(progressId);
   }
-  return response.json();
 }
 
 function collectCompletionProductImageCodes(rows) {
@@ -2490,11 +2560,11 @@ async function pollPaymentFeedUpdates() {
     params.set("since", completionState.paymentUpdatesSince);
   }
   try {
-    const data = await fetchJson(`/api/payment-feeds/updates?${params.toString()}`);
+    const data = await fetchJson(`/api/payment-feeds/updates?${params.toString()}`, { progress: false });
     completionState.paymentUpdatesSince = data.serverTime || new Date().toISOString();
     const rows = data.rows || [];
     if (!rows.length) return;
-    await refreshCompletionRowsFromServer(datasetId);
+    await refreshCompletionRowsFromServer(datasetId, { progress: false });
     setCompletionMessage(`Platební stavy aktualizovány: ${rows.length} změn.`, "warning");
   } catch (error) {
     console.warn("Payment feed update polling failed", error);
@@ -2503,8 +2573,10 @@ async function pollPaymentFeedUpdates() {
   }
 }
 
-async function refreshCompletionRowsFromServer(datasetId) {
-  const data = await fetchJson(`/api/datasets/${encodeURIComponent(datasetId)}`);
+async function refreshCompletionRowsFromServer(datasetId, options = {}) {
+  const data = await fetchJson(`/api/datasets/${encodeURIComponent(datasetId)}`, {
+    progress: options.progress !== false,
+  });
   if (!completionState.dataset || String(completionState.dataset.id) !== String(datasetId)) return;
   completionState.dataset = data.dataset || completionState.dataset;
   completionState.rows = data.rows || [];
@@ -4326,7 +4398,7 @@ async function autoRefreshWorkflowSortingCheck() {
   const before = workflowSortingSnapshot(row);
   completionWorkflowState.sortingRefreshInFlight = true;
   try {
-    const updatedRow = await refreshWorkflowSortingCheck(row);
+    const updatedRow = await refreshWorkflowSortingCheck(row, { progress: false });
     if (!completionWorkflowState.row || String(completionWorkflowState.row.id) !== String(rowId)) return;
     const after = workflowSortingSnapshot(updatedRow);
     if (before !== after) {
@@ -4344,10 +4416,13 @@ async function autoRefreshWorkflowSortingCheck() {
   }
 }
 
-async function refreshWorkflowSortingCheck(row) {
+async function refreshWorkflowSortingCheck(row, options = {}) {
   if (!row?.id || !row?.orderNumber || completionFlowKind(row) === "unknown") return row;
   try {
-    const data = await fetchJson(`/api/completion/rows/${encodeURIComponent(row.id)}/sorting-check`);
+    const data = await fetchJson(`/api/completion/rows/${encodeURIComponent(row.id)}/sorting-check`, {
+      progress: options.progress !== false,
+      progressLabel: "Ověřuji roztřídění...",
+    });
     const sortingItems = (data.rows || []).map(sortingRowToItem);
     ensureProductImagesForCodes(collectProductImageCodesFromItems(sortingItems));
     const updatedRow = {
