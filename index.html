@@ -6,7 +6,7 @@
     <title>Roztřídění zboží</title>
     <link rel="stylesheet" href="styles.css?v=workflow-status-colors-20260706" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=workflow-status-colors-20260706"></script>
+    <script defer src="app.js?v=user-label-20260706"></script>
   </head>
   <body>
     <aside id="global-progress" class="global-progress hidden" role="status" aria-live="polite" aria-atomic="true">
@@ -913,7 +913,7 @@
                   </label>
                   <div class="print-agent-actions">
                     <button id="print-agent-test" type="button" class="secondary">Otestovat agenta</button>
-                    <a class="button-link secondary" href="print-agent.html">Instalace tisku pro zaměstnance</a>
+                    <a class="button-link secondary" href="print-agent.html">Instalace tisku pro uživatele</a>
                     <a class="button-link secondary" href="https://github.com/DominikCodex/expedice/releases/download/print-agent-latest/ExpedicePrintAgentSetup.exe" target="_blank" rel="noreferrer">Stáhnout instalátor V1</a>
                     <a class="button-link secondary" href="https://github.com/DominikCodex/expedice/releases/download/print-agent-latest/ExpedicePrintAgentUninstall.exe" target="_blank" rel="noreferrer">Stáhnout odinstalátor V1</a>
                     <a class="button-link secondary" href="print-agent/install.ps1" download>Servisní instalace PS</a>
@@ -928,7 +928,7 @@
                     <div class="settings-section-title">
                       <div>
                         <p class="eyebrow">Admin</p>
-                        <h3>Uživatelé a zaměstnanci</h3>
+                        <h3>Uživatelé</h3>
                       </div>
                       <span>Přístupy</span>
                     </div>
@@ -956,7 +956,7 @@
                   <label class="field">
                     <span>Role</span>
                     <select id="user-create-role">
-                      <option value="employee">Zaměstnanec</option>
+                      <option value="employee">Uživatel</option>
                       <option value="admin">Admin</option>
                     </select>
                   </label>

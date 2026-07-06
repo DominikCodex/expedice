@@ -1076,7 +1076,7 @@ def create_user():
     password = clean_text(data.get("password"))
     role = clean_text(data.get("role") or "employee").strip().lower()
     if role not in {"admin", "employee"}:
-        return jsonify({"error": "Role musí být admin nebo employee."}), 400
+        return jsonify({"error": "Role musí být admin nebo uživatel."}), 400
     if not username or not password:
         return jsonify({"error": "Vyplň uživatele a heslo."}), 400
     if len(password) < 4:
@@ -1119,7 +1119,7 @@ def update_user(user_id):
     if "role" in data:
         role = clean_text(data.get("role")).strip().lower()
         if role not in {"admin", "employee"}:
-            return jsonify({"error": "Role musí být admin nebo employee."}), 400
+            return jsonify({"error": "Role musí být admin nebo uživatel."}), 400
         updates.append("role = %s")
         params.append(role)
     if "active" in data:

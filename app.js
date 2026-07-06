@@ -913,7 +913,7 @@ function startAppForUser(user) {
   employeeDayLockState.choosing = false;
   els.authView.classList.add("hidden");
   els.appShell.classList.remove("hidden");
-  els.authUserName.textContent = `${user.displayName || user.username} · ${user.role === "admin" ? "admin" : "zaměstnanec"}`;
+  els.authUserName.textContent = `${user.displayName || user.username} · ${user.role === "admin" ? "admin" : "uživatel"}`;
   applyRoleVisibility();
   if (!settingsState.loaded) {
     loadSettings({ silent: true });
@@ -5021,7 +5021,7 @@ function renderUsers() {
                 </td>
                 <td>
                   <select data-action="change-user-role" data-user-id="${escapeHtml(user.id)}" ${self ? "disabled" : ""}>
-                    <option value="employee" ${user.role === "employee" ? "selected" : ""}>Zaměstnanec</option>
+                    <option value="employee" ${user.role === "employee" ? "selected" : ""}>Uživatel</option>
                     <option value="admin" ${user.role === "admin" ? "selected" : ""}>Admin</option>
                   </select>
                 </td>
@@ -5088,7 +5088,7 @@ async function patchUser(userId, payload) {
 }
 
 async function resetUserPassword(userId) {
-  const password = prompt("Zadej nové dočasné heslo pro zaměstnance:");
+  const password = prompt("Zadej nové dočasné heslo pro uživatele:");
   if (!password) return;
   try {
     await fetchJson(`/api/users/${userId}/reset-password`, {
