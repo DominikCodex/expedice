@@ -1251,7 +1251,6 @@ function renderExpeditionBatchReport() {
       ${batchReportMetricHtml("Objednávek", ordersValue)}
       ${batchReportMetricHtml("Kusů", piecesValue)}
       ${batchReportMetricHtml("Skladovek", hasCompletionRows ? flowCounts.stock : "-")}
-      ${batchReportMetricHtml("Z roztřídění", hasCompletionRows ? flowCounts.sorting : "-")}
       ${batchReportMetricHtml("Chybné adresy", hasCompletionRows ? addressErrors : "-", addressErrors ? "danger" : "")}
       ${batchReportMetricHtml("Platby k řešení", hasCompletionRows ? paymentWarnings : "-", paymentWarnings ? "warning" : "")}
     </div>
