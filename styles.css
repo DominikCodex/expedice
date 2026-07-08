@@ -915,7 +915,8 @@ select:focus {
 
 .global-progress-text {
   display: grid;
-  gap: 2px;
+  gap: 3px;
+  padding-right: 52px;
 }
 
 .global-progress-text strong {
@@ -940,24 +941,21 @@ select:focus {
 .global-progress-track span {
   position: absolute;
   inset: 0 auto 0 0;
-  width: 42%;
+  width: var(--global-progress, 0%);
   background: linear-gradient(90deg, #0f6a4d, #2ca879);
   border-radius: inherit;
-  animation: global-progress-slide 1s ease-in-out infinite;
+  transition: width 180ms ease;
 }
 
-@keyframes global-progress-slide {
-  0% {
-    transform: translateX(-110%);
-  }
-
-  50% {
-    transform: translateX(75%);
-  }
-
-  100% {
-    transform: translateX(245%);
-  }
+.global-progress-percent {
+  position: absolute;
+  right: 14px;
+  top: 13px;
+  min-width: 42px;
+  color: var(--accent-dark);
+  font-size: 13px;
+  font-weight: 950;
+  text-align: right;
 }
 
 .hidden {
