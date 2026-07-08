@@ -32,6 +32,7 @@ const expeditionState = {
 const sortingState = {
   datasets: [],
   dataset: null,
+  reportItems: [],
   loaded: false,
 };
 
@@ -39,6 +40,7 @@ const completionState = {
   datasets: [],
   dataset: null,
   rows: [],
+  stockPiecesSnapshot: null,
   loaded: false,
   paymentUpdatesSince: null,
   paymentPollInFlight: false,
@@ -1064,9 +1066,37 @@ function completionRowQuantity(row) {
   return workflowQuantityFromValue(row?.quantity || row?.amount);
 }
 
+function completionStockPiecesSnapshotKey(rows) {
+  return [
+    expeditionState.day?.date || "",
+    completionState.dataset?.id || "",
+    sortingState.dataset?.id || "",
+    rows?.length || 0,
+    sortingState.reportItems?.length || 0,
+  ].join("|");
+}
+
+function resetCompletionStockPiecesSnapshot() {
+  completionState.stockPiecesSnapshot = null;
+}
+
+function workflowSortingItemsFromSource(row, sourceItems) {
+  const orderNumber = normalize(row?.orderNumber || "").trim();
+  if (!orderNumber) return [];
+  const items = (sourceItems || []).filter((item) => normalize(item.orderNumber || "").trim() === orderNumber);
+  return applyCompletionOrderQuantitiesToSortingItems(row, items);
+}
+
+function workflowSortingItemsForReport(row) {
+  return workflowSortingItemsFromSource(row, sortingState.reportItems || []);
+}
+
 function completionSortingPiecesForRow(row) {
   if (completionFlowKind(row) !== "sorting") return 0;
-  return workflowSortingItems(row).reduce((total, item) => {
+  if (!sortingState.reportItems.length) return completionRowQuantity(row);
+  const reportItems = workflowSortingItemsForReport(row);
+  if (!reportItems.length) return completionRowQuantity(row);
+  return reportItems.reduce((total, item) => {
     const hasSortingQuantity =
       item.sortingQuantity !== undefined && item.sortingQuantity !== null && String(item.sortingQuantity).trim() !== "";
     const sortingQuantity = workflowQuantityFromValue(item.sortingQuantity);
@@ -1087,6 +1117,16 @@ function completionStockPieces(rows) {
     if (kind === "sorting") return total + Math.max(0, quantity - completionSortingPiecesForRow(row));
     return total;
   }, 0);
+}
+
+function completionStockPiecesForReport(rows) {
+  const key = completionStockPiecesSnapshotKey(rows);
+  if (completionState.stockPiecesSnapshot?.key === key) {
+    return completionState.stockPiecesSnapshot.value;
+  }
+  const value = completionStockPieces(rows);
+  completionState.stockPiecesSnapshot = { key, value };
+  return value;
 }
 
 const EXPEDITION_ORDER_CODE_LABELS = {
@@ -1239,7 +1279,7 @@ function renderExpeditionBatchReport() {
   const rows = completionState.rows || [];
   const flowCounts = completionFlowCounts(rows);
   const pieces = rows.reduce((total, row) => total + completionRowQuantity(row), 0);
-  const stockPieces = completionStockPieces(rows);
+  const stockPieces = completionStockPiecesForReport(rows);
   const addressRows = rows.filter((row) => completionRequiresAddressValidation(row));
   const addressErrors = addressRows.filter((row) => completionAddressHasError(row)).length;
   const paymentWarnings = rows.filter((row) => ["warning", "danger"].includes(paymentCheckTone(row))).length;
@@ -1325,10 +1365,12 @@ function clearSelectedExpeditionDayData(options = {}) {
   expeditionState.day = null;
   sortingState.datasets = [];
   sortingState.dataset = null;
+  sortingState.reportItems = [];
   sortingState.loaded = false;
   completionState.datasets = [];
   completionState.dataset = null;
   completionState.rows = [];
+  resetCompletionStockPiecesSnapshot();
   completionState.loaded = false;
   completionState.paymentUpdatesSince = null;
   completionState.paymentPollInFlight = false;
@@ -1537,8 +1579,10 @@ async function loadExpeditionDay(dayDate) {
   sortingState.loaded = true;
   completionState.loaded = true;
   sortingState.dataset = null;
+  sortingState.reportItems = [];
   completionState.dataset = null;
   completionState.rows = [];
+  resetCompletionStockPiecesSnapshot();
   completionWorkflowState.row = null;
   completionWorkflowState.index = -1;
   completionWorkflowState.checkedItemKeys = new Set();
@@ -1575,6 +1619,8 @@ async function loadExpeditionDay(dayDate) {
     applySortingDataset(data.activeSorting.dataset, data.activeSorting.rows || []);
   } else {
     sortingState.dataset = null;
+    sortingState.reportItems = [];
+    resetCompletionStockPiecesSnapshot();
     renderSortingOptions();
     setMessage("Pro vybraný expediční den není nahrané roztřídění.", "warning");
   }
@@ -1584,6 +1630,7 @@ async function loadExpeditionDay(dayDate) {
   } else {
     completionState.dataset = null;
     completionState.rows = [];
+    resetCompletionStockPiecesSnapshot();
     completionWorkflowState.row = null;
     completionWorkflowState.index = -1;
     renderCompletionOptions();
@@ -1631,6 +1678,8 @@ function applySortingDataset(dataset, rows) {
   sortingState.dataset = dataset || null;
   zeroRowsKeptUntilRefresh.clear();
   const nextItems = (rows || []).map(sortingRowToItem);
+  sortingState.reportItems = nextItems.map((item) => ({ ...item }));
+  resetCompletionStockPiecesSnapshot();
   applyLoaded({
     items: nextItems,
     eanMap: Object.keys(state.eanMap || {}).length ? state.eanMap : seed.eanMap || {},
@@ -1695,9 +1744,11 @@ async function deleteCurrentExpeditionDay() {
     });
     sortingState.dataset = null;
     sortingState.datasets = [];
+    sortingState.reportItems = [];
     completionState.dataset = null;
     completionState.datasets = [];
     completionState.rows = [];
+    resetCompletionStockPiecesSnapshot();
     expeditionState.day = null;
     expeditionState.showInactive = true;
     els.expeditionShowInactive.checked = true;
@@ -1762,6 +1813,7 @@ async function loadCompletionDatasets() {
 function applyCompletionDataset(dataset, rows) {
   completionState.dataset = dataset || null;
   completionState.rows = rows || [];
+  resetCompletionStockPiecesSnapshot();
   completionState.paymentUpdatesSince = null;
   completionWorkflowState.row = null;
   completionWorkflowState.index = -1;
