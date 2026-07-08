@@ -1163,6 +1163,38 @@ function batchReportRangesHtml(rows) {
   return `<div class="batch-report-ranges" aria-label="Rozpis expedičních kódů">${rangeRows}${missing}</div>`;
 }
 
+function printExpeditionBatchReport() {
+  if (!els.expeditionBatchReport || els.expeditionBatchReport.classList.contains("hidden")) return;
+  const reportClone = els.expeditionBatchReport.cloneNode(true);
+  reportClone.querySelectorAll("[data-action='print-batch-report']").forEach((button) => button.remove());
+  const printWindow = window.open("", "_blank", "width=420,height=720");
+  if (!printWindow) {
+    setMessage("Prohlížeč zablokoval tiskové okno. Povol prosím vyskakovací okna pro expedici.", "warning");
+    return;
+  }
+
+  printWindow.document.write(`
+    <!doctype html>
+    <html lang="cs">
+      <head>
+        <meta charset="UTF-8" />
+        <title>Report vybrané várky</title>
+        <link rel="stylesheet" href="styles.css?v=batch-report-print-20260708" />
+      </head>
+      <body class="batch-report-print-page">
+        ${reportClone.outerHTML}
+        <script>
+          window.addEventListener("load", () => {
+            window.focus();
+            window.print();
+          });
+        <\/script>
+      </body>
+    </html>
+  `);
+  printWindow.document.close();
+}
+
 function renderExpeditionBatchReport() {
   if (!els.expeditionBatchReport) return;
   if (!hasSelectedExpeditionDay()) {
@@ -1206,8 +1238,11 @@ function renderExpeditionBatchReport() {
 
   els.expeditionBatchReport.innerHTML = `
     <div class="batch-report-head">
-      <span>Report vybrané várky</span>
-      <strong>${escapeHtml(title)}</strong>
+      <div>
+        <span>Report vybrané várky</span>
+        <strong>${escapeHtml(title)}</strong>
+      </div>
+      <button type="button" class="batch-report-print" data-action="print-batch-report">Tisk</button>
     </div>
     <div class="batch-report-grid">
       ${batchReportMetricHtml("Objednávek", ordersValue)}
@@ -6525,6 +6560,11 @@ els.workflowItems?.addEventListener("click", (event) => {
       : `Odkontrolováno ${physicalCheck.checked}/${physicalCheck.total} položek v boxu.`,
     physicalCheck.ok ? "success" : "neutral"
   );
+});
+els.expeditionBatchReport?.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-action='print-batch-report']");
+  if (!button || !els.expeditionBatchReport.contains(button)) return;
+  printExpeditionBatchReport();
 });
 
 checkAuth();

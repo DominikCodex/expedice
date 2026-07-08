@@ -502,8 +502,17 @@ select:focus {
 }
 
 .batch-report-head {
+  display: flex;
+  gap: 2px;
+  align-items: start;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.batch-report-head > div {
   display: grid;
   gap: 2px;
+  min-width: 0;
 }
 
 .batch-report-head span {
@@ -518,6 +527,22 @@ select:focus {
   color: var(--text);
   font-size: 13px;
   line-height: 1.2;
+}
+
+.batch-report-print {
+  min-height: 28px;
+  padding: 5px 9px;
+  color: var(--accent-dark);
+  font-size: 11px;
+  font-weight: 950;
+  white-space: nowrap;
+  background: #eef8f3;
+  border-color: #c9ded5;
+}
+
+.batch-report-print:hover {
+  background: #dff2ea;
+  border-color: #a9cfbd;
 }
 
 .batch-report-grid {
@@ -651,6 +676,22 @@ select:focus {
 
 .batch-report-note span {
   display: block;
+}
+
+.batch-report-print-page {
+  margin: 0;
+  padding: 12px;
+  color: var(--text);
+  background: #fff;
+}
+
+.batch-report-print-page .batch-report {
+  max-width: 390px;
+  box-shadow: none;
+}
+
+.batch-report-print-page .batch-report-print {
+  display: none;
 }
 
 .tab-button {
