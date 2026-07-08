@@ -26,6 +26,18 @@ from flask import Flask, Response, g, jsonify, request, send_from_directory
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
+def env_int(name, default, minimum=None, maximum=None):
+    try:
+        value = int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        value = default
+    if minimum is not None:
+        value = max(minimum, value)
+    if maximum is not None:
+        value = min(maximum, value)
+    return value
+
+
 APP_DIR = os.path.dirname(os.path.abspath(__file__))
 PRAGUE_TZ = ZoneInfo("Europe/Prague")
 
@@ -41,6 +53,11 @@ SESSION_SECONDS = 12 * 60 * 60
 INITIAL_ADMIN_USERNAME = "d.najman@centrum.cz"
 INITIAL_ADMIN_PASSWORD = "1234"
 PASSWORD_HASH_METHOD = "pbkdf2:sha256:260000"
+LOGIN_USER_IP_MAX_ATTEMPTS = env_int("LOGIN_USER_IP_MAX_ATTEMPTS", 5, 1, 100)
+LOGIN_IP_MAX_ATTEMPTS = env_int("LOGIN_IP_MAX_ATTEMPTS", 25, LOGIN_USER_IP_MAX_ATTEMPTS, 500)
+LOGIN_FAILURE_WINDOW_SECONDS = env_int("LOGIN_FAILURE_WINDOW_SECONDS", 15 * 60, 60, 24 * 60 * 60)
+LOGIN_LOCK_SECONDS = env_int("LOGIN_LOCK_SECONDS", 15 * 60, 60, 24 * 60 * 60)
+LOGIN_CLEANUP_AFTER_SECONDS = env_int("LOGIN_CLEANUP_AFTER_SECONDS", 24 * 60 * 60, 60 * 60, 7 * 24 * 60 * 60)
 PAYMENT_SYNC_LOCK = threading.Lock()
 PAYMENT_SYNC_ACTIVE_SECONDS = 20 * 60
 PRODUCT_FEED_DEFAULT_TIMEOUT_SECONDS = 600
@@ -172,6 +189,34 @@ def db_conn():
         raise
     finally:
         active_pool.putconn(conn, close=bool(conn.closed))
+
+
+def ensure_login_rate_limit_schema(cur):
+    cur.execute(
+        """
+        CREATE TABLE IF NOT EXISTS login_rate_limits (
+            scope TEXT NOT NULL,
+            identifier TEXT NOT NULL,
+            attempts INTEGER NOT NULL DEFAULT 0,
+            first_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            last_attempt_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+            locked_until TIMESTAMPTZ,
+            PRIMARY KEY (scope, identifier)
+        )
+        """
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_login_rate_limits_locked
+        ON login_rate_limits (locked_until)
+        """
+    )
+    cur.execute(
+        """
+        CREATE INDEX IF NOT EXISTS idx_login_rate_limits_last_attempt
+        ON login_rate_limits (last_attempt_at)
+        """
+    )
 
 
 def ensure_schema():
@@ -532,6 +577,7 @@ def ensure_schema():
                 )
                 """
             )
+            ensure_login_rate_limit_schema(cur)
             seed_initial_admin(cur)
             cur.execute(
                 """
@@ -681,6 +727,7 @@ def ensure_auth_schema():
                 ON user_sessions (user_id)
                 """
             )
+            ensure_login_rate_limit_schema(cur)
             seed_initial_admin(cur)
 
     AUTH_SCHEMA_READY = True
@@ -760,6 +807,145 @@ def normalize_username(value):
 
 def hash_session_token(token):
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def client_ip_address():
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    if forwarded_for:
+        first_ip = forwarded_for.split(",", 1)[0].strip()
+        if first_ip:
+            return first_ip[:128]
+    real_ip = request.headers.get("X-Real-IP", "").strip()
+    if real_ip:
+        return real_ip[:128]
+    return (request.remote_addr or "unknown")[:128]
+
+
+def login_rate_identifier(*parts):
+    normalized = "|".join(clean_text(part).strip().lower()[:200] for part in parts)
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def login_rate_limit_targets(username):
+    ip_address = client_ip_address()
+    return [
+        {
+            "scope": "user_ip",
+            "identifier": login_rate_identifier(username, ip_address),
+            "max_attempts": LOGIN_USER_IP_MAX_ATTEMPTS,
+        },
+        {
+            "scope": "ip",
+            "identifier": login_rate_identifier(ip_address),
+            "max_attempts": LOGIN_IP_MAX_ATTEMPTS,
+        },
+    ]
+
+
+def cleanup_login_rate_limits(cur):
+    now = dt.datetime.now(dt.timezone.utc)
+    cutoff = now - timedelta(seconds=LOGIN_CLEANUP_AFTER_SECONDS)
+    cur.execute(
+        """
+        DELETE FROM login_rate_limits
+        WHERE last_attempt_at < %s
+          AND (locked_until IS NULL OR locked_until < %s)
+        """,
+        (cutoff, now),
+    )
+
+
+def login_rate_limited_until(cur, username):
+    now = dt.datetime.now(dt.timezone.utc)
+    locked_until = None
+    for target in login_rate_limit_targets(username):
+        cur.execute(
+            """
+            SELECT locked_until
+            FROM login_rate_limits
+            WHERE scope = %s
+              AND identifier = %s
+              AND locked_until > %s
+            """,
+            (target["scope"], target["identifier"], now),
+        )
+        row = cur.fetchone()
+        if row and (locked_until is None or row["locked_until"] > locked_until):
+            locked_until = row["locked_until"]
+    return locked_until
+
+
+def login_retry_after_seconds(locked_until):
+    if not locked_until:
+        return 0
+    now = dt.datetime.now(dt.timezone.utc)
+    return max(1, int((locked_until - now).total_seconds()))
+
+
+def login_rate_limit_response(locked_until):
+    retry_after = login_retry_after_seconds(locked_until)
+    minutes = max(1, (retry_after + 59) // 60)
+    response = jsonify(
+        {
+            "error": f"Příliš mnoho neúspěšných pokusů. Zkus to prosím znovu za {minutes} min.",
+            "retryAfterSeconds": retry_after,
+        }
+    )
+    response.status_code = 429
+    response.headers["Retry-After"] = str(retry_after)
+    return response
+
+
+def record_login_failure(cur, username):
+    now = dt.datetime.now(dt.timezone.utc)
+    window_start = now - timedelta(seconds=LOGIN_FAILURE_WINDOW_SECONDS)
+    locked_until = None
+    for target in login_rate_limit_targets(username):
+        cur.execute(
+            """
+            SELECT attempts, first_attempt_at, locked_until
+            FROM login_rate_limits
+            WHERE scope = %s AND identifier = %s
+            FOR UPDATE
+            """,
+            (target["scope"], target["identifier"]),
+        )
+        row = cur.fetchone()
+        if row and row["first_attempt_at"] >= window_start and not (
+            row["locked_until"] and row["locked_until"] <= now
+        ):
+            attempts = int(row["attempts"] or 0) + 1
+            first_attempt_at = row["first_attempt_at"]
+        else:
+            attempts = 1
+            first_attempt_at = now
+
+        next_locked_until = now + timedelta(seconds=LOGIN_LOCK_SECONDS) if attempts >= target["max_attempts"] else None
+        cur.execute(
+            """
+            INSERT INTO login_rate_limits (
+                scope, identifier, attempts, first_attempt_at, last_attempt_at, locked_until
+            )
+            VALUES (%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (scope, identifier) DO UPDATE SET
+                attempts = EXCLUDED.attempts,
+                first_attempt_at = EXCLUDED.first_attempt_at,
+                last_attempt_at = EXCLUDED.last_attempt_at,
+                locked_until = EXCLUDED.locked_until
+            """,
+            (target["scope"], target["identifier"], attempts, first_attempt_at, now, next_locked_until),
+        )
+        if next_locked_until and (locked_until is None or next_locked_until > locked_until):
+            locked_until = next_locked_until
+    return locked_until
+
+
+def clear_login_failures_for_user_ip(cur, username):
+    ip_address = client_ip_address()
+    cur.execute(
+        "DELETE FROM login_rate_limits WHERE scope = %s AND identifier = %s",
+        ("user_ip", login_rate_identifier(username, ip_address)),
+    )
 
 
 def user_to_api(user):
@@ -981,13 +1167,22 @@ def auth_login():
 
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cleanup_login_rate_limits(cur)
+            locked_until = login_rate_limited_until(cur, username)
+            if locked_until:
+                return login_rate_limit_response(locked_until)
+
             cur.execute("SELECT * FROM users WHERE username = %s", (username,))
             user = cur.fetchone()
             if not user or not user["active"] or not check_password_hash(user["password_hash"], password):
+                locked_until = record_login_failure(cur, username)
+                if locked_until:
+                    return login_rate_limit_response(locked_until)
                 return jsonify({"error": "Nesprávné přihlašovací údaje."}), 401
 
             password_update_sql = ", password_hash = %s" if password_hash_needs_upgrade(user["password_hash"]) else ""
             password_update_params = [make_password_hash(password)] if password_update_sql else []
+            clear_login_failures_for_user_ip(cur, username)
             token = create_user_session(cur, user["id"])
             cur.execute(
                 f"UPDATE users SET last_login_at = NOW(), must_change_password = FALSE, updated_at = NOW(){password_update_sql} WHERE id = %s RETURNING *",
