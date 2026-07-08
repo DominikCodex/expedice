@@ -516,6 +516,7 @@ function normalizeItem(item) {
     image: item.image || "",
     datasetRowId: item.datasetRowId || item.rowId || "",
     shopCode: item.shopCode || "",
+    sortingQuantity: item.sortingQuantity ?? "",
   };
 }
 
@@ -1066,6 +1067,10 @@ function completionRowQuantity(row) {
 function completionSortingPiecesForRow(row) {
   if (completionFlowKind(row) !== "sorting") return 0;
   return workflowSortingItems(row).reduce((total, item) => {
+    const hasSortingQuantity =
+      item.sortingQuantity !== undefined && item.sortingQuantity !== null && String(item.sortingQuantity).trim() !== "";
+    const sortingQuantity = workflowQuantityFromValue(item.sortingQuantity);
+    if (hasSortingQuantity) return total + sortingQuantity;
     const lineQuantity = workflowItemLineQuantity(item);
     if (lineQuantity) return total + lineQuantity;
     const initial = toNumber(item.initialQuantity, NaN);
@@ -1596,10 +1601,10 @@ async function loadExpeditionDay(dayDate) {
 }
 
 function sortingRowToItem(row) {
+  const sortingQuantity = workflowQuantityFromValue(row.quantity) || workflowQuantityFromValue(row.remaining);
   const initialQuantity =
     workflowQuantityFromValue(row.initialQuantity) ||
-    workflowQuantityFromValue(row.quantity) ||
-    workflowQuantityFromValue(row.remaining);
+    sortingQuantity;
   return normalizeItem({
     id: `online-${row.id}`,
     sourceRow: row.rowNumber || "",
@@ -1618,6 +1623,7 @@ function sortingRowToItem(row) {
     image: row.image || "",
     datasetRowId: row.id || "",
     shopCode: row.shopCode || "",
+    sortingQuantity,
   });
 }
 
