@@ -1067,6 +1067,110 @@ function batchReportMetricHtml(label, value, tone = "") {
   `;
 }
 
+const EXPEDITION_ORDER_CODE_LABELS = {
+  "0.8": "Komplet ze skladu Galantra.cz přes Zásilkovnu",
+  1: "Komplet ze skladu iVeronika.cz",
+  "1.5": "Komplet ze skladu iVeronika.sk",
+  "1.8": "Komplet ze skladu Galantra.cz přes DPD",
+  "1.9": "Komplet ze skladu DPD mimo Galantra.cz",
+  2: "Zásilkovna pouze Hotex",
+  3: "Zásilkovna Milpex",
+  4: "Zásilkovna Milpex + Hotex kombinace",
+  5: "Zatím nepoužíváme",
+  6: "iVeronika.sk Zásilkovna",
+  7: "DPD Milpex nebo Hotex",
+  8: "ERRORKA Galantra.cz",
+};
+
+function normalizeExpeditionOrderCode(value) {
+  const text = String(value ?? "").trim().replace(",", ".");
+  const numericValue = toNumber(text, NaN);
+  if (!Number.isFinite(numericValue)) return text;
+  const knownCode = Object.keys(EXPEDITION_ORDER_CODE_LABELS).find((code) => Math.abs(Number(code) - numericValue) < 0.00001);
+  if (knownCode) return knownCode;
+  return Number.isInteger(numericValue) ? String(numericValue) : String(Math.round(numericValue * 10) / 10);
+}
+
+function expeditionOrderCodeTone(code) {
+  const value = toNumber(code, NaN);
+  if (!Number.isFinite(value)) return "unknown";
+  if (value === 8) return "danger";
+  if (value < 2) return "stock";
+  if (value >= 2 && value <= 7) return "sorting";
+  return "unknown";
+}
+
+function expeditionOrderCodeLabel(code) {
+  return EXPEDITION_ORDER_CODE_LABELS[code] || "Neznámý kód";
+}
+
+function completionExpeditionNumber(row) {
+  const value = toNumber(row?.expeditionNumber, NaN);
+  return Number.isFinite(value) ? Math.trunc(value) : null;
+}
+
+function completionCodeRanges(rows) {
+  const items = [];
+  let withoutExpeditionNumber = 0;
+
+  (rows || []).forEach((row) => {
+    const expeditionNumber = completionExpeditionNumber(row);
+    if (!expeditionNumber) {
+      withoutExpeditionNumber += 1;
+      return;
+    }
+    items.push({
+      expeditionNumber,
+      code: normalizeExpeditionOrderCode(row?.expeditionOrderCode),
+    });
+  });
+
+  items.sort((a, b) => a.expeditionNumber - b.expeditionNumber);
+
+  const ranges = [];
+  items.forEach((item) => {
+    const last = ranges[ranges.length - 1];
+    if (last && last.code === item.code && item.expeditionNumber === last.end + 1) {
+      last.end = item.expeditionNumber;
+      last.count += 1;
+      return;
+    }
+    ranges.push({
+      start: item.expeditionNumber,
+      end: item.expeditionNumber,
+      code: item.code,
+      count: 1,
+    });
+  });
+
+  return { ranges, withoutExpeditionNumber };
+}
+
+function batchReportRangesHtml(rows) {
+  const { ranges, withoutExpeditionNumber } = completionCodeRanges(rows);
+  if (!ranges.length && !withoutExpeditionNumber) return "";
+
+  const rangeRows = ranges
+    .map((range) => {
+      const rangeText = range.start === range.end ? String(range.start) : `${range.start}-${range.end}`;
+      const tone = expeditionOrderCodeTone(range.code);
+      return `
+        <div class="batch-report-range ${escapeHtml(tone)}">
+          <strong>${escapeHtml(rangeText)}</strong>
+          <span class="batch-report-code">${escapeHtml(range.code || "-")}</span>
+          <span>${escapeHtml(expeditionOrderCodeLabel(range.code))}</span>
+        </div>
+      `;
+    })
+    .join("");
+
+  const missing = withoutExpeditionNumber
+    ? `<div class="batch-report-range unknown"><strong>?</strong><span class="batch-report-code">-</span><span>Bez expedičního čísla: ${escapeHtml(withoutExpeditionNumber)}</span></div>`
+    : "";
+
+  return `<div class="batch-report-ranges" aria-label="Rozpis expedičních kódů">${rangeRows}${missing}</div>`;
+}
+
 function renderExpeditionBatchReport() {
   if (!els.expeditionBatchReport) return;
   if (!hasSelectedExpeditionDay()) {
@@ -1121,6 +1225,7 @@ function renderExpeditionBatchReport() {
       ${batchReportMetricHtml("Chybné adresy", hasCompletionRows ? addressErrors : "-", addressErrors ? "danger" : "")}
       ${batchReportMetricHtml("Platby k řešení", hasCompletionRows ? paymentWarnings : "-", paymentWarnings ? "warning" : "")}
     </div>
+    ${hasCompletionRows ? batchReportRangesHtml(rows) : ""}
     <p class="batch-report-note">${notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</p>
   `;
   els.expeditionBatchReport.classList.remove("hidden");
