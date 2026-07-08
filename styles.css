@@ -572,6 +572,8 @@ select:focus {
   color: var(--muted);
   font-size: 10px;
   font-weight: 900;
+  line-height: 1.05;
+  overflow-wrap: anywhere;
 }
 
 .batch-report-metric.warning strong {

@@ -1182,7 +1182,7 @@ function printExpeditionBatchReport() {
       <head>
         <meta charset="UTF-8" />
         <title>Report vybrané várky</title>
-        <link rel="stylesheet" href="styles.css?v=batch-report-print-20260708" />
+        <link rel="stylesheet" href="styles.css?v=batch-report-stock-pieces-20260708" />
       </head>
       <body class="batch-report-print-page">
         ${reportClone.outerHTML}
@@ -1209,6 +1209,10 @@ function renderExpeditionBatchReport() {
   const rows = completionState.rows || [];
   const flowCounts = completionFlowCounts(rows);
   const pieces = rows.reduce((total, row) => total + (workflowQuantityFromValue(row?.quantity || row?.amount) || 0), 0);
+  const stockPieces = rows.reduce((total, row) => {
+    if (completionFlowKind(row) !== "stock") return total;
+    return total + (workflowQuantityFromValue(row?.quantity || row?.amount) || 0);
+  }, 0);
   const addressRows = rows.filter((row) => completionRequiresAddressValidation(row));
   const addressErrors = addressRows.filter((row) => completionAddressHasError(row)).length;
   const paymentWarnings = rows.filter((row) => ["warning", "danger"].includes(paymentCheckTone(row))).length;
@@ -1250,7 +1254,8 @@ function renderExpeditionBatchReport() {
     <div class="batch-report-grid">
       ${batchReportMetricHtml("Objednávek", ordersValue)}
       ${batchReportMetricHtml("Kusů", piecesValue)}
-      ${batchReportMetricHtml("Skladovek", hasCompletionRows ? flowCounts.stock : "-")}
+      ${batchReportMetricHtml("Skladovek (objednávek)", hasCompletionRows ? flowCounts.stock : "-")}
+      ${batchReportMetricHtml("Skladovky (kusů)", hasCompletionRows ? stockPieces : "-")}
       ${batchReportMetricHtml("Chybné adresy", hasCompletionRows ? addressErrors : "-", addressErrors ? "danger" : "")}
       ${batchReportMetricHtml("Platby k řešení", hasCompletionRows ? paymentWarnings : "-", paymentWarnings ? "warning" : "")}
     </div>
