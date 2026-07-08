@@ -740,7 +740,7 @@ def seed_initial_admin(cur):
         INSERT INTO users (
             username, display_name, password_hash, role, active, must_change_password
         )
-        VALUES (%s, %s, %s, 'admin', TRUE, TRUE)
+        VALUES (%s, %s, %s, 'admin', TRUE, FALSE)
         """,
         (username, "Dominik Najman", make_password_hash(INITIAL_ADMIN_PASSWORD)),
     )
@@ -771,7 +771,7 @@ def user_to_api(user):
         "displayName": user.get("display_name") or user["username"],
         "role": user.get("role") or "employee",
         "active": bool(user.get("active")),
-        "mustChangePassword": bool(user.get("must_change_password")),
+        "mustChangePassword": False,
         "createdAt": user.get("created_at").isoformat() if user.get("created_at") else None,
         "updatedAt": user.get("updated_at").isoformat() if user.get("updated_at") else None,
         "lastLoginAt": user.get("last_login_at").isoformat() if user.get("last_login_at") else None,
@@ -990,7 +990,7 @@ def auth_login():
             password_update_params = [make_password_hash(password)] if password_update_sql else []
             token = create_user_session(cur, user["id"])
             cur.execute(
-                f"UPDATE users SET last_login_at = NOW(), updated_at = NOW(){password_update_sql} WHERE id = %s RETURNING *",
+                f"UPDATE users SET last_login_at = NOW(), must_change_password = FALSE, updated_at = NOW(){password_update_sql} WHERE id = %s RETURNING *",
                 [*password_update_params, user["id"]],
             )
             user = cur.fetchone()
@@ -1092,7 +1092,7 @@ def create_user():
                         username, display_name, password_hash, role, active,
                         must_change_password, created_by
                     )
-                    VALUES (%s, %s, %s, %s, TRUE, TRUE, %s)
+                    VALUES (%s, %s, %s, %s, TRUE, FALSE, %s)
                     RETURNING *
                     """,
                     (username, display_name or username, make_password_hash(password), role, creator["id"]),
@@ -1168,7 +1168,7 @@ def reset_user_password(user_id):
                 """
                 UPDATE users
                 SET password_hash = %s,
-                    must_change_password = TRUE,
+                    must_change_password = FALSE,
                     updated_at = NOW()
                 WHERE id = %s
                 RETURNING *

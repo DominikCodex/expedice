@@ -863,7 +863,7 @@ function showPasswordChange(user) {
   els.authView.classList.remove("hidden");
   els.loginForm.classList.add("hidden");
   els.passwordChangeForm.classList.remove("hidden");
-  setAuthMessage("Tohle je první přihlášení nebo reset hesla. Nejdřív prosím nastav nové heslo.", "warning");
+  setAuthMessage("Nastav prosím nové heslo.", "neutral");
   requestAnimationFrame(() => els.changeCurrentPassword.focus());
 }
 
@@ -949,10 +949,6 @@ async function checkAuth() {
       showLogin();
       return;
     }
-    if (data.user.mustChangePassword) {
-      showPasswordChange(data.user);
-      return;
-    }
     startAppForUser(data.user);
   } catch {
     showLogin("Přihlášení se nepodařilo ověřit. Zkus to prosím znovu.");
@@ -974,10 +970,6 @@ async function login() {
       body: JSON.stringify({ username, password }),
     });
     els.loginPassword.value = "";
-    if (data.user?.mustChangePassword) {
-      showPasswordChange(data.user);
-      return;
-    }
     startAppForUser(data.user);
   } catch (error) {
     setAuthMessage(error.message, "error");
@@ -5150,7 +5142,6 @@ function renderUsers() {
                 <td>
                   <strong>${escapeHtml(user.displayName || user.username)}</strong>
                   <small>${escapeHtml(user.username)}</small>
-                  ${user.mustChangePassword ? `<span class="status-chip warning">musí změnit heslo</span>` : ""}
                 </td>
                 <td>
                   <select data-action="change-user-role" data-user-id="${escapeHtml(user.id)}" ${self ? "disabled" : ""}>
@@ -5205,7 +5196,7 @@ async function createUserFromForm() {
     els.userCreateUsername.value = "";
     els.userCreateDisplay.value = "";
     els.userCreatePassword.value = "";
-    setSettingsMessage("Uživatel byl vytvořený. Při prvním přihlášení si změní heslo.", "success");
+    setSettingsMessage("Uživatel byl vytvořený. Přidělené heslo zůstává platné.", "success");
     await loadUsers();
   } catch (error) {
     setSettingsMessage(`Uživatele se nepodařilo vytvořit: ${error.message}`, "error");
@@ -5221,14 +5212,14 @@ async function patchUser(userId, payload) {
 }
 
 async function resetUserPassword(userId) {
-  const password = prompt("Zadej nové dočasné heslo pro uživatele:");
+  const password = prompt("Zadej nové heslo pro uživatele:");
   if (!password) return;
   try {
     await fetchJson(`/api/users/${userId}/reset-password`, {
       method: "POST",
       body: JSON.stringify({ password }),
     });
-    setSettingsMessage("Heslo bylo resetované a uživatel ho po přihlášení změní.", "success");
+    setSettingsMessage("Heslo bylo uložené a zůstává platné.", "success");
     await loadUsers();
   } catch (error) {
     setSettingsMessage(`Reset hesla selhal: ${error.message}`, "error");
