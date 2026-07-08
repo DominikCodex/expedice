@@ -605,6 +605,10 @@ select:focus {
   line-height: 1.15;
 }
 
+.batch-report-range.without-code {
+  grid-template-columns: minmax(38px, auto) minmax(0, 1fr);
+}
+
 .batch-report-range strong {
   color: var(--text);
   font-size: 12px;

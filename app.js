@@ -1141,15 +1141,16 @@ function completionCodeRanges(rows) {
 function batchReportRangesHtml(rows) {
   const { ranges, withoutExpeditionNumber } = completionCodeRanges(rows);
   if (!ranges.length && !withoutExpeditionNumber) return "";
+  const showCodes = isAdmin();
 
   const rangeRows = ranges
     .map((range) => {
       const rangeText = range.start === range.end ? String(range.start) : `${range.start}-${range.end}`;
       const tone = expeditionOrderCodeTone(range.code);
       return `
-        <div class="batch-report-range ${escapeHtml(tone)}">
+        <div class="batch-report-range ${escapeHtml(tone)} ${showCodes ? "" : "without-code"}">
           <strong>${escapeHtml(rangeText)}</strong>
-          <span class="batch-report-code">${escapeHtml(range.code || "-")}</span>
+          ${showCodes ? `<span class="batch-report-code">${escapeHtml(range.code || "-")}</span>` : ""}
           <span>${escapeHtml(expeditionOrderCodeLabel(range.code))}</span>
         </div>
       `;
@@ -1157,7 +1158,9 @@ function batchReportRangesHtml(rows) {
     .join("");
 
   const missing = withoutExpeditionNumber
-    ? `<div class="batch-report-range unknown"><strong>?</strong><span class="batch-report-code">-</span><span>Bez expedičního čísla: ${escapeHtml(withoutExpeditionNumber)}</span></div>`
+    ? `<div class="batch-report-range unknown ${showCodes ? "" : "without-code"}"><strong>?</strong>${
+        showCodes ? `<span class="batch-report-code">-</span>` : ""
+      }<span>Bez expedičního čísla: ${escapeHtml(withoutExpeditionNumber)}</span></div>`
     : "";
 
   return `<div class="batch-report-ranges" aria-label="Rozpis expedičních kódů">${rangeRows}${missing}</div>`;
