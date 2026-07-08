@@ -1059,6 +1059,31 @@ function batchReportMetricHtml(label, value, tone = "") {
   `;
 }
 
+function completionRowQuantity(row) {
+  return workflowQuantityFromValue(row?.quantity || row?.amount);
+}
+
+function completionSortingPiecesForRow(row) {
+  if (completionFlowKind(row) !== "sorting") return 0;
+  return workflowSortingItems(row).reduce((total, item) => {
+    const lineQuantity = workflowItemLineQuantity(item);
+    if (lineQuantity) return total + lineQuantity;
+    const initial = toNumber(item.initialQuantity, NaN);
+    const fallback = toNumber(item.quantity, toNumber(item.remaining, 0));
+    return total + Math.max(0, Math.trunc(Number.isFinite(initial) ? initial : fallback));
+  }, 0);
+}
+
+function completionStockPieces(rows) {
+  return (rows || []).reduce((total, row) => {
+    const quantity = completionRowQuantity(row);
+    const kind = completionFlowKind(row);
+    if (kind === "stock") return total + quantity;
+    if (kind === "sorting") return total + Math.max(0, quantity - completionSortingPiecesForRow(row));
+    return total;
+  }, 0);
+}
+
 const EXPEDITION_ORDER_CODE_LABELS = {
   "0.8": "Komplet ze skladu Galantra.cz přes Zásilkovnu",
   1: "Komplet ze skladu iVeronika.cz",
@@ -1208,11 +1233,8 @@ function renderExpeditionBatchReport() {
 
   const rows = completionState.rows || [];
   const flowCounts = completionFlowCounts(rows);
-  const pieces = rows.reduce((total, row) => total + (workflowQuantityFromValue(row?.quantity || row?.amount) || 0), 0);
-  const stockPieces = rows.reduce((total, row) => {
-    if (completionFlowKind(row) !== "stock") return total;
-    return total + (workflowQuantityFromValue(row?.quantity || row?.amount) || 0);
-  }, 0);
+  const pieces = rows.reduce((total, row) => total + completionRowQuantity(row), 0);
+  const stockPieces = completionStockPieces(rows);
   const addressRows = rows.filter((row) => completionRequiresAddressValidation(row));
   const addressErrors = addressRows.filter((row) => completionAddressHasError(row)).length;
   const paymentWarnings = rows.filter((row) => ["warning", "danger"].includes(paymentCheckTone(row))).length;
