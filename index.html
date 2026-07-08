@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Roztřídění zboží</title>
-    <link rel="stylesheet" href="styles.css?v=real-progress-20260708" />
+    <link rel="stylesheet" href="styles.css?v=order-code-label-settings-20260708" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=real-progress-20260708"></script>
+    <script defer src="app.js?v=order-code-label-settings-20260708"></script>
   </head>
   <body>
     <aside id="global-progress" class="global-progress hidden" role="status" aria-live="polite" aria-atomic="true">
@@ -625,6 +625,63 @@
                     <input id="settings-mapy-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
                   </label>
                   <div id="settings-mapy-status" class="settings-hint"></div>
+                </fieldset>
+
+                <fieldset class="settings-card settings-card-wide">
+                  <legend>Popisky kódů pořadí</legend>
+                  <p class="settings-description">
+                    Texty se zobrazují v reportu vybrané várky. Kódy zůstávají interní, pro uživatele se ukáže jen popisek.
+                  </p>
+                  <div class="settings-code-label-grid">
+                    <label class="field settings-code-label-field">
+                      <span>0.8</span>
+                      <input data-settings-order-code-label="0.8" autocomplete="off" maxlength="120" />
+                    </label>
+                    <label class="field settings-code-label-field">
+                      <span>1</span>
+                      <input data-settings-order-code-label="1" autocomplete="off" maxlength="120" />
+                    </label>
+                    <label class="field settings-code-label-field">
+                      <span>1.5</span>
+                      <input data-settings-order-code-label="1.5" autocomplete="off" maxlength="120" />
+                    </label>
+                    <label class="field settings-code-label-field">
+                      <span>1.8</span>
+                      <input data-settings-order-code-label="1.8" autocomplete="off" maxlength="120" />
+                    </label>
+                    <label class="field settings-code-label-field">
+                      <span>1.9</span>
+                      <input data-settings-order-code-label="1.9" autocomplete="off" maxlength="120" />
+                    </label>
+                    <label class="field settings-code-label-field">
+                      <span>2</span>
+                      <input data-settings-order-code-label="2" autocomplete="off" maxlength="120" />
+                    </label>
+                    <label class="field settings-code-label-field">
+                      <span>3</span>
+                      <input data-settings-order-code-label="3" autocomplete="off" maxlength="120" />
+                    </label>
+                    <label class="field settings-code-label-field">
+                      <span>4</span>
+                      <input data-settings-order-code-label="4" autocomplete="off" maxlength="120" />
+                    </label>
+                    <label class="field settings-code-label-field">
+                      <span>5</span>
+                      <input data-settings-order-code-label="5" autocomplete="off" maxlength="120" />
+                    </label>
+                    <label class="field settings-code-label-field">
+                      <span>6</span>
+                      <input data-settings-order-code-label="6" autocomplete="off" maxlength="120" />
+                    </label>
+                    <label class="field settings-code-label-field">
+                      <span>7</span>
+                      <input data-settings-order-code-label="7" autocomplete="off" maxlength="120" />
+                    </label>
+                    <label class="field settings-code-label-field">
+                      <span>8</span>
+                      <input data-settings-order-code-label="8" autocomplete="off" maxlength="120" />
+                    </label>
+                  </div>
                 </fieldset>
                     </div>
                   </section>

@@ -70,6 +70,20 @@ APP_UI_FONT_DEFAULT = "system"
 APP_UI_FONT_CHOICES = {"system", "segoe", "aptos", "inter", "arial", "verdana", "tahoma", "roboto", "lexend", "georgia"}
 APP_COMPLETION_DENSITY_DEFAULT = "auto"
 APP_COMPLETION_DENSITY_CHOICES = {"auto", "comfortable", "warehouse", "ultra"}
+EXPEDITION_ORDER_CODE_LABELS_DEFAULT = {
+    "0.8": "Komplet ze skladu Galantra.cz přes Zásilkovnu",
+    "1": "Komplet ze skladu iVeronika.cz",
+    "1.5": "Komplet ze skladu iVeronika.sk",
+    "1.8": "Komplet ze skladu Galantra.cz přes DPD",
+    "1.9": "Komplet ze skladu DPD mimo Galantra.cz",
+    "2": "Zásilkovna pouze Hotex",
+    "3": "Zásilkovna Milpex",
+    "4": "Zásilkovna Milpex + Hotex kombinace",
+    "5": "Zatím nepoužíváme",
+    "6": "iVeronika.sk Zásilkovna",
+    "7": "DPD Milpex nebo Hotex",
+    "8": "ERRORKA Galantra.cz",
+}
 PRODUCT_IMAGE_CACHE_SECONDS = 12 * 60 * 60
 PRODUCT_IMAGE_REQUEST_CODE_LIMIT = 10000
 PRODUCT_IMAGE_CACHE_LOCK = threading.Lock()
@@ -2196,6 +2210,7 @@ def default_settings():
             "font": ui_font,
             "completionDensity": APP_COMPLETION_DENSITY_DEFAULT,
         },
+        "expeditionOrderCodeLabels": dict(EXPEDITION_ORDER_CODE_LABELS_DEFAULT),
         "mapy": {
             "apiKey": os.environ.get("MAPY_API_KEY", ""),
         },
@@ -2328,6 +2343,15 @@ def normalize_appearance_settings(settings):
     return normalized
 
 
+def normalize_expedition_order_code_labels(settings):
+    source = settings if isinstance(settings, dict) else {}
+    normalized = {}
+    for code, default_label in EXPEDITION_ORDER_CODE_LABELS_DEFAULT.items():
+        label = clean_text(source.get(code)).strip()
+        normalized[code] = label[:120] if label else default_label
+    return normalized
+
+
 def normalize_product_feed_settings(settings):
     source = settings if isinstance(settings, dict) else {}
     delimiter = clean_text(source.get("delimiter") or ";")
@@ -2418,6 +2442,9 @@ def read_settings(include_secrets=False):
 
     settings = deep_merge_settings(default_settings(), row["value"] if row else {})
     settings["appearance"] = normalize_appearance_settings(settings.get("appearance"))
+    settings["expeditionOrderCodeLabels"] = normalize_expedition_order_code_labels(
+        settings.get("expeditionOrderCodeLabels")
+    )
     if include_secrets:
         return settings
 
@@ -2475,6 +2502,9 @@ def save_settings_payload(payload):
     incoming = payload if isinstance(payload, dict) else {}
     next_settings = deep_merge_settings(current, incoming)
     next_settings["appearance"] = normalize_appearance_settings(next_settings.get("appearance"))
+    next_settings["expeditionOrderCodeLabels"] = normalize_expedition_order_code_labels(
+        next_settings.get("expeditionOrderCodeLabels")
+    )
     next_settings.setdefault("productFeed", {})
     merge_secret_field(next_settings["mapy"], current["mapy"], "apiKey")
     merge_secret_field(next_settings["packeta"], current["packeta"], "apiPassword")

@@ -1263,7 +1263,9 @@ function expeditionOrderCodeTone(code) {
 }
 
 function expeditionOrderCodeLabel(code) {
-  return EXPEDITION_ORDER_CODE_LABELS[code] || "Neznámý kód";
+  const normalizedCode = normalizeExpeditionOrderCode(code);
+  const customLabels = settingsState.settings?.expeditionOrderCodeLabels || {};
+  return customLabels[normalizedCode] || EXPEDITION_ORDER_CODE_LABELS[normalizedCode] || "Neznámý kód";
 }
 
 function completionExpeditionNumber(row) {
@@ -1352,7 +1354,7 @@ function printExpeditionBatchReport() {
       <head>
         <meta charset="UTF-8" />
         <title>Report vybrané várky</title>
-        <link rel="stylesheet" href="styles.css?v=batch-report-stock-pieces-20260708" />
+        <link rel="stylesheet" href="styles.css?v=order-code-label-settings-20260708" />
       </head>
       <body class="batch-report-print-page">
         ${reportClone.outerHTML}
@@ -2522,6 +2524,26 @@ function collectProductFeedSettings() {
   };
 }
 
+function orderCodeLabelInputs() {
+  return Array.from(document.querySelectorAll("[data-settings-order-code-label]"));
+}
+
+function renderExpeditionOrderCodeLabelSettings(settings) {
+  const labels = settings?.expeditionOrderCodeLabels || {};
+  orderCodeLabelInputs().forEach((input) => {
+    const code = normalizeExpeditionOrderCode(input.dataset.settingsOrderCodeLabel);
+    input.value = labels[code] || EXPEDITION_ORDER_CODE_LABELS[code] || "";
+  });
+}
+
+function collectExpeditionOrderCodeLabels() {
+  return orderCodeLabelInputs().reduce((labels, input) => {
+    const code = normalizeExpeditionOrderCode(input.dataset.settingsOrderCodeLabel);
+    if (code) labels[code] = input.value.trim();
+    return labels;
+  }, {});
+}
+
 function paymentCheckKind(row) {
   return normalize(row?.paymentCheckStatus || "");
 }
@@ -2710,6 +2732,7 @@ function renderSettings(settings) {
     dpdIveronika,
     dpdGalantra,
   });
+  renderExpeditionOrderCodeLabelSettings(settings);
 
   els.settingsMapyKey.value = "";
   els.settingsMapyStatus.textContent = mapy.hasApiKey ? "API key je uložený." : "API key zatím není uložený.";
@@ -2829,6 +2852,7 @@ async function loadSettings(options = {}) {
     settingsState.settings = data.settings || {};
     settingsState.loaded = true;
     renderSettings(settingsState.settings);
+    renderExpeditionBatchReport();
     if (!options.silent) {
       setSettingsMessage("Nastavení je načtené.", "success");
     }
@@ -2847,6 +2871,7 @@ function collectSettings() {
       font: uiFontKey(els.settingsUiFont?.value),
       completionDensity: completionDensityKey(els.settingsCompletionDensity?.value),
     },
+    expeditionOrderCodeLabels: collectExpeditionOrderCodeLabels(),
     mapy: {
       apiKey: els.settingsMapyKey.value.trim(),
     },
@@ -2934,6 +2959,7 @@ async function saveSettings() {
     settingsState.settings = data.settings || {};
     settingsState.loaded = true;
     renderSettings(settingsState.settings);
+    renderExpeditionBatchReport();
     resetProductImages();
     ensureProductImagesForCurrentData();
     setSettingsMessage("Nastavení je uložené.", "success");
