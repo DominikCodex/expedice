@@ -14,6 +14,7 @@ import urllib.error
 import datetime as dt
 import urllib.parse
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from xml.sax.saxutils import escape as xml_escape
@@ -219,7 +220,7 @@ def db_pool():
     if DB_POOL is None or DB_POOL_DSN != url:
         minconn = int(os.environ.get("DB_POOL_MIN", "1"))
         maxconn = int(os.environ.get("DB_POOL_MAX", "6"))
-        DB_POOL = pool.SimpleConnectionPool(minconn, maxconn, dsn=url)
+        DB_POOL = pool.ThreadedConnectionPool(minconn, maxconn, dsn=url)
         DB_POOL_DSN = url
     return DB_POOL
 
@@ -686,6 +687,22 @@ def ensure_schema():
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
                 )
+                """
+            )
+            cur.execute("ALTER TABLE operation_jobs ADD COLUMN IF NOT EXISTS expedition_day_id BIGINT")
+            cur.execute("ALTER TABLE operation_jobs ADD COLUMN IF NOT EXISTS dataset_id BIGINT")
+            cur.execute("ALTER TABLE operation_jobs ADD COLUMN IF NOT EXISTS superseded_by_job_id TEXT")
+            cur.execute("ALTER TABLE operation_jobs ADD COLUMN IF NOT EXISTS triggered_by TEXT")
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_operation_jobs_day_kind_created
+                ON operation_jobs (expedition_day_id, kind, created_at DESC)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_operation_jobs_dataset_kind
+                ON operation_jobs (dataset_id, kind)
                 """
             )
             cur.execute(
@@ -2502,6 +2519,10 @@ def default_settings():
             "font": ui_font,
             "completionDensity": APP_COMPLETION_DENSITY_DEFAULT,
         },
+        "automation": {
+            "postUploadPaymentCheck": True,
+            "postUploadAddressCheck": True,
+        },
         "expeditionOrderCodeLabels": dict(EXPEDITION_ORDER_CODE_LABELS_DEFAULT),
         "mapy": {
             "apiKey": os.environ.get("MAPY_API_KEY", ""),
@@ -2641,6 +2662,14 @@ def normalize_appearance_settings(settings):
     return normalized
 
 
+def normalize_automation_settings(settings):
+    source = settings if isinstance(settings, dict) else {}
+    return {
+        "postUploadPaymentCheck": source.get("postUploadPaymentCheck") is not False,
+        "postUploadAddressCheck": source.get("postUploadAddressCheck") is not False,
+    }
+
+
 def normalize_expedition_order_code_labels(settings):
     source = settings if isinstance(settings, dict) else {}
     normalized = {}
@@ -2740,6 +2769,7 @@ def read_settings(include_secrets=False):
 
     settings = deep_merge_settings(default_settings(), row["value"] if row else {})
     settings["appearance"] = normalize_appearance_settings(settings.get("appearance"))
+    settings["automation"] = normalize_automation_settings(settings.get("automation"))
     settings["expeditionOrderCodeLabels"] = normalize_expedition_order_code_labels(
         settings.get("expeditionOrderCodeLabels")
     )
@@ -2803,6 +2833,7 @@ def save_settings_payload(payload):
     incoming = payload if isinstance(payload, dict) else {}
     next_settings = deep_merge_settings(current, incoming)
     next_settings["appearance"] = normalize_appearance_settings(next_settings.get("appearance"))
+    next_settings["automation"] = normalize_automation_settings(next_settings.get("automation"))
     next_settings["expeditionOrderCodeLabels"] = normalize_expedition_order_code_labels(
         next_settings.get("expeditionOrderCodeLabels")
     )
@@ -4273,6 +4304,10 @@ def upload_dataset():
 
             batch_snapshot, _, _, _ = get_or_create_batch_snapshot(cur, expedition_day["id"])
 
+    check_job = None
+    if dataset_kind == "completion":
+        check_job = enqueue_post_upload_checks(expedition_day["id"], dataset["id"], "upload")
+
     return jsonify(
         {
             "ok": True,
@@ -4281,6 +4316,7 @@ def upload_dataset():
             "rows": len(rows),
             "replacedDatasets": replaced_datasets,
             "batchSnapshot": batch_snapshot,
+            "checkJob": check_job,
         }
     )
 
@@ -5359,9 +5395,14 @@ def address_validation_row_snapshot(row):
     }
 
 
-def insert_address_validation_log(cur, original_row, updated_row, result_payload):
+def insert_address_validation_log(cur, original_row, updated_row, result_payload, actor_user=None):
     row = updated_row or original_row or {}
-    actor = current_user() or {}
+    actor = actor_user
+    if actor is None:
+        try:
+            actor = current_user() or {}
+        except RuntimeError:
+            actor = {}
     cur.execute(
         """
         INSERT INTO address_validation_logs (
@@ -6935,7 +6976,7 @@ def update_operation_job(job_id, *, status=None, phase=None, progress=None, curr
                 SET status = COALESCE(%s, status), phase = COALESCE(%s, phase), progress = %s,
                     current_value = %s, total_value = %s, message = %s,
                     result = COALESCE(%s, result), error = %s, updated_at = NOW()
-                WHERE id = %s
+                WHERE id = %s AND status <> 'superseded'
                 """,
                 (status, phase, progress, current, total, message, Json(result) if result is not None else None, error, job_id),
             )
@@ -6985,9 +7026,551 @@ def operation_job_to_api(row):
         "message": row.get("message") or "",
         "result": row.get("result") or {},
         "error": row.get("error") or "",
+        "expeditionDayId": row.get("expedition_day_id"),
+        "datasetId": row.get("dataset_id"),
+        "supersededByJobId": row.get("superseded_by_job_id") or "",
+        "triggeredBy": row.get("triggered_by") or "",
         "createdAt": row["created_at"].isoformat() if row.get("created_at") else None,
         "updatedAt": row["updated_at"].isoformat() if row.get("updated_at") else None,
     }
+
+
+POST_UPLOAD_JOB_KIND = "post_upload_checks"
+def post_upload_job_is_active(job_id, dataset_id):
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT operation_jobs.status, datasets.status AS dataset_status
+                FROM operation_jobs
+                LEFT JOIN datasets ON datasets.id = operation_jobs.dataset_id
+                WHERE operation_jobs.id = %s AND operation_jobs.dataset_id = %s
+                """,
+                (job_id, dataset_id),
+            )
+            row = cur.fetchone()
+    return bool(row and row["status"] in {"queued", "running"} and row.get("dataset_status") == "active")
+
+
+def completion_dataset_rows(dataset_id):
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM completion_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
+                (dataset_id,),
+            )
+            return cur.fetchall()
+
+
+def post_upload_payment_summary(dataset_id):
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT COUNT(*) AS total,
+                       COUNT(*) FILTER (WHERE payment_check_checked_at IS NOT NULL) AS checked,
+                       COUNT(*) FILTER (
+                           WHERE COALESCE(payment_check_status, '') IN (
+                               'warning', 'danger', 'error', 'missing', 'unpaid', 'unknown'
+                           )
+                       ) AS problems
+                FROM completion_rows
+                WHERE dataset_id = %s
+                """,
+                (dataset_id,),
+            )
+            row = cur.fetchone() or {}
+    return {
+        "total": int(row.get("total") or 0),
+        "current": int(row.get("checked") or 0),
+        "problems": int(row.get("problems") or 0),
+    }
+
+
+def wait_for_or_run_payment_sync(job_id, dataset_id):
+    if PAYMENT_SYNC_LOCK.locked():
+        while PAYMENT_SYNC_LOCK.locked():
+            if not post_upload_job_is_active(job_id, dataset_id):
+                return {"ok": False, "superseded": True}
+            time.sleep(0.5)
+        return {"ok": True, "waitedForExistingSync": True, "latestSync": latest_payment_sync()}
+    result = sync_payment_feeds(f"post_upload:{dataset_id}")
+    if result.get("skipped") and PAYMENT_SYNC_LOCK.locked():
+        while PAYMENT_SYNC_LOCK.locked():
+            if not post_upload_job_is_active(job_id, dataset_id):
+                return {"ok": False, "superseded": True}
+            time.sleep(0.5)
+        return {"ok": True, "waitedForExistingSync": True, "latestSync": latest_payment_sync()}
+    return result
+
+
+def mapy_lookup_with_retries(api_key, data, query, timeout, attempts=3):
+    last_error = None
+    for attempt in range(attempts):
+        try:
+            return mapy_geocode_items(api_key, data, query, timeout)
+        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, OSError) as exc:
+            last_error = exc
+            if attempt + 1 < attempts:
+                time.sleep(0.35 * (attempt + 1))
+    raise last_error or RuntimeError("Mapy.com neodpověděly.")
+
+
+def classify_post_upload_address(api_key, data, timeout=15):
+    query = mapy_address_query(data)
+    precheck_error = address_precheck_error(data)
+    if precheck_error:
+        return {
+            "valid": False,
+            "status": "error",
+            "message": precheck_error,
+            "query": query,
+            "items": [],
+            "safeAddress": None,
+        }
+
+    items = mapy_lookup_with_retries(api_key, data, query, timeout)
+    exact_items = [item for item in items if address_matches_mapy_result(data, item)[0]]
+    if len(exact_items) == 1:
+        safe_address = mapy_address_from_item(exact_items[0])
+        return {
+            "valid": True,
+            "status": "verified",
+            "message": f"Adresa ověřena přes Mapy.com: {mapy_address_label(safe_address)}",
+            "query": query,
+            "items": items,
+            "safeAddress": safe_address,
+            "cleanup": None,
+        }
+
+    for candidate in address_cleanup_candidates(data):
+        cleanup_query = mapy_address_query(candidate["data"])
+        cleanup_items = mapy_lookup_with_retries(api_key, candidate["data"], cleanup_query, timeout)
+        cleanup_matches = [item for item in cleanup_items if address_matches_mapy_result(candidate["data"], item)[0]]
+        if len(cleanup_matches) != 1:
+            continue
+        safe_address = mapy_address_from_item(cleanup_matches[0])
+        return {
+            "valid": True,
+            "status": "verified",
+            "message": f"Adresa bezpečně očištěna a ověřena: {mapy_address_label(safe_address)}",
+            "query": cleanup_query,
+            "originalQuery": query,
+            "items": cleanup_items,
+            "safeAddress": safe_address,
+            "cleanup": candidate,
+            "appliedAddressCleanup": True,
+            "appliedCarrierNote": bool(candidate.get("carrierNoteAddition")),
+        }
+
+    suggestion = mapy_address_from_item(items[0]) if items else None
+    suggestion_label = mapy_address_label(suggestion)
+    return {
+        "valid": False,
+        "status": "suggestion" if suggestion else "not_found",
+        "message": (
+            f"Adresa je nejednoznačná. Návrh Mapy.com: {suggestion_label}"
+            if suggestion
+            else "Adresa nebyla na Mapy.com nalezena."
+        ),
+        "query": query,
+        "items": items,
+        "suggestedAddress": suggestion,
+        "safeAddress": None,
+    }
+
+
+def post_upload_address_key(row_api):
+    return searchable_text(
+        "|".join(
+            clean_text(row_api.get(key))
+            for key in ("country", "streetWithNumber", "street", "houseNumber", "zipCode", "city")
+        )
+    )
+
+
+def apply_post_upload_address_result(row, result):
+    row_api = completion_row_to_api(row)
+    override = row.get("expedition_override") or {}
+    override_actor = clean_text(row.get("expedition_override_updated_by"))
+    manual_override = bool(override) and override_actor != "auto:mapy"
+    safe_address = result.get("safeAddress")
+    result_payload = dict(result)
+    result_payload.pop("safeAddress", None)
+    result_payload["source"] = "post_upload_checks"
+    result_payload["manualOverridePreserved"] = manual_override
+    actor = {"username": "auto:mapy", "displayName": "Automatická kontrola Mapy.com"}
+
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM completion_rows WHERE id = %s FOR UPDATE", (row["id"],))
+            original_row = cur.fetchone()
+            if not original_row:
+                return None
+            current_override = original_row.get("expedition_override") or {}
+            current_actor = clean_text(original_row.get("expedition_override_updated_by"))
+            manual_override = bool(current_override) and current_actor != "auto:mapy"
+            result_payload["manualOverridePreserved"] = manual_override
+
+            if safe_address and not manual_override:
+                details = {field: row_api.get(field) for field in EXPEDITION_DETAIL_FIELDS}
+                details.update(current_override)
+                details.update(safe_address)
+                cleanup = result.get("cleanup") or {}
+                if cleanup.get("carrierNoteAddition"):
+                    details["carrierNote"] = merge_carrier_note(
+                        details.get("carrierNote"), cleanup["carrierNoteAddition"]
+                    )
+                result_payload["appliedAddress"] = safe_address
+                cur.execute(
+                    """
+                    UPDATE completion_rows
+                    SET expedition_override = %s,
+                        expedition_override_version = expedition_override_version + 1,
+                        expedition_override_updated_at = NOW(),
+                        expedition_override_updated_by = 'auto:mapy',
+                        expedition_validation_status = %s,
+                        expedition_validation_message = %s,
+                        expedition_validation_result = %s
+                    WHERE id = %s
+                    RETURNING *
+                    """,
+                    (
+                        Json(details),
+                        result_payload["status"],
+                        result_payload["message"],
+                        Json(result_payload),
+                        row["id"],
+                    ),
+                )
+            elif current_override:
+                cur.execute(
+                    """
+                    UPDATE completion_rows
+                    SET expedition_validation_status = %s,
+                        expedition_validation_message = %s,
+                        expedition_validation_result = %s
+                    WHERE id = %s
+                    RETURNING *
+                    """,
+                    (result_payload["status"], result_payload["message"], Json(result_payload), row["id"]),
+                )
+            else:
+                cur.execute(
+                    """
+                    UPDATE completion_rows
+                    SET address_validation_status = %s,
+                        address_validation_message = %s,
+                        address_validation_query = %s,
+                        address_validation_checked_at = NOW(),
+                        address_validation_result = %s
+                    WHERE id = %s
+                    RETURNING *
+                    """,
+                    (
+                        result_payload["status"],
+                        result_payload["message"],
+                        result_payload.get("query") or "",
+                        Json(result_payload),
+                        row["id"],
+                    ),
+                )
+            updated_row = cur.fetchone()
+            insert_address_validation_log(cur, original_row, updated_row, result_payload, actor_user=actor)
+    return updated_row
+
+
+def post_upload_job_result(payments=None, addresses=None):
+    return {
+        "payments": payments or {"status": "queued", "current": 0, "total": 0, "problems": 0, "errors": []},
+        "addresses": addresses or {
+            "status": "queued",
+            "current": 0,
+            "total": 0,
+            "problems": 0,
+            "errors": [],
+        },
+    }
+
+
+def run_post_upload_checks_job(job_id, expedition_day_id, dataset_id, settings):
+    automation = normalize_automation_settings(settings.get("automation"))
+    rows = completion_dataset_rows(dataset_id)
+    payment_total = len(rows)
+    address_rows = [row for row in rows if completion_row_to_api(row).get("deliveryRequiresAddress")]
+    address_total = len(address_rows)
+    result = post_upload_job_result()
+    result["payments"]["total"] = payment_total
+    result["addresses"]["total"] = address_total
+    payment_urls = [
+        clean_text(shop.get("url"))
+        for shop in (settings.get("paymentFeeds", {}).get("shops") or {}).values()
+        if isinstance(shop, dict)
+    ]
+    api_key = clean_text(settings.get("mapy", {}).get("apiKey"))
+    payment_phase_active = automation["postUploadPaymentCheck"] and any(payment_urls)
+    address_phase_active = automation["postUploadAddressCheck"] and bool(api_key)
+    overall_total = 0
+    if payment_phase_active:
+        overall_total += payment_total
+    if address_phase_active:
+        overall_total += address_total
+
+    try:
+        update_operation_job(
+            job_id,
+            status="running",
+            phase="payments",
+            progress=0 if overall_total else None,
+            current=0,
+            total=overall_total,
+            message="Kontroluji platby.",
+            result=result,
+        )
+        if not post_upload_job_is_active(job_id, dataset_id):
+            return
+
+        if not automation["postUploadPaymentCheck"]:
+            result["payments"].update(status="skipped", message="Automatická kontrola plateb je vypnutá.")
+        elif not any(payment_urls):
+            result["payments"].update(status="skipped", message="Platební feedy nejsou nastavené.")
+        else:
+            sync_result = wait_for_or_run_payment_sync(job_id, dataset_id)
+            if sync_result.get("superseded"):
+                return
+            payment_summary = post_upload_payment_summary(dataset_id)
+            errors = sync_result.get("errors") or ([] if sync_result.get("ok") else [sync_result.get("error") or "Kontrola plateb selhala."])
+            unchecked = max(0, payment_summary["total"] - payment_summary["current"])
+            if unchecked:
+                errors = [*errors, f"{unchecked} objednávek se nepodařilo platebně vyhodnotit."]
+                payment_summary["problems"] += unchecked
+            result["payments"].update(
+                status="warning" if errors else "completed",
+                current=payment_summary["current"],
+                total=payment_summary["total"],
+                problems=payment_summary["problems"],
+                errors=errors,
+                message="Platby byly zkontrolovány." if not errors else "Platby byly zkontrolovány s varováním.",
+            )
+
+        completed_total = result["payments"]["current"] if result["payments"]["status"] != "skipped" else 0
+        update_operation_job(
+            job_id,
+            status="running",
+            phase="addresses",
+            progress=round((completed_total / overall_total) * 100) if overall_total else None,
+            current=completed_total,
+            total=overall_total,
+            message="Ověřuji doručovací adresy.",
+            result=result,
+        )
+        if not post_upload_job_is_active(job_id, dataset_id):
+            return
+
+        if not automation["postUploadAddressCheck"]:
+            result["addresses"].update(status="skipped", message="Automatické ověřování adres je vypnuté.")
+        elif not api_key:
+            result["addresses"].update(status="skipped", message="Mapy.com API key není nastavený.")
+        else:
+            verified_rows = []
+            manual_override_rows = []
+            pending_by_key = {}
+            for row in address_rows:
+                row_api = completion_row_to_api(row)
+                if row_api.get("hasExpeditionOverride") and clean_text(row_api.get("expeditionUpdatedBy")) != "auto:mapy":
+                    manual_override_rows.append(row)
+                    continue
+                if row_api.get("addressValidationStatus") == "verified":
+                    verified_rows.append(row)
+                    continue
+                pending_by_key.setdefault(post_upload_address_key(row_api), {"data": row_api, "rows": []})["rows"].append(row)
+
+            address_summary = {
+                "status": "running",
+                "current": len(verified_rows) + len(manual_override_rows),
+                "total": address_total,
+                "verified": len(verified_rows),
+                "suggestions": 0,
+                "notFound": 0,
+                "problems": 0,
+                "technicalErrors": 0,
+                "skippedVerified": len(verified_rows),
+                "skippedManualOverrides": len(manual_override_rows),
+                "errors": [],
+            }
+            result["addresses"] = address_summary
+            timeout = int_from_text(os.environ.get("MAPY_API_TIMEOUT")) or 15
+            with ThreadPoolExecutor(max_workers=4) as executor:
+                futures = {
+                    executor.submit(classify_post_upload_address, api_key, group["data"], timeout): group
+                    for group in pending_by_key.values()
+                }
+                for future in as_completed(futures):
+                    if not post_upload_job_is_active(job_id, dataset_id):
+                        return
+                    group = futures[future]
+                    try:
+                        address_result = future.result()
+                    except Exception as exc:
+                        address_result = {
+                            "valid": False,
+                            "status": "technical_error",
+                            "message": f"Mapy.com se nepodařilo kontaktovat: {clean_text(exc)}",
+                            "query": mapy_address_query(group["data"]),
+                            "items": [],
+                            "safeAddress": None,
+                        }
+                    for row in group["rows"]:
+                        apply_post_upload_address_result(row, address_result)
+                    count = len(group["rows"])
+                    address_summary["current"] += count
+                    if address_result["status"] == "verified":
+                        address_summary["verified"] += count
+                    elif address_result["status"] == "suggestion":
+                        address_summary["suggestions"] += count
+                        address_summary["problems"] += count
+                    elif address_result["status"] == "technical_error":
+                        address_summary["technicalErrors"] += count
+                        address_summary["errors"].append(address_result["message"])
+                    else:
+                        address_summary["notFound"] += count
+                        address_summary["problems"] += count
+                    current = completed_total + address_summary["current"]
+                    update_operation_job(
+                        job_id,
+                        status="running",
+                        phase="addresses",
+                        progress=min(99, round((current / overall_total) * 100)) if overall_total else None,
+                        current=current,
+                        total=overall_total,
+                        message=f"Adresy: {address_summary['current']} / {address_total}",
+                        result=result,
+                    )
+            address_summary["status"] = "warning" if address_summary["technicalErrors"] else "completed"
+            address_summary["message"] = (
+                "Adresy byly zkontrolovány s technickým varováním."
+                if address_summary["technicalErrors"]
+                else "Adresy byly zkontrolovány."
+            )
+
+        warnings = any(section.get("status") == "warning" for section in result.values())
+        skipped_all = all(section.get("status") == "skipped" for section in result.values())
+        final_status = "skipped" if skipped_all else "warning" if warnings else "completed"
+        final_current = sum(
+            section.get("current", 0) for section in result.values() if section.get("status") != "skipped"
+        )
+        update_operation_job(
+            job_id,
+            status=final_status,
+            phase="done",
+            progress=100 if not skipped_all else None,
+            current=final_current,
+            total=overall_total,
+            message="Automatická kontrola je dokončená." if not warnings else "Kontrola skončila s varováním.",
+            result=result,
+        )
+    except Exception as exc:
+        update_operation_job(
+            job_id,
+            status="failed",
+            phase="error",
+            progress=None,
+            current=0,
+            total=overall_total,
+            message="Automatická kontrola selhala.",
+            result=result,
+            error=clean_text(exc),
+        )
+
+
+def enqueue_post_upload_checks(expedition_day_id, dataset_id, triggered_by="upload"):
+    ensure_schema()
+    job_id = secrets.token_urlsafe(18)
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                UPDATE operation_jobs
+                SET status = 'superseded', superseded_by_job_id = %s,
+                    phase = 'superseded', message = 'Nahrazeno novější kompletací.', updated_at = NOW()
+                WHERE kind = %s AND expedition_day_id = %s AND status IN ('queued', 'running')
+                """,
+                (job_id, POST_UPLOAD_JOB_KIND, expedition_day_id),
+            )
+            cur.execute(
+                """
+                INSERT INTO operation_jobs (
+                    id, kind, status, phase, message, expedition_day_id, dataset_id, triggered_by, result
+                )
+                VALUES (%s, %s, 'queued', 'queued', 'Kontrola čeká na spuštění.', %s, %s, %s, %s)
+                RETURNING *
+                """,
+                (
+                    job_id,
+                    POST_UPLOAD_JOB_KIND,
+                    expedition_day_id,
+                    dataset_id,
+                    clean_text(triggered_by),
+                    Json(post_upload_job_result()),
+                ),
+            )
+            row = cur.fetchone()
+    settings = read_settings(include_secrets=True)
+    threading.Thread(
+        target=run_post_upload_checks_job,
+        args=(job_id, expedition_day_id, dataset_id, settings),
+        daemon=True,
+        name=f"post-upload-checks-{dataset_id}",
+    ).start()
+    return operation_job_to_api(row)
+
+
+@app.route("/api/expedition-days/<int:day_id>/checks/latest")
+def latest_post_upload_checks(day_id):
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT * FROM operation_jobs
+                WHERE kind = %s AND expedition_day_id = %s
+                ORDER BY created_at DESC, dataset_id DESC LIMIT 1
+                """,
+                (POST_UPLOAD_JOB_KIND, day_id),
+            )
+            row = cur.fetchone()
+    return jsonify({
+        "ok": True,
+        "job": operation_job_to_api(row) if row else None,
+        "automation": normalize_automation_settings(read_settings(include_secrets=False).get("automation")),
+    })
+
+
+@app.route("/api/expedition-days/<int:day_id>/checks/retry", methods=["POST"])
+def retry_post_upload_checks(day_id):
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT * FROM datasets
+                WHERE expedition_day_id = %s AND dataset_kind = 'completion' AND status = 'active'
+                ORDER BY uploaded_at DESC, id DESC LIMIT 1
+                """,
+                (day_id,),
+            )
+            dataset = cur.fetchone()
+    if not dataset:
+        return jsonify({"error": "Pro tento den není aktivní dávka kompletace."}), 404
+    actor = current_user() or {}
+    job = enqueue_post_upload_checks(day_id, dataset["id"], actor.get("username") or "admin")
+    return jsonify({"ok": True, "checkJob": job}), 202
 
 
 @app.route("/api/product-feed/check/jobs", methods=["POST"])

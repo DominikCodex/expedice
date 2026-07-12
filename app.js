@@ -90,6 +90,10 @@ const batchReportState = {
   snapshot: null,
   live: null,
   integrity: null,
+  checks: null,
+  checksLoading: false,
+  checksPollTimer: null,
+  refreshedChecksJobId: null,
   loading: false,
 };
 
@@ -382,6 +386,8 @@ const els = {
   settingsMessage: document.getElementById("settings-message"),
   settingsUiFont: document.getElementById("settings-ui-font"),
   settingsCompletionDensity: document.getElementById("settings-completion-density"),
+  settingsAutoPaymentCheck: document.getElementById("settings-auto-payment-check"),
+  settingsAutoAddressCheck: document.getElementById("settings-auto-address-check"),
   settingsUiFontPreview: document.getElementById("settings-ui-font-preview"),
   settingsStatusFont: document.getElementById("settings-status-font"),
   settingsStatusProductFeed: document.getElementById("settings-status-product-feed"),
@@ -1486,6 +1492,95 @@ async function loadExpeditionBatchReportData() {
     batchReportState.loading = false;
     renderExpeditionBatchReport();
   }
+  await loadPostUploadChecks({ silent: true });
+}
+
+function stopPostUploadChecksPolling() {
+  if (batchReportState.checksPollTimer) window.clearTimeout(batchReportState.checksPollTimer);
+  batchReportState.checksPollTimer = null;
+}
+
+function postUploadCheckSectionHtml(label, section = {}) {
+  const status = section.status || "queued";
+  const tone = status === "failed" ? "danger" : status === "warning" || section.problems ? "warning" : status === "completed" ? "success" : "neutral";
+  const current = Number(section.current || 0);
+  const total = Number(section.total || 0);
+  const detail = status === "skipped" ? section.message || "Přeskočeno" : `${current} / ${total}`;
+  return `<div class="batch-check-row ${tone}"><span>${escapeHtml(label)}</span><strong>${escapeHtml(detail)}</strong>${
+    section.problems ? `<small>${escapeHtml(section.problems)} k řešení</small>` : ""
+  }</div>`;
+}
+
+function postUploadChecksHtml() {
+  if (batchReportState.checksLoading && !batchReportState.checks) {
+    return `<div class="batch-checks neutral"><strong>Načítám stav automatické kontroly...</strong></div>`;
+  }
+  const job = batchReportState.checks;
+  if (!job) return "";
+  const result = job.result || {};
+  const active = ["queued", "running"].includes(job.status);
+  const progress = job.progress !== null && job.progress !== undefined && Number.isFinite(Number(job.progress))
+    ? Math.max(0, Math.min(100, Number(job.progress)))
+    : null;
+  return `
+    <div class="batch-checks ${escapeHtml(job.status || "neutral")}">
+      <div class="batch-checks-head">
+        <div><span>Automatická kontrola</span><strong>${escapeHtml(job.message || "Kontrola čeká.")}</strong></div>
+        ${isAdmin() ? `<button type="button" class="secondary" data-action="retry-post-upload-checks" ${active ? "disabled" : ""}>Zopakovat kontrolu</button>` : ""}
+      </div>
+      <div class="batch-check-grid">
+        ${postUploadCheckSectionHtml("Platby", result.payments)}
+        ${postUploadCheckSectionHtml("Adresy", result.addresses)}
+      </div>
+      ${progress !== null ? `<div class="batch-check-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="width:${progress}%"></span></div><small>${progress} %</small>` : ""}
+      ${job.error ? `<p class="batch-check-error">${escapeHtml(job.error)}</p>` : ""}
+    </div>`;
+}
+
+async function loadPostUploadChecks(options = {}) {
+  const dayId = expeditionState.day?.id;
+  if (!dayId) return;
+  if (!options.silent) batchReportState.checksLoading = true;
+  try {
+    const data = await fetchJson(`/api/expedition-days/${encodeURIComponent(dayId)}/checks/latest`, { progress: false });
+    if (String(expeditionState.day?.id || "") !== String(dayId)) return;
+    const previousStatus = batchReportState.checks?.status;
+    batchReportState.checks = data.job || null;
+    const active = ["queued", "running"].includes(data.job?.status);
+    stopPostUploadChecksPolling();
+    if (active) {
+      batchReportState.checksPollTimer = window.setTimeout(() => loadPostUploadChecks({ silent: true }), 1800);
+    } else if (
+      data.job?.id &&
+      ["queued", "running"].includes(previousStatus) &&
+      batchReportState.refreshedChecksJobId !== data.job.id
+    ) {
+      batchReportState.refreshedChecksJobId = data.job.id;
+      if (completionState.dataset?.id) await loadCompletionDataset(completionState.dataset.id);
+    }
+  } catch (error) {
+    if (!options.silent) console.warn("Stav automatické kontroly se nepodařilo načíst.", error);
+  } finally {
+    batchReportState.checksLoading = false;
+    renderExpeditionBatchReport();
+  }
+}
+
+async function retryPostUploadChecks() {
+  const dayId = expeditionState.day?.id;
+  if (!dayId || !isAdmin()) return;
+  try {
+    const data = await fetchJson(`/api/expedition-days/${encodeURIComponent(dayId)}/checks/retry`, {
+      method: "POST",
+      body: JSON.stringify({}),
+      progressLabel: "Spouštím automatickou kontrolu...",
+    });
+    batchReportState.checks = data.checkJob || null;
+    renderExpeditionBatchReport();
+    await loadPostUploadChecks({ silent: true });
+  } catch (error) {
+    setMessage(`Kontrolu se nepodařilo spustit: ${error.message}`, "danger");
+  }
 }
 
 async function checkExpeditionBatchIntegrity() {
@@ -1514,7 +1609,7 @@ async function checkExpeditionBatchIntegrity() {
 function printExpeditionBatchReport() {
   if (!els.expeditionBatchReport || els.expeditionBatchReport.classList.contains("hidden")) return;
   const reportClone = els.expeditionBatchReport.cloneNode(true);
-  reportClone.querySelectorAll("[data-action='print-batch-report']").forEach((button) => button.remove());
+  reportClone.querySelectorAll("[data-action]").forEach((button) => button.remove());
   const printWindow = window.open("", "_blank", "width=420,height=720");
   if (!printWindow) {
     setMessage("Prohlížeč zablokoval tiskové okno. Povol prosím vyskakovací okna pro expedici.", "warning");
@@ -1527,7 +1622,7 @@ function printExpeditionBatchReport() {
       <head>
         <meta charset="UTF-8" />
         <title>Report vybrané várky</title>
-        <link rel="stylesheet" href="styles.css?v=day-reset-20260712" />
+        <link rel="stylesheet" href="styles.css?v=post-upload-checks-20260712-1" />
       </head>
       <body class="batch-report-print-page">
         ${reportClone.outerHTML}
@@ -1609,6 +1704,7 @@ function renderExpeditionBatchReport() {
       ${batchReportMetricHtml("Chybné adresy", addressErrorsValue, toNumber(addressErrorsValue, 0) ? "danger" : "")}
       ${batchReportMetricHtml("Platby k řešení", paymentWarningsValue, toNumber(paymentWarningsValue, 0) ? "warning" : "")}
     </div>
+    ${postUploadChecksHtml()}
     ${batchIntegrityHtml()}
     ${hasCompletionRows || serverMetrics ? batchReportRangesHtml(rows, serverMetrics?.codeRanges) : ""}
     <p class="batch-report-note">${notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</p>
@@ -1659,6 +1755,10 @@ function clearSelectedExpeditionDayData(options = {}) {
   batchReportState.snapshot = null;
   batchReportState.live = null;
   batchReportState.integrity = null;
+  batchReportState.checks = null;
+  batchReportState.checksLoading = false;
+  batchReportState.refreshedChecksJobId = null;
+  stopPostUploadChecksPolling();
   batchReportState.loading = false;
   completionState.loaded = false;
   completionState.paymentUpdatesSince = null;
@@ -1883,6 +1983,10 @@ async function loadExpeditionDay(dayDate) {
   batchReportState.snapshot = null;
   batchReportState.live = null;
   batchReportState.integrity = null;
+  batchReportState.checks = null;
+  batchReportState.checksLoading = false;
+  batchReportState.refreshedChecksJobId = null;
+  stopPostUploadChecksPolling();
   completionWorkflowState.row = null;
   completionWorkflowState.index = -1;
   completionWorkflowState.checkedItemKeys = new Set();
@@ -2902,6 +3006,7 @@ function renderSettingsOverview(settings, context = {}) {
 
 function renderSettings(settings) {
   applyAppearanceSettings(settings);
+  const automation = settings.automation || {};
   const mapy = settings.mapy || {};
   const printAgent = settings.printAgent || {};
   const paymentFeeds = settings.paymentFeeds || {};
@@ -2933,6 +3038,13 @@ function renderSettings(settings) {
     dpdGalantra,
   });
   renderExpeditionOrderCodeLabelSettings(settings);
+
+  if (els.settingsAutoPaymentCheck) {
+    els.settingsAutoPaymentCheck.checked = automation.postUploadPaymentCheck !== false;
+  }
+  if (els.settingsAutoAddressCheck) {
+    els.settingsAutoAddressCheck.checked = automation.postUploadAddressCheck !== false;
+  }
 
   els.settingsMapyKey.value = "";
   els.settingsMapyStatus.textContent = mapy.hasApiKey ? "API key je uložený." : "API key zatím není uložený.";
@@ -3129,6 +3241,10 @@ function collectSettings() {
     appearance: {
       font: uiFontKey(els.settingsUiFont?.value),
       completionDensity: completionDensityKey(els.settingsCompletionDensity?.value),
+    },
+    automation: {
+      postUploadPaymentCheck: els.settingsAutoPaymentCheck?.checked !== false,
+      postUploadAddressCheck: els.settingsAutoAddressCheck?.checked !== false,
     },
     expeditionOrderCodeLabels: collectExpeditionOrderCodeLabels(),
     mapy: {
@@ -7799,6 +7915,7 @@ els.expeditionBatchReport?.addEventListener("click", (event) => {
   if (!button || !els.expeditionBatchReport.contains(button)) return;
   if (button.dataset.action === "print-batch-report") printExpeditionBatchReport();
   if (button.dataset.action === "check-batch-integrity") checkExpeditionBatchIntegrity();
+  if (button.dataset.action === "retry-post-upload-checks") retryPostUploadChecks();
 });
 
 checkAuth();

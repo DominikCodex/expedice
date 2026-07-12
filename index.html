@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Roztřídění zboží</title>
-    <link rel="stylesheet" href="styles.css?v=expedition-editor-20260712-2" />
+    <link rel="stylesheet" href="styles.css?v=post-upload-checks-20260712-1" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=expedition-editor-20260712-2"></script>
+    <script defer src="app.js?v=post-upload-checks-20260712-1"></script>
   </head>
   <body>
     <aside id="global-progress" class="global-progress hidden" role="status" aria-live="polite" aria-atomic="true">
@@ -425,22 +425,22 @@
                     <section class="editor-section editor-section-contact">
                       <div class="editor-section-head"><span class="editor-section-number">1</span><div><p class="eyebrow">Kontakt</p><h3>Zákazník</h3></div></div>
                       <div class="editor-field-grid editor-field-grid-2">
-                        <label class="field"><span>Jméno</span><input id="editor-first-name" autocomplete="given-name" /></label>
-                        <label class="field"><span>Příjmení</span><input id="editor-last-name" autocomplete="family-name" /></label>
-                        <label class="field"><span>Telefon</span><input id="editor-phone" autocomplete="tel" /></label>
-                        <label class="field"><span>E-mail</span><input id="editor-email" type="email" autocomplete="email" /></label>
+                        <label class="field"><span>Jméno</span><input id="editor-first-name" autocomplete="off" /></label>
+                        <label class="field"><span>Příjmení</span><input id="editor-last-name" autocomplete="off" /></label>
+                        <label class="field"><span>Telefon</span><input id="editor-phone" autocomplete="off" /></label>
+                        <label class="field"><span>E-mail</span><input id="editor-email" type="email" autocomplete="off" /></label>
                       </div>
                     </section>
 
                     <section class="editor-section editor-section-address">
                       <div class="editor-section-head"><span class="editor-section-number">2</span><div><p class="eyebrow">Doručení</p><h3>Adresa a země</h3></div></div>
                       <div class="editor-field-grid editor-address-grid">
-                        <label class="field editor-span-2"><span>Ulice a číslo</span><input id="editor-street-with-number" autocomplete="street-address" /></label>
-                        <label class="field"><span>Ulice</span><input id="editor-street" /></label>
-                        <label class="field"><span>Číslo domu</span><input id="editor-house-number" /></label>
-                        <label class="field"><span>Město</span><input id="editor-city" autocomplete="address-level2" /></label>
-                        <label class="field"><span>PSČ</span><input id="editor-zip-code" autocomplete="postal-code" /></label>
-                        <label class="field"><span>Země</span><select id="editor-country"><option value="CZ">Česká republika</option><option value="SK">Slovensko</option></select></label>
+                        <label class="field editor-span-2"><span>Ulice a číslo</span><input id="editor-street-with-number" autocomplete="off" /></label>
+                        <label class="field"><span>Ulice</span><input id="editor-street" autocomplete="off" /></label>
+                        <label class="field"><span>Číslo domu</span><input id="editor-house-number" autocomplete="off" /></label>
+                        <label class="field"><span>Město</span><input id="editor-city" autocomplete="off" /></label>
+                        <label class="field"><span>PSČ</span><input id="editor-zip-code" autocomplete="off" /></label>
+                        <label class="field"><span>Země</span><select id="editor-country" autocomplete="off"><option value="CZ">Česká republika</option><option value="SK">Slovensko</option></select></label>
                       </div>
                       <div id="editor-address-result" class="editor-validation-result neutral">Adresa zatím nebyla ověřena.</div>
                     </section>
@@ -761,6 +761,23 @@
                     <input id="settings-mapy-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
                   </label>
                   <div id="settings-mapy-status" class="settings-hint"></div>
+                </fieldset>
+
+                <fieldset class="settings-card settings-card-wide">
+                  <legend>Automatická kontrola po nahrání</legend>
+                  <p class="settings-description">
+                    Kontroly běží na pozadí až po uložení kompletace. Nahrávání z Excelu na ně nečeká.
+                  </p>
+                  <div class="settings-switch-row">
+                    <label class="toggle settings-toggle">
+                      <input id="settings-auto-payment-check" type="checkbox" />
+                      <span>Kontrolovat platby po nahrání</span>
+                    </label>
+                    <label class="toggle settings-toggle">
+                      <input id="settings-auto-address-check" type="checkbox" />
+                      <span>Ověřovat adresy po nahrání</span>
+                    </label>
+                  </div>
                 </fieldset>
 
                 <fieldset class="settings-card settings-card-wide">
