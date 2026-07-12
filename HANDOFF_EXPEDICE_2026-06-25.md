@@ -60,7 +60,7 @@ Dulezite prostredove promenne:
 Je implementovane prihlaseni:
 
 - admin: `d.najman@centrum.cz`,
-- prvni historicke heslo bylo `1234`, po prvnim prihlaseni se melo vynutit zmeneni hesla,
+- puvodni vychozi heslo bylo odstraneno; bootstrap admina se nastavuje pouze pres promenne prostredi,
 - role: `admin`, `employee`.
 
 Admin muze:
@@ -631,4 +631,3 @@ Možné dalsi kroky:
 - Zlepsit platebni feed logiku pro vsechny slovenske a ceske stavy.
 - Dodelat jasny panel pro storna a nezaplacene objednavky.
 - Dodelat dokumentaci print agenta pro skladove PC.
-

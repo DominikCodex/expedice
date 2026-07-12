@@ -25,6 +25,8 @@ from psycopg2.extras import Json, RealDictCursor
 from flask import Flask, Response, g, jsonify, request, send_from_directory
 from werkzeug.security import check_password_hash, generate_password_hash
 
+from expedition_integrity import assess_integrity, build_batch_snapshot
+
 
 def env_int(name, default, minimum=None, maximum=None):
     try:
@@ -50,8 +52,8 @@ SESSION_CACHE = {}
 SESSION_CACHE_SECONDS = 30
 SESSION_COOKIE = "expedice_session"
 SESSION_SECONDS = 12 * 60 * 60
-INITIAL_ADMIN_USERNAME = "d.najman@centrum.cz"
-INITIAL_ADMIN_PASSWORD = "1234"
+INITIAL_ADMIN_USERNAME = os.environ.get("INITIAL_ADMIN_USERNAME", "").strip()
+INITIAL_ADMIN_PASSWORD = os.environ.get("INITIAL_ADMIN_PASSWORD", "")
 PASSWORD_HASH_METHOD = "pbkdf2:sha256:260000"
 LOGIN_USER_IP_MAX_ATTEMPTS = env_int("LOGIN_USER_IP_MAX_ATTEMPTS", 5, 1, 100)
 LOGIN_IP_MAX_ATTEMPTS = env_int("LOGIN_IP_MAX_ATTEMPTS", 25, LOGIN_USER_IP_MAX_ATTEMPTS, 500)
@@ -791,6 +793,8 @@ def seed_core_config(cur):
 
 
 def seed_initial_admin(cur):
+    if not INITIAL_ADMIN_USERNAME or not INITIAL_ADMIN_PASSWORD:
+        return
     username = INITIAL_ADMIN_USERNAME.lower()
     cur.execute("SELECT id FROM users WHERE username = %s", (username,))
     if cur.fetchone():
