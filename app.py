@@ -25,7 +25,7 @@ from psycopg2.extras import Json, RealDictCursor
 from flask import Flask, Response, g, jsonify, request, send_from_directory
 from werkzeug.security import check_password_hash, generate_password_hash
 
-from expedition_integrity import assess_integrity, build_batch_snapshot
+from expedition_integrity import assess_integrity, build_batch_snapshot, compare_order_variants
 
 
 def env_int(name, default, minimum=None, maximum=None):
@@ -553,6 +553,26 @@ def ensure_schema():
                     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                     actor TEXT
                 )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS expedition_batch_snapshots (
+                    id BIGSERIAL PRIMARY KEY,
+                    expedition_day_id BIGINT NOT NULL REFERENCES expedition_days(id) ON DELETE CASCADE,
+                    dataset_signature TEXT NOT NULL,
+                    completion_dataset_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    sorting_dataset_ids JSONB NOT NULL DEFAULT '[]'::jsonb,
+                    snapshot JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    UNIQUE (expedition_day_id, dataset_signature)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_batch_snapshots_day_created
+                ON expedition_batch_snapshots (expedition_day_id, created_at DESC)
                 """
             )
             cur.execute(
@@ -3452,6 +3472,129 @@ def full_expedition_day_payload(cur, day_date, include_deleted=False):
     }
 
 
+def active_expedition_day_rows(cur, expedition_day_id):
+    cur.execute(
+        """
+        SELECT * FROM datasets
+        WHERE expedition_day_id = %s
+          AND status = 'active'
+          AND deleted_at IS NULL
+        ORDER BY dataset_kind, shop_code, uploaded_at, id
+        """,
+        (expedition_day_id,),
+    )
+    datasets = cur.fetchall()
+    completion_ids = sorted(row["id"] for row in datasets if row["dataset_kind"] == "completion")
+    sorting_ids = sorted(row["id"] for row in datasets if row["dataset_kind"] == "sorting")
+
+    completion_rows = []
+    sorting_rows = []
+    if completion_ids:
+        cur.execute(
+            "SELECT * FROM completion_rows WHERE dataset_id = ANY(%s) ORDER BY dataset_id, row_number NULLS LAST, id",
+            (completion_ids,),
+        )
+        completion_rows = [completion_row_to_api(row) for row in cur.fetchall()]
+    if sorting_ids:
+        cur.execute(
+            "SELECT * FROM dataset_rows WHERE dataset_id = ANY(%s) ORDER BY dataset_id, row_number NULLS LAST, id",
+            (sorting_ids,),
+        )
+        sorting_rows = [row_to_api(row) for row in cur.fetchall()]
+    return datasets, completion_ids, sorting_ids, completion_rows, sorting_rows
+
+
+def batch_dataset_signature(completion_ids, sorting_ids):
+    source = "completion:" + ",".join(map(str, completion_ids)) + "|sorting:" + ",".join(map(str, sorting_ids))
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def get_or_create_batch_snapshot(cur, expedition_day_id):
+    datasets, completion_ids, sorting_ids, completion_rows, sorting_rows = active_expedition_day_rows(cur, expedition_day_id)
+    signature = batch_dataset_signature(completion_ids, sorting_ids)
+    snapshot = build_batch_snapshot(completion_rows, sorting_rows)
+    cur.execute(
+        """
+        INSERT INTO expedition_batch_snapshots (
+            expedition_day_id, dataset_signature, completion_dataset_ids, sorting_dataset_ids, snapshot
+        )
+        VALUES (%s, %s, %s, %s, %s)
+        ON CONFLICT (expedition_day_id, dataset_signature) DO NOTHING
+        RETURNING *
+        """,
+        (expedition_day_id, signature, Json(completion_ids), Json(sorting_ids), Json(snapshot)),
+    )
+    stored = cur.fetchone()
+    if not stored:
+        cur.execute(
+            """
+            SELECT * FROM expedition_batch_snapshots
+            WHERE expedition_day_id = %s AND dataset_signature = %s
+            """,
+            (expedition_day_id, signature),
+        )
+        stored = cur.fetchone()
+    return {
+        "id": stored["id"],
+        "expeditionDayId": stored["expedition_day_id"],
+        "datasetSignature": stored["dataset_signature"],
+        "completionDatasetIds": stored["completion_dataset_ids"],
+        "sortingDatasetIds": stored["sorting_dataset_ids"],
+        "createdAt": stored["created_at"].isoformat(),
+        "metrics": stored["snapshot"],
+    }, datasets, completion_rows, sorting_rows
+
+
+def live_batch_report(completion_rows, sorting_rows):
+    report = build_batch_snapshot(completion_rows, sorting_rows)
+    report["sortingRemaining"] = sum(max(0, int_from_text(row.get("remaining"))) for row in sorting_rows)
+    report["completionStatuses"] = {}
+    for row in completion_rows:
+        status = clean_text(row.get("completionStatus") or "").strip().upper() or "BEZ STAVU"
+        report["completionStatuses"][status] = report["completionStatuses"].get(status, 0) + 1
+    return report
+
+
+@app.route("/api/expedition-days/<int:expedition_day_id>/report")
+def expedition_day_report(expedition_day_id):
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM expedition_days WHERE id = %s", (expedition_day_id,))
+            day = cur.fetchone()
+            if not day or day["status"] != "active":
+                return jsonify({"error": "Expediční den nebyl nalezen."}), 404
+            snapshot, datasets, completion_rows, sorting_rows = get_or_create_batch_snapshot(cur, expedition_day_id)
+    return jsonify(
+        {
+            "day": expedition_day_summary(day),
+            "snapshot": snapshot,
+            "live": live_batch_report(completion_rows, sorting_rows),
+            "datasets": [dataset_summary(row) for row in datasets],
+        }
+    )
+
+
+@app.route("/api/expedition-days/<int:expedition_day_id>/integrity", methods=["GET", "POST"])
+def expedition_day_integrity(expedition_day_id):
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+    payload = request.get_json(silent=True) or {} if request.method == "POST" else {}
+    ean_map = payload.get("eanMap") if isinstance(payload.get("eanMap"), dict) else {}
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT id FROM expedition_days WHERE id = %s AND status = 'active'", (expedition_day_id,))
+            if not cur.fetchone():
+                return jsonify({"error": "Expediční den nebyl nalezen."}), 404
+            _, _, _, completion_rows, sorting_rows = active_expedition_day_rows(cur, expedition_day_id)
+    return jsonify(assess_integrity(completion_rows, sorting_rows, ean_map))
+
+
 @app.route("/api/expedition-days/initial")
 def initial_expedition_day():
     auth_error = require_download_token_if_configured()
@@ -3789,6 +3932,8 @@ def upload_dataset():
                     ),
                 )
 
+            batch_snapshot, _, _, _ = get_or_create_batch_snapshot(cur, expedition_day["id"])
+
     return jsonify(
         {
             "ok": True,
@@ -3796,6 +3941,7 @@ def upload_dataset():
             "expeditionDay": expedition_day_summary(expedition_day),
             "rows": len(rows),
             "replacedDatasets": replaced_datasets,
+            "batchSnapshot": batch_snapshot,
         }
     )
 
@@ -5520,6 +5666,7 @@ def completion_row_sorting_check(row_id):
                 sorting_rows = [row_to_api(item) for item in cur.fetchall()]
 
     remaining_total = sum(max(0, int_from_text(item.get("remaining"))) for item in sorting_rows)
+    variant_comparison = compare_order_variants(completion_row_to_api(row), sorting_rows)
     return jsonify(
         {
             "ok": bool(active_sorting) and bool(sorting_rows) and remaining_total == 0,
@@ -5527,6 +5674,7 @@ def completion_row_sorting_check(row_id):
             "rows": sorting_rows,
             "remainingTotal": remaining_total,
             "orderNumber": clean_text(row.get("order_number")),
+            "variantComparison": variant_comparison,
         }
     )
 

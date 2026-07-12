@@ -221,3 +221,69 @@ def assess_integrity(completion_rows, sorting_rows, ean_map=None):
         "issues": issues,
     }
 
+
+def completion_variant_quantities(row):
+    raw = row.get("raw") or row.get("raw_row") or {}
+    quantities = defaultdict(int)
+    array_keys = ("items", "products", "productItems", "product_items", "orderProducts", "order_items", "goods", "zbozi", "zboží")
+    if isinstance(raw, dict):
+        for key in array_keys:
+            values = raw.get(key)
+            if not isinstance(values, list):
+                continue
+            for item in values:
+                if not isinstance(item, dict):
+                    continue
+                code = item.get("variantCode") or item.get("productCode") or item.get("sku") or item.get("code") or item.get("kod") or item.get("kód")
+                quantity = item.get("quantity") or item.get("quantityText") or item.get("mnozstvi") or item.get("množství") or item.get("pocet") or item.get("počet") or item.get("ks")
+                key_code = normalized_code(code)
+                if key_code:
+                    quantities[key_code] += max(1, integer(quantity, 1))
+            if quantities:
+                return dict(quantities)
+
+    values = []
+    if isinstance(raw, dict):
+        values.extend(value for value in raw.values() if isinstance(value, str))
+    values.extend(value for value in (row.get("cells") or []) if isinstance(value, str))
+    pattern = re.compile(r"^([A-Z0-9][A-Z0-9-]{2,})\s+.+?\s+(\d+)\s*(?:x|ks)\s+.+$", re.IGNORECASE)
+    for value in values:
+        for line in re.split(r"\r?\n| {3,}|\t+", value):
+            match = pattern.match(line.strip().removeprefix("ERROR:").strip())
+            if match:
+                quantities[normalized_code(match.group(1))] += max(1, integer(match.group(2), 1))
+    return dict(quantities)
+
+
+def compare_order_variants(completion_row, sorting_rows):
+    expected = completion_variant_quantities(completion_row or {})
+    actual = defaultdict(lambda: {"initial": 0, "remaining": 0, "label": ""})
+    for row in sorting_rows or []:
+        label = text(row.get("variantCode") or row.get("variant_code") or row.get("productCode") or row.get("product_code"))
+        key = normalized_code(label)
+        if not key:
+            continue
+        actual[key]["label"] = label
+        actual[key]["initial"] += sorting_initial(row)
+        actual[key]["remaining"] += max(0, sorting_remaining(row))
+
+    keys = sorted(set(expected) | set(actual))
+    comparisons = []
+    for key in keys:
+        expected_quantity = expected.get(key)
+        actual_quantity = actual[key]["initial"] if key in actual else 0
+        comparisons.append(
+            {
+                "variantKey": key,
+                "variantCode": actual[key]["label"] if key in actual else key.upper(),
+                "expected": expected_quantity,
+                "sortingInitial": actual_quantity,
+                "sortingRemaining": actual[key]["remaining"] if key in actual else 0,
+                "matches": expected_quantity is None or expected_quantity == actual_quantity,
+            }
+        )
+    return {
+        "hasExpectedVariants": bool(expected),
+        "matches": all(item["matches"] for item in comparisons),
+        "items": comparisons,
+    }

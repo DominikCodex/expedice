@@ -1,4 +1,4 @@
-from expedition_integrity import assess_integrity, build_batch_snapshot
+from expedition_integrity import assess_integrity, build_batch_snapshot, compare_order_variants
 
 
 def completion(order, number, code, quantity=1):
@@ -57,3 +57,24 @@ def test_invalid_remaining_and_duplicate_number_are_errors():
     assert "duplicate_expedition_number" in codes
     assert result["ok"] is False
 
+
+def test_variant_comparison_reports_specific_quantity_difference():
+    row = {
+        "raw": {
+            "items": [
+                {"variantCode": "GBTW-3101-LXL-CERNA", "quantity": 2},
+                {"variantCode": "GBTW-3101-LXL-RUZOVA", "quantity": 1},
+            ]
+        }
+    }
+    comparison = compare_order_variants(
+        row,
+        [
+            sorting("A", "GBTW-3101-LXL-CERNA", 1),
+            sorting("A", "GBTW-3101-LXL-RUZOVA", 1),
+        ],
+    )
+    assert comparison["matches"] is False
+    black = next(item for item in comparison["items"] if item["variantKey"] == "gbtw3101lxlcerna")
+    assert black["expected"] == 2
+    assert black["sortingInitial"] == 1
