@@ -66,6 +66,14 @@ test("nové připojení nepřebírá dříve otevřený report dne", async ({ pa
   await expect(page.locator("#day-required-view")).toBeVisible();
 });
 
+test("uživatel bez zámku začíná bez vybraného dne a reportu", async ({ page }) => {
+  await mockExpeditionApp(page, "employee");
+  await page.goto("/kompletace");
+  await expect(page.locator("#expedition-day-list .day-card.active")).toHaveCount(0);
+  await expect(page.locator("#expedition-batch-report")).toBeHidden();
+  await expect(page.locator("#day-required-view")).toBeVisible();
+});
+
 test("platný uživatelský zámek dne se po připojení obnoví", async ({ page }) => {
   await page.addInitScript(() => {
     localStorage.setItem(
@@ -73,7 +81,7 @@ test("platný uživatelský zámek dne se po připojení obnoví", async ({ page
       JSON.stringify({ date: "2026-07-08", expiresAt: Date.now() + 60 * 60 * 1000 })
     );
   });
-  await mockExpeditionApp(page, "user");
+  await mockExpeditionApp(page, "employee");
   await page.goto("/kompletace");
   await expect(page.locator("#expedition-day-list .day-card.active")).toHaveCount(1);
   await expect(page.locator("#expedition-batch-report")).toBeVisible();
