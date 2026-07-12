@@ -97,7 +97,10 @@ test("admin fronta otevře kompaktní editor bez vodorovného přetečení", asy
   await expect(page.locator("#completion-body .completion-queue-row")).toHaveCount(1);
   await page.locator(".completion-filter-panel").scrollIntoViewIfNeeded();
   await page.screenshot({ path: ".codex-playwright/expedition-queue-1280x720.png", fullPage: false });
-  await page.locator("#completion-body .completion-queue-row").first().click();
+  const actionCell = page.locator("#completion-body .completion-queue-actions").first();
+  await actionCell.click({ position: { x: 2, y: 2 } });
+  await expect(page.locator("#expedition-editor")).toBeHidden();
+  await actionCell.locator("button[data-action='open-expedition-editor']").click();
   await expect(page.locator("#expedition-editor")).toBeVisible();
   await expect(page.locator(".expedition-editor-actions")).toBeVisible();
   await expect(page.locator("#editor-save-verify")).toBeInViewport();

@@ -7433,9 +7433,6 @@ els.importData.addEventListener("change", (event) => {
 els.sortingBody.addEventListener("click", async (event) => {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
-  if (button.dataset.action === "open-expedition-editor") {
-    openExpeditionEditor(button.dataset.rowId);
-  }
   const id = button.dataset.id;
   if (button.dataset.action === "deduct") {
     const entry = await changeItem(id, -1, { mode: "ruční odpis" });
@@ -7592,6 +7589,7 @@ setInterval(pollPaymentFeedUpdates, 30000);
 els.completionBody.addEventListener("click", (event) => {
   const interactiveTarget = event.target.closest("button, input, select, textarea, a, label");
   if (!interactiveTarget) {
+    if (event.target.closest(".completion-queue-actions")) return;
     const mainRow = event.target.closest("tr.completion-main-row");
     if (mainRow?.dataset.completionRowId) {
       toggleCompletionDetail(mainRow.dataset.completionRowId);
@@ -7601,6 +7599,9 @@ els.completionBody.addEventListener("click", (event) => {
 
   const button = event.target.closest("button[data-action]");
   if (!button) return;
+  if (button.dataset.action === "open-expedition-editor") {
+    openExpeditionEditor(button.dataset.rowId);
+  }
   if (button.dataset.action === "save-completion-row") {
     saveCompletionRow(button.dataset.rowId);
   }

@@ -311,15 +311,20 @@ body.modal-open {
 .queue-state.danger { background: #fde1e1; color: #9e2626; }
 
 .completion-queue-actions {
+  cursor: default;
   text-align: right;
 }
 
 .completion-queue-actions button {
+  display: block;
+  box-sizing: border-box;
   width: 100%;
+  max-width: 100%;
   min-height: 30px;
   margin: 2px 0;
   padding: 4px 7px;
   white-space: nowrap;
+  cursor: pointer;
 }
 
 .expedition-editor {
