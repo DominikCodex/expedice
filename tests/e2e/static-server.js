@@ -18,4 +18,3 @@ http.createServer((request, response) => {
   response.writeHead(200, { "Content-Type": types[path.extname(target)] || "application/octet-stream" });
   fs.createReadStream(target).pipe(response);
 }).listen(port, "127.0.0.1", () => console.log(`Test server: http://127.0.0.1:${port}`));
-
