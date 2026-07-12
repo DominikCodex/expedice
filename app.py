@@ -60,6 +60,7 @@ LOGIN_IP_MAX_ATTEMPTS = env_int("LOGIN_IP_MAX_ATTEMPTS", 25, LOGIN_USER_IP_MAX_A
 LOGIN_FAILURE_WINDOW_SECONDS = env_int("LOGIN_FAILURE_WINDOW_SECONDS", 15 * 60, 60, 24 * 60 * 60)
 LOGIN_LOCK_SECONDS = env_int("LOGIN_LOCK_SECONDS", 15 * 60, 60, 24 * 60 * 60)
 LOGIN_CLEANUP_AFTER_SECONDS = env_int("LOGIN_CLEANUP_AFTER_SECONDS", 24 * 60 * 60, 60 * 60, 7 * 24 * 60 * 60)
+AUDIT_RETENTION_DAYS = env_int("AUDIT_RETENTION_DAYS", 90, 7, 3650)
 PAYMENT_SYNC_LOCK = threading.Lock()
 PAYMENT_SYNC_ACTIVE_SECONDS = 20 * 60
 PRODUCT_FEED_DEFAULT_TIMEOUT_SECONDS = 600
@@ -601,6 +602,17 @@ def ensure_schema():
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS last_login_at TIMESTAMPTZ")
             cur.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS created_by BIGINT")
+            cur.execute("ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS row_id BIGINT")
+            cur.execute("ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS row_kind TEXT")
+            cur.execute("ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS actor_user_id BIGINT")
+            cur.execute("ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS ean TEXT")
+            cur.execute("ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS expedition_number TEXT")
+            cur.execute("ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS source TEXT")
+            cur.execute("ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS previous_state JSONB NOT NULL DEFAULT '{}'::jsonb")
+            cur.execute("ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS next_state JSONB NOT NULL DEFAULT '{}'::jsonb")
+            cur.execute("ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS reverted_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS reverted_by TEXT")
+            cur.execute("ALTER TABLE audit_events ADD COLUMN IF NOT EXISTS reversal_event_id BIGINT")
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS user_sessions (
@@ -628,6 +640,24 @@ def ensure_schema():
                 """
                 CREATE INDEX IF NOT EXISTS idx_users_username
                 ON users (username)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_audit_events_created
+                ON audit_events (created_at DESC, id DESC)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_audit_events_row
+                ON audit_events (row_kind, row_id, created_at DESC)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_audit_events_order_actor
+                ON audit_events (order_number, actor, created_at DESC)
                 """
             )
             cur.execute(
@@ -1441,6 +1471,98 @@ def row_value(row, *keys):
         if hasattr(row, "get") and row.get(key) is not None:
             return row.get(key)
     return ""
+
+
+def cleanup_audit_events(cur):
+    cur.execute(
+        """
+        DELETE FROM audit_events
+        WHERE id IN (
+            SELECT id FROM audit_events
+            WHERE created_at < NOW() - (%s * INTERVAL '1 day')
+            ORDER BY created_at
+            LIMIT 1000
+        )
+        """,
+        (AUDIT_RETENTION_DAYS,),
+    )
+
+
+def record_audit_event(
+    cur,
+    event_type,
+    *,
+    dataset_id=None,
+    shop_code="",
+    order_number="",
+    row_ref="",
+    row_id=None,
+    row_kind="",
+    payload=None,
+    previous_state=None,
+    next_state=None,
+    ean="",
+    expedition_number="",
+    source="",
+    actor_user=None,
+):
+    actor_user = actor_user or current_user() or {}
+    actor_name = actor_user.get("username") or actor_user.get("displayName") or actor_user.get("display_name") or "unknown"
+    cleanup_audit_events(cur)
+    cur.execute(
+        """
+        INSERT INTO audit_events (
+            event_type, dataset_id, shop_code, order_number, row_ref, payload, actor,
+            row_id, row_kind, actor_user_id, ean, expedition_number, source,
+            previous_state, next_state
+        )
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+        RETURNING *
+        """,
+        (
+            event_type,
+            dataset_id,
+            clean_text(shop_code),
+            clean_text(order_number),
+            clean_text(row_ref),
+            Json(payload or {}),
+            clean_text(actor_name),
+            row_id,
+            clean_text(row_kind),
+            actor_user.get("id"),
+            clean_text(ean),
+            clean_text(expedition_number),
+            clean_text(source),
+            Json(previous_state or {}),
+            Json(next_state or {}),
+        ),
+    )
+    return cur.fetchone()
+
+
+def audit_event_to_api(row):
+    return {
+        "id": row["id"],
+        "eventType": row["event_type"],
+        "datasetId": row.get("dataset_id"),
+        "shopCode": row.get("shop_code") or "",
+        "orderNumber": row.get("order_number") or "",
+        "rowRef": row.get("row_ref") or "",
+        "rowId": row.get("row_id"),
+        "rowKind": row.get("row_kind") or "",
+        "actorUserId": row.get("actor_user_id"),
+        "actor": row.get("actor") or "",
+        "ean": row.get("ean") or "",
+        "expeditionNumber": row.get("expedition_number") or "",
+        "source": row.get("source") or "",
+        "payload": row.get("payload") or {},
+        "previousState": row.get("previous_state") or {},
+        "nextState": row.get("next_state") or {},
+        "createdAt": row["created_at"].isoformat() if row.get("created_at") else None,
+        "revertedAt": row["reverted_at"].isoformat() if row.get("reverted_at") else None,
+        "revertedBy": row.get("reverted_by") or "",
+        "reversalEventId": row.get("reversal_event_id"),
+    }
 
 
 def row_text_contains(row, *keys_and_needles):
@@ -4796,6 +4918,22 @@ def insert_address_validation_log(cur, original_row, updated_row, result_payload
             Json(address_validation_row_snapshot(updated_row or original_row)),
         ),
     )
+    previous_state = address_validation_row_snapshot(original_row)
+    next_state = address_validation_row_snapshot(updated_row or original_row)
+    if previous_state != next_state:
+        record_audit_event(
+            cur,
+            "address_update",
+            dataset_id=row_value(row, "datasetId", "dataset_id"),
+            order_number=row_value(row, "orderNumber", "order_number"),
+            row_id=row_value(row, "id", "id"),
+            row_kind="completion",
+            payload={"action": address_validation_action(result_payload), "message": result_payload.get("message")},
+            previous_state=previous_state,
+            next_state=next_state,
+            source="address_validation",
+            actor_user=actor,
+        )
 
 
 def address_validation_log_to_api(row):
@@ -6278,8 +6416,22 @@ def update_settings():
         return auth_error
 
     payload = request.get_json(silent=True) or {}
+    previous = read_settings(include_secrets=False)
     save_settings_payload(payload.get("settings") or payload)
-    return jsonify({"ok": True, "settings": read_settings(include_secrets=False)})
+    updated = read_settings(include_secrets=False)
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            record_audit_event(
+                cur,
+                "admin_settings_update",
+                row_kind="settings",
+                payload={"changedSections": sorted((payload.get("settings") or payload).keys())},
+                previous_state=previous,
+                next_state=updated,
+                source="settings",
+            )
+    return jsonify({"ok": True, "settings": updated})
 
 
 @app.route("/api/product-feed/check", methods=["POST"])
@@ -6456,6 +6608,18 @@ def delete_expedition_day(day_date):
                 (actor, reason, day["id"]),
             )
             updated_day = cur.fetchone()
+            record_audit_event(
+                cur,
+                "expedition_day_delete",
+                row_id=day["id"],
+                row_kind="expedition_day",
+                row_ref=day["day_date"].isoformat(),
+                payload={"reason": reason, "datasetIds": deleted_dataset_ids},
+                previous_state={"status": day.get("status") or "active"},
+                next_state={"status": "deleted"},
+                source="expedition_days",
+                actor_user=user,
+            )
 
     return jsonify(
         {
@@ -6918,28 +7082,28 @@ def adjust_sorting_row(row_id):
             payload = {
                 "delta": delta,
                 "amount": amount,
+                "remainingBefore": row["remaining"] - delta,
                 "remainingAfter": row["remaining"],
                 "mode": clean_text(data.get("mode")),
                 "ean": clean_text(data.get("ean")),
                 "userId": user["id"] if user else None,
                 "username": user["username"] if user else "",
             }
-            cur.execute(
-                """
-                INSERT INTO audit_events (
-                    event_type, dataset_id, shop_code, order_number, row_ref, payload, actor
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                """,
-                (
-                    "sorting_deduct" if delta < 0 else "sorting_restore",
-                    row["dataset_id"],
-                    row["shop_code"],
-                    row["order_number"],
-                    row["sequence"],
-                    Json(payload),
-                    user["username"] if user else "unknown",
-                ),
+            record_audit_event(
+                cur,
+                "sorting_deduct" if delta < 0 else "sorting_restore",
+                dataset_id=row["dataset_id"],
+                shop_code=row["shop_code"],
+                order_number=row["order_number"],
+                row_ref=row["sequence"],
+                row_id=row["id"],
+                row_kind="sorting",
+                payload=payload,
+                previous_state={"remaining": row["remaining"] - delta},
+                next_state={"remaining": row["remaining"]},
+                ean=data.get("ean"),
+                source=data.get("mode") or "manual",
+                actor_user=user,
             )
 
     return jsonify({"ok": True, "row": row_to_api(row), "delta": delta, "actor": user_to_api(user)})
@@ -6970,6 +7134,32 @@ def update_completion_workflow(row_id):
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
                 """
+                SELECT cr.*, d.expedition_day_id
+                FROM completion_rows cr
+                JOIN datasets d ON d.id = cr.dataset_id
+                WHERE cr.id = %s
+                FOR UPDATE OF cr
+                """,
+                (row_id,),
+            )
+            previous_row = cur.fetchone()
+            if not previous_row:
+                return jsonify({"error": "Řádek kompletace nebyl nalezen."}), 404
+
+            active_warnings = []
+            if action == "ok" and previous_row.get("expedition_day_id"):
+                _, _, _, completion_rows, sorting_rows = active_expedition_day_rows(cur, previous_row["expedition_day_id"])
+                integrity = assess_integrity(completion_rows, sorting_rows)
+                order_number = clean_text(previous_row.get("order_number"))
+                active_warnings = [
+                    issue
+                    for issue in integrity["issues"]
+                    if not issue.get("context", {}).get("orderNumber")
+                    or clean_text(issue.get("context", {}).get("orderNumber")) == order_number
+                ]
+
+            cur.execute(
+                """
                 UPDATE completion_rows
                 SET completion_status = %s,
                     label_printed = CASE
@@ -6982,28 +7172,183 @@ def update_completion_workflow(row_id):
                 (status_by_action[action], action, row_id),
             )
             row = cur.fetchone()
-            if not row:
-                return jsonify({"error": "Řádek kompletace nebyl nalezen."}), 404
+            event_type = "completion_ok_with_issues" if action == "ok" and active_warnings else "completion_workflow"
+            record_audit_event(
+                cur,
+                event_type,
+                dataset_id=row["dataset_id"],
+                shop_code=row["shop_code"],
+                order_number=row["order_number"],
+                row_ref=row["expedition_number"],
+                row_id=row["id"],
+                row_kind="completion",
+                payload={"action": action, "status": status_by_action[action], "activeWarnings": active_warnings},
+                previous_state={"completionStatus": previous_row.get("completion_status") or ""},
+                next_state={"completionStatus": row.get("completion_status") or ""},
+                expedition_number=row["expedition_number"],
+                source="completion_workflow",
+                actor_user=user,
+            )
+
+    return jsonify(
+        {
+            "ok": True,
+            "row": completion_row_to_api(row),
+            "actor": user_to_api(user),
+            "integrityWarnings": active_warnings,
+        }
+    )
+
+
+@app.route("/api/audit-events")
+def list_audit_events():
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+    ensure_schema()
+    filters = ["ae.created_at >= NOW() - (%s * INTERVAL '1 day')"]
+    params = [AUDIT_RETENTION_DAYS]
+    mappings = {
+        "eventType": "ae.event_type",
+        "actor": "ae.actor",
+        "orderNumber": "ae.order_number",
+        "ean": "ae.ean",
+    }
+    for argument, column in mappings.items():
+        value = clean_text(request.args.get(argument)).strip()
+        if value:
+            filters.append(f"{column} ILIKE %s")
+            params.append(f"%{value}%")
+    date_from = clean_text(request.args.get("dateFrom")).strip()
+    date_to = clean_text(request.args.get("dateTo")).strip()
+    if date_from:
+        filters.append("ae.created_at >= %s::date")
+        params.append(date_from)
+    if date_to:
+        filters.append("ae.created_at < (%s::date + INTERVAL '1 day')")
+        params.append(date_to)
+    expedition_day_id = int_from_text(request.args.get("expeditionDayId"))
+    if expedition_day_id:
+        filters.append("d.expedition_day_id = %s")
+        params.append(expedition_day_id)
+    limit = clamp_int(request.args.get("limit"), 100, 1, 500)
+    offset = clamp_int(request.args.get("offset"), 0, 0, 1000000)
+    params.extend([limit, offset])
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cleanup_audit_events(cur)
+            cur.execute(
+                f"""
+                SELECT ae.*
+                FROM audit_events ae
+                LEFT JOIN datasets d ON d.id = ae.dataset_id
+                WHERE {' AND '.join(filters)}
+                ORDER BY ae.created_at DESC, ae.id DESC
+                LIMIT %s OFFSET %s
+                """,
+                params,
+            )
+            events = [audit_event_to_api(row) for row in cur.fetchall()]
+    return jsonify({"events": events, "limit": limit, "offset": offset, "retentionDays": AUDIT_RETENTION_DAYS})
+
+
+@app.route("/api/audit-events/<int:event_id>/revert", methods=["POST"])
+def revert_audit_event(event_id):
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+    ensure_schema()
+    user = current_user() or {}
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM audit_events WHERE id = %s FOR UPDATE", (event_id,))
+            event = cur.fetchone()
+            if not event:
+                return jsonify({"error": "Auditní událost nebyla nalezena."}), 404
+            if event.get("reverted_at"):
+                return jsonify({"error": "Tato operace už byla vrácena."}), 409
+            if event.get("event_type") not in {"sorting_deduct", "sorting_restore", "completion_workflow", "completion_ok_with_issues"}:
+                return jsonify({"error": "Tento typ operace nelze automaticky vrátit."}), 400
+            if not event.get("row_id") or not event.get("row_kind"):
+                return jsonify({"error": "Starší auditní záznam nemá údaje potřebné pro bezpečné vrácení."}), 400
 
             cur.execute(
                 """
-                INSERT INTO audit_events (
-                    event_type, dataset_id, shop_code, order_number, row_ref, payload, actor
-                )
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                SELECT id FROM audit_events
+                WHERE row_kind = %s AND row_id = %s AND created_at > %s
+                  AND reverted_at IS NULL
+                ORDER BY created_at DESC, id DESC
+                LIMIT 1
                 """,
-                (
-                    "completion_workflow",
-                    row["dataset_id"],
-                    row["shop_code"],
-                    row["order_number"],
-                    row["expedition_number"],
-                    Json({"action": action, "status": status_by_action[action]}),
-                    user["username"] if user else "unknown",
-                ),
+                (event["row_kind"], event["row_id"], event["created_at"]),
             )
+            later = cur.fetchone()
+            if later:
+                return jsonify({"error": "Na stejné položce už proběhla novější změna. Automatické vrácení by nebylo bezpečné."}), 409
 
-    return jsonify({"ok": True, "row": completion_row_to_api(row), "actor": user_to_api(user)})
+            if event["row_kind"] == "sorting":
+                expected = int_from_text((event.get("next_state") or {}).get("remaining"))
+                target = int_from_text((event.get("previous_state") or {}).get("remaining"))
+                cur.execute(
+                    """
+                    UPDATE dataset_rows SET remaining = %s
+                    WHERE id = %s AND remaining = %s
+                    RETURNING *
+                    """,
+                    (target, event["row_id"], expected),
+                )
+                updated = cur.fetchone()
+                if not updated:
+                    return jsonify({"error": "Množství položky se od auditu změnilo. Vrácení bylo zastaveno."}), 409
+                row_api = row_to_api(updated)
+                previous_state = {"remaining": expected}
+                next_state = {"remaining": target}
+            else:
+                expected = clean_text((event.get("next_state") or {}).get("completionStatus"))
+                target = clean_text((event.get("previous_state") or {}).get("completionStatus"))
+                cur.execute(
+                    """
+                    UPDATE completion_rows SET completion_status = %s
+                    WHERE id = %s AND COALESCE(completion_status, '') = %s
+                    RETURNING *
+                    """,
+                    (target, event["row_id"], expected),
+                )
+                updated = cur.fetchone()
+                if not updated:
+                    return jsonify({"error": "Stav objednávky se od auditu změnil. Vrácení bylo zastaveno."}), 409
+                row_api = completion_row_to_api(updated)
+                previous_state = {"completionStatus": expected}
+                next_state = {"completionStatus": target}
+
+            reversal = record_audit_event(
+                cur,
+                "audit_revert",
+                dataset_id=event.get("dataset_id"),
+                shop_code=event.get("shop_code"),
+                order_number=event.get("order_number"),
+                row_ref=event.get("row_ref"),
+                row_id=event.get("row_id"),
+                row_kind=event.get("row_kind"),
+                payload={"revertedEventId": event_id, "reason": clean_text((request.get_json(silent=True) or {}).get("reason"))},
+                previous_state=previous_state,
+                next_state=next_state,
+                ean=event.get("ean"),
+                expedition_number=event.get("expedition_number"),
+                source="admin_audit",
+                actor_user=user,
+            )
+            cur.execute(
+                """
+                UPDATE audit_events
+                SET reverted_at = NOW(), reverted_by = %s, reversal_event_id = %s
+                WHERE id = %s
+                RETURNING *
+                """,
+                (user.get("username") or "admin", reversal["id"], event_id),
+            )
+            reverted = cur.fetchone()
+    return jsonify({"ok": True, "event": audit_event_to_api(reverted), "reversal": audit_event_to_api(reversal), "row": row_api})
 
 
 @app.route("/api/completion/rows/<int:row_id>", methods=["PATCH"])
