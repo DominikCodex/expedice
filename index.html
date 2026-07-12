@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Roztřídění zboží</title>
-    <link rel="stylesheet" href="styles.css?v=day-reset-20260712" />
+    <link rel="stylesheet" href="styles.css?v=expedition-editor-20260712-1" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=day-reset-20260712"></script>
+    <script defer src="app.js?v=expedition-editor-20260712-1"></script>
   </head>
   <body>
     <aside id="global-progress" class="global-progress hidden" role="status" aria-live="polite" aria-atomic="true">
@@ -341,6 +341,7 @@
             <section id="packeta-dry-run-result" class="dry-run-result hidden" aria-live="polite"></section>
 
             <section class="completion-filter-panel" aria-label="Filtry kompletace">
+              <div id="completion-problem-filters" class="completion-problem-filters" aria-label="Rychlé filtry problémů"></div>
               <label class="field">
                 <span>Hledat v objednávkách</span>
                 <input id="completion-filter-search" autocomplete="off" placeholder="Objednávka, zákazník, adresa, telefon..." />
@@ -393,24 +394,118 @@
                 <table class="completion-table">
                   <thead>
                     <tr>
-                      <th>Akce</th>
                       <th>Poř.</th>
-                      <th>Obj.</th>
-                      <th>Zákazník</th>
-                      <th>Adresa</th>
-                      <th>Kontakt</th>
-                      <th>Ověření adresy</th>
-                      <th>Dopravce</th>
-                      <th>Pozn. přepravce</th>
+                      <th>Objednávka a zákazník</th>
+                      <th>Doručení</th>
+                      <th>Produkty</th>
                       <th>Platba</th>
-                      <th>Kusů</th>
                       <th>Stav</th>
-                      <th>Poznámka</th>
-                      <th>Tech</th>
+                      <th>Rychlé akce</th>
                     </tr>
                   </thead>
                   <tbody id="completion-body"></tbody>
                 </table>
+              </div>
+            </section>
+
+            <section id="expedition-editor" class="expedition-editor hidden" role="dialog" aria-modal="true" aria-labelledby="expedition-editor-title">
+              <div class="expedition-editor-backdrop" data-editor-action="close"></div>
+              <div class="expedition-editor-dialog">
+                <header class="expedition-editor-head">
+                  <div>
+                    <p class="eyebrow">Expediční údaje</p>
+                    <h2 id="expedition-editor-title">Úprava objednávky</h2>
+                    <div id="expedition-editor-subtitle" class="expedition-editor-subtitle"></div>
+                  </div>
+                  <button id="expedition-editor-close" type="button" class="icon-button" title="Zavřít editor" aria-label="Zavřít editor">×</button>
+                </header>
+                <div id="expedition-editor-alert" class="message neutral hidden" aria-live="polite"></div>
+                <div class="expedition-editor-content">
+                  <div class="expedition-editor-main">
+                    <section class="editor-section editor-section-contact">
+                      <div class="editor-section-head"><span class="editor-section-number">1</span><div><p class="eyebrow">Kontakt</p><h3>Zákazník</h3></div></div>
+                      <div class="editor-field-grid editor-field-grid-2">
+                        <label class="field"><span>Jméno</span><input id="editor-first-name" autocomplete="given-name" /></label>
+                        <label class="field"><span>Příjmení</span><input id="editor-last-name" autocomplete="family-name" /></label>
+                        <label class="field"><span>Telefon</span><input id="editor-phone" autocomplete="tel" /></label>
+                        <label class="field"><span>E-mail</span><input id="editor-email" type="email" autocomplete="email" /></label>
+                      </div>
+                    </section>
+
+                    <section class="editor-section editor-section-address">
+                      <div class="editor-section-head"><span class="editor-section-number">2</span><div><p class="eyebrow">Doručení</p><h3>Adresa a země</h3></div></div>
+                      <div class="editor-field-grid editor-address-grid">
+                        <label class="field editor-span-2"><span>Ulice a číslo</span><input id="editor-street-with-number" autocomplete="street-address" /></label>
+                        <label class="field"><span>Ulice</span><input id="editor-street" /></label>
+                        <label class="field"><span>Číslo domu</span><input id="editor-house-number" /></label>
+                        <label class="field"><span>Město</span><input id="editor-city" autocomplete="address-level2" /></label>
+                        <label class="field"><span>PSČ</span><input id="editor-zip-code" autocomplete="postal-code" /></label>
+                        <label class="field"><span>Země</span><select id="editor-country"><option value="CZ">Česká republika</option><option value="SK">Slovensko</option></select></label>
+                      </div>
+                      <div id="editor-address-result" class="editor-validation-result neutral">Adresa zatím nebyla ověřena.</div>
+                    </section>
+
+                    <section class="editor-section editor-section-delivery">
+                      <div class="editor-section-head"><span class="editor-section-number">3</span><div><p class="eyebrow">Přeprava</p><h3>Dopravce a služba</h3></div></div>
+                      <div class="editor-field-grid editor-field-grid-2">
+                        <label class="field editor-span-2"><span>Služba</span>
+                          <select id="editor-delivery-service">
+                            <option value="">Vyber službu</option>
+                            <option value="packeta_pickup">Zásilkovna/Packeta - výdejní místo</option>
+                            <option value="packeta_home">Packeta - doručení na adresu</option>
+                            <option value="dpd_courier">DPD - kurýr na adresu</option>
+                            <option value="dpd_pickup">DPD - výdejní místo nebo box</option>
+                            <option value="gift_voucher_email">E-mailový poukaz</option>
+                            <option value="manual">Ruční doprava</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div id="editor-pickup-panel" class="editor-pickup-panel hidden">
+                        <div class="editor-pickup-tools">
+                          <label class="field"><span>ID výdejního místa</span><input id="editor-pickup-id" autocomplete="off" /></label>
+                          <button id="editor-pickup-verify" type="button" class="secondary">Ověřit ID</button>
+                          <button id="editor-packeta-widget" type="button" class="secondary hidden">Vybrat na mapě Packety</button>
+                        </div>
+                        <label class="field"><span>Hledat podle města, PSČ, adresy, názvu nebo ID</span><input id="editor-pickup-search" autocomplete="off" /></label>
+                        <div id="editor-pickup-selected" class="editor-pickup-selected neutral">Výdejní místo není vybrané.</div>
+                        <div id="editor-pickup-results" class="editor-pickup-results"></div>
+                        <div id="editor-pickup-cache" class="settings-hint"></div>
+                      </div>
+                    </section>
+
+                    <section class="editor-section editor-section-parcel">
+                      <div class="editor-section-head"><span class="editor-section-number">4</span><div><p class="eyebrow">Zásilka</p><h3>Balík a platba</h3></div></div>
+                      <div class="editor-field-grid editor-parcel-grid">
+                        <label class="field"><span>Hmotnost (kg)</span><input id="editor-weight" inputmode="decimal" /></label>
+                        <label class="field"><span>Dobírka</span><input id="editor-cod-amount" inputmode="decimal" /></label>
+                        <label class="field"><span>Měna</span><select id="editor-currency"><option value="CZK">CZK</option><option value="EUR">EUR</option></select></label>
+                        <label class="field editor-span-3"><span>Poznámka dopravci</span><textarea id="editor-carrier-note" rows="2"></textarea></label>
+                      </div>
+                    </section>
+                  </div>
+
+                  <aside class="expedition-editor-aside">
+                    <section class="editor-section">
+                      <div class="editor-section-head"><div><p class="eyebrow">Pouze ke čtení</p><h3>Produkty</h3></div></div>
+                      <div id="editor-products"></div>
+                    </section>
+                    <section class="editor-section">
+                      <div class="editor-section-head"><div><p class="eyebrow">Původní import</p><h3>Zdrojové údaje</h3></div></div>
+                      <div id="editor-imported-data" class="editor-imported-data"></div>
+                    </section>
+                    <section class="editor-section">
+                      <div class="editor-section-head"><div><p class="eyebrow">Historie</p><h3>Zásilky a změny</h3></div></div>
+                      <div id="editor-shipment-history" class="editor-shipment-history"></div>
+                      <button id="editor-create-replacement" type="button" class="danger hidden">Vytvořit náhradní zásilku</button>
+                    </section>
+                  </aside>
+                </div>
+                <footer class="expedition-editor-actions">
+                  <button id="editor-save-verify" type="button" class="primary">Uložit a ověřit</button>
+                  <button id="editor-save-next" type="button" class="secondary">Uložit a další problém</button>
+                  <button id="editor-open-shop" type="button" class="secondary">Otevřít v e-shopu</button>
+                  <button id="editor-cancel" type="button" class="secondary">Zavřít</button>
+                </footer>
               </div>
             </section>
 
@@ -826,25 +921,36 @@
                       <span>Výchozí API heslo</span>
                       <input id="settings-packeta-password" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
                     </label>
+                    <label class="field">
+                      <span>API key pro katalog a mapový widget</span>
+                      <input id="settings-packeta-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
+                    </label>
                   </div>
                   <div id="settings-packeta-status" class="settings-hint"></div>
                   <div class="settings-client-list">
                     <div class="settings-client-row settings-client-row-compact">
                       <strong>iVeronika.cz</strong>
-                      <label class="field">
-                        <span>API heslo klienta</span>
-                        <input id="settings-packeta-iveronika-password" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
-                      </label>
+                      <div class="settings-mini-grid">
+                        <label class="field"><span>API heslo klienta</span><input id="settings-packeta-iveronika-password" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" /></label>
+                        <label class="field"><span>API key katalogu</span><input id="settings-packeta-iveronika-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" /></label>
+                      </div>
                       <div id="settings-packeta-iveronika-status" class="settings-hint"></div>
                     </div>
                     <div class="settings-client-row settings-client-row-compact">
                       <strong>Galantra.cz</strong>
-                      <label class="field">
-                        <span>API heslo klienta</span>
-                        <input id="settings-packeta-galantra-password" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" />
-                      </label>
+                      <div class="settings-mini-grid">
+                        <label class="field"><span>API heslo klienta</span><input id="settings-packeta-galantra-password" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" /></label>
+                        <label class="field"><span>API key katalogu</span><input id="settings-packeta-galantra-key" type="password" autocomplete="off" placeholder="Prázdné = ponechat uložené" /></label>
+                      </div>
                       <div id="settings-packeta-galantra-status" class="settings-hint"></div>
                     </div>
+                  </div>
+                  <div class="settings-catalog-diagnostics">
+                    <div>
+                      <strong>Katalogy výdejních míst</strong>
+                      <span id="settings-pickup-catalog-status">Diagnostika se načte po otevření Nastavení.</span>
+                    </div>
+                    <button id="settings-pickup-catalog-refresh" type="button" class="secondary">Obnovit katalogy</button>
                   </div>
                 </fieldset>
 

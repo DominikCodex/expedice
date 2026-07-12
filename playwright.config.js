@@ -6,9 +6,18 @@ module.exports = defineConfig({
   timeout: 45_000,
   expect: { timeout: 7_500 },
   use: {
-    baseURL: process.env.EXPEDICE_TEST_URL || "http://127.0.0.1:8000",
+    baseURL: process.env.EXPEDICE_TEST_URL || "http://127.0.0.1:8123",
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
+  webServer: process.env.EXPEDICE_TEST_URL
+    ? undefined
+    : {
+        command: "node tests/e2e/static-server.js 8123",
+        url: "http://127.0.0.1:8123",
+        reuseExistingServer: false,
+        timeout: 15_000,
+        gracefulShutdown: { signal: "SIGTERM", timeout: 2_000 },
+      },
   reporter: [["list"], ["html", { outputFolder: "playwright-report", open: "never" }]],
 });

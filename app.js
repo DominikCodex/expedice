@@ -52,6 +52,18 @@ const completionFilters = {
   carrier: "",
   status: "",
   shop: "",
+  problem: "issues",
+};
+
+const expeditionEditorState = {
+  row: null,
+  shipments: [],
+  problems: [],
+  pickupPoint: null,
+  pickupWidgetKey: "",
+  dirty: false,
+  loading: false,
+  pickupTimer: null,
 };
 
 const eanFilters = {
@@ -277,6 +289,44 @@ const els = {
   completionFilterStatus: document.getElementById("completion-filter-status"),
   completionFilterShop: document.getElementById("completion-filter-shop"),
   completionFilterReset: document.getElementById("completion-filter-reset"),
+  completionProblemFilters: document.getElementById("completion-problem-filters"),
+  expeditionEditor: document.getElementById("expedition-editor"),
+  expeditionEditorClose: document.getElementById("expedition-editor-close"),
+  expeditionEditorTitle: document.getElementById("expedition-editor-title"),
+  expeditionEditorSubtitle: document.getElementById("expedition-editor-subtitle"),
+  expeditionEditorAlert: document.getElementById("expedition-editor-alert"),
+  editorFirstName: document.getElementById("editor-first-name"),
+  editorLastName: document.getElementById("editor-last-name"),
+  editorPhone: document.getElementById("editor-phone"),
+  editorEmail: document.getElementById("editor-email"),
+  editorStreetWithNumber: document.getElementById("editor-street-with-number"),
+  editorStreet: document.getElementById("editor-street"),
+  editorHouseNumber: document.getElementById("editor-house-number"),
+  editorCity: document.getElementById("editor-city"),
+  editorZipCode: document.getElementById("editor-zip-code"),
+  editorCountry: document.getElementById("editor-country"),
+  editorDeliveryService: document.getElementById("editor-delivery-service"),
+  editorPickupPanel: document.getElementById("editor-pickup-panel"),
+  editorPickupId: document.getElementById("editor-pickup-id"),
+  editorPickupVerify: document.getElementById("editor-pickup-verify"),
+  editorPacketaWidget: document.getElementById("editor-packeta-widget"),
+  editorPickupSearch: document.getElementById("editor-pickup-search"),
+  editorPickupSelected: document.getElementById("editor-pickup-selected"),
+  editorPickupResults: document.getElementById("editor-pickup-results"),
+  editorPickupCache: document.getElementById("editor-pickup-cache"),
+  editorAddressResult: document.getElementById("editor-address-result"),
+  editorWeight: document.getElementById("editor-weight"),
+  editorCodAmount: document.getElementById("editor-cod-amount"),
+  editorCurrency: document.getElementById("editor-currency"),
+  editorCarrierNote: document.getElementById("editor-carrier-note"),
+  editorProducts: document.getElementById("editor-products"),
+  editorImportedData: document.getElementById("editor-imported-data"),
+  editorShipmentHistory: document.getElementById("editor-shipment-history"),
+  editorCreateReplacement: document.getElementById("editor-create-replacement"),
+  editorSaveVerify: document.getElementById("editor-save-verify"),
+  editorSaveNext: document.getElementById("editor-save-next"),
+  editorOpenShop: document.getElementById("editor-open-shop"),
+  editorCancel: document.getElementById("editor-cancel"),
   addressValidationLog: document.getElementById("address-validation-log"),
   addressValidationLogRefresh: document.getElementById("address-validation-log-refresh"),
   workflowBoxCode: document.getElementById("completion-box-code"),
@@ -355,10 +405,15 @@ const els = {
   settingsPaymentGalantraStatus: document.getElementById("settings-payment-galantra-status"),
   settingsPacketaUrl: document.getElementById("settings-packeta-url"),
   settingsPacketaPassword: document.getElementById("settings-packeta-password"),
+  settingsPacketaKey: document.getElementById("settings-packeta-key"),
   settingsPacketaStatus: document.getElementById("settings-packeta-status"),
+  settingsPickupCatalogStatus: document.getElementById("settings-pickup-catalog-status"),
+  settingsPickupCatalogRefresh: document.getElementById("settings-pickup-catalog-refresh"),
   settingsPacketaIveronikaPassword: document.getElementById("settings-packeta-iveronika-password"),
+  settingsPacketaIveronikaKey: document.getElementById("settings-packeta-iveronika-key"),
   settingsPacketaIveronikaStatus: document.getElementById("settings-packeta-iveronika-status"),
   settingsPacketaGalantraPassword: document.getElementById("settings-packeta-galantra-password"),
+  settingsPacketaGalantraKey: document.getElementById("settings-packeta-galantra-key"),
   settingsPacketaGalantraStatus: document.getElementById("settings-packeta-galantra-status"),
   settingsDpdUrl: document.getElementById("settings-dpd-url"),
   settingsDpdKey: document.getElementById("settings-dpd-key"),
@@ -2925,6 +2980,10 @@ function renderSettings(settings) {
 
   els.settingsPacketaUrl.value = packeta.apiUrl || "";
   els.settingsPacketaPassword.value = "";
+  if (els.settingsPacketaKey) {
+    els.settingsPacketaKey.value = "";
+    els.settingsPacketaKey.placeholder = packeta.hasApiKey ? "Uloženo, prázdné = ponechat" : "Zadej API key";
+  }
   renderSecretInput(
     els.settingsPacketaIveronikaPassword,
     els.settingsPacketaIveronikaStatus,
@@ -2932,6 +2991,10 @@ function renderSettings(settings) {
     "API heslo je uložené.",
     "API heslo zatím není uložené."
   );
+  if (els.settingsPacketaIveronikaKey) {
+    els.settingsPacketaIveronikaKey.value = "";
+    els.settingsPacketaIveronikaKey.placeholder = packetaIveronika.hasApiKey ? "Uloženo, prázdné = ponechat" : "Zadej API key";
+  }
   renderSecretInput(
     els.settingsPacketaGalantraPassword,
     els.settingsPacketaGalantraStatus,
@@ -2939,6 +3002,10 @@ function renderSettings(settings) {
     "API heslo je uložené.",
     "API heslo zatím není uložené."
   );
+  if (els.settingsPacketaGalantraKey) {
+    els.settingsPacketaGalantraKey.value = "";
+    els.settingsPacketaGalantraKey.placeholder = packetaGalantra.hasApiKey ? "Uloženo, prázdné = ponechat" : "Zadej API key";
+  }
   els.settingsPacketaStatus.textContent = [
     packeta.hasApiPassword ? "Výchozí API heslo je uložené." : "Výchozí API heslo zatím není uložené.",
     packetaIveronika.hasApiPassword ? "iVeronika.cz má uložené API heslo." : "iVeronika.cz zatím nemá API heslo.",
@@ -2988,6 +3055,52 @@ function renderSettings(settings) {
   els.settingsSenderEmail.value = dpd.senderEmail || "";
 }
 
+async function loadPickupCatalogDiagnostics() {
+  if (!els.settingsPickupCatalogStatus || !isAdmin()) return;
+  els.settingsPickupCatalogStatus.textContent = "Načítám stav katalogů...";
+  const combinations = [
+    ["packeta", "CZ"],
+    ["packeta", "SK"],
+    ["dpd", "CZ"],
+    ["dpd", "SK"],
+  ];
+  const results = await Promise.all(
+    combinations.map(async ([carrier, country]) => {
+      try {
+        const data = await fetchJson(`/api/pickup-points?carrier=${carrier}&country=${country}&limit=1`, { progress: false });
+        return { carrier, country, ...(data.catalog || {}), ok: true };
+      } catch (error) {
+        return { carrier, country, ok: false, message: error.message };
+      }
+    })
+  );
+  els.settingsPickupCatalogStatus.innerHTML = results
+    .map((item) => {
+      const label = item.carrier === "packeta" ? "Packeta" : "DPD";
+      const refreshed = item.refreshedAt ? formatTime(item.refreshedAt) : "bez aktualizace";
+      return `<span class="catalog-status ${item.ok && item.rowsCount ? "ok" : "warning"}"><b>${label} ${item.country}</b> · ${escapeHtml(
+        item.rowsCount || 0
+      )} míst · ${escapeHtml(item.ok ? refreshed : item.message || "chyba")}</span>`;
+    })
+    .join("");
+}
+
+async function refreshPickupCatalogs() {
+  if (!isAdmin() || !els.settingsPickupCatalogRefresh) return;
+  els.settingsPickupCatalogRefresh.disabled = true;
+  els.settingsPickupCatalogStatus.textContent = "Obnovuji katalogy Packety a DPD. Může to chvíli trvat...";
+  try {
+    const data = await fetchJson("/api/pickup-points/refresh", { method: "POST", body: JSON.stringify({}) });
+    const failures = (data.results || []).filter((item) => !item.ok);
+    setSettingsMessage(failures.length ? `Katalogy obnoveny s ${failures.length} chybami.` : "Katalogy výdejních míst byly obnoveny.", failures.length ? "warning" : "success");
+  } catch (error) {
+    setSettingsMessage(`Obnova katalogů selhala: ${error.message}`, "error");
+  } finally {
+    els.settingsPickupCatalogRefresh.disabled = false;
+    await loadPickupCatalogDiagnostics();
+  }
+}
+
 async function loadSettings(options = {}) {
   if (!options.silent) {
     setSettingsMessage("Načítám nastavení...", "neutral");
@@ -2997,6 +3110,7 @@ async function loadSettings(options = {}) {
     settingsState.settings = data.settings || {};
     settingsState.loaded = true;
     renderSettings(settingsState.settings);
+    loadPickupCatalogDiagnostics();
     renderExpeditionBatchReport();
     if (!options.silent) {
       setSettingsMessage("Nastavení je načtené.", "success");
@@ -3046,14 +3160,17 @@ function collectSettings() {
     packeta: {
       apiUrl: els.settingsPacketaUrl.value.trim(),
       apiPassword: els.settingsPacketaPassword.value,
+      apiKey: els.settingsPacketaKey?.value || "",
       clients: {
         iveronika_cz: {
           name: "iVeronika.cz",
           apiPassword: els.settingsPacketaIveronikaPassword.value,
+          apiKey: els.settingsPacketaIveronikaKey?.value || "",
         },
         galantra_cz: {
           name: "Galantra.cz",
           apiPassword: els.settingsPacketaGalantraPassword.value,
+          apiKey: els.settingsPacketaGalantraKey?.value || "",
         },
       },
     },
@@ -4025,9 +4142,12 @@ function completionProductPreviewItems(row) {
   ];
   const seen = new Set();
   return items.filter((item, index) => {
-    const key = [item.variantCode, item.productCode, item.productName, item.variant]
-      .map((value) => normalize(String(value || "")))
-      .join("|");
+    const primaryCode = normalize(String(item.variantCode || ""));
+    const key =
+      primaryCode ||
+      [item.productCode, item.productName, item.variant]
+        .map((value) => normalize(String(value || "")))
+        .join("|");
     if (seen.has(key)) return false;
     seen.add(key || `product-${index}`);
     return true;
@@ -5526,100 +5646,549 @@ function openWorkflowOrder() {
   window.open(url, "_blank", "noopener,noreferrer");
 }
 
+const EDITOR_DETAIL_FIELDS = {
+  firstName: "editorFirstName",
+  lastName: "editorLastName",
+  phone: "editorPhone",
+  email: "editorEmail",
+  streetWithNumber: "editorStreetWithNumber",
+  street: "editorStreet",
+  houseNumber: "editorHouseNumber",
+  city: "editorCity",
+  zipCode: "editorZipCode",
+  country: "editorCountry",
+  deliveryService: "editorDeliveryService",
+  pickupPointId: "editorPickupId",
+  weight: "editorWeight",
+  codAmount: "editorCodAmount",
+  currency: "editorCurrency",
+  carrierNote: "editorCarrierNote",
+};
+
+const COMPLETION_PROBLEM_FILTERS = [
+  ["issues", "K řešení"],
+  ["address", "Adresy"],
+  ["delivery", "Doprava"],
+  ["pickup", "Výdejní místa"],
+  ["payment", "Platby"],
+  ["replacement", "Náhradní zásilky"],
+  ["ready", "Připravené"],
+];
+
+function inferredCompletionProblems(row) {
+  const problems = Array.isArray(row?.problems) ? [...row.problems] : [];
+  const categories = new Set(problems.map((item) => item.category));
+  const add = (category, message, severity = "error") => {
+    if (!categories.has(category)) {
+      problems.push({ category, message, severity });
+      categories.add(category);
+    }
+  };
+  if (completionRequiresAddressValidation(row) && !completionAddressIsResolvedOk(row)) {
+    add("address", row.addressValidationMessage || "Adresa zatím není ověřená.", "warning");
+  }
+  if (["packeta_pickup", "dpd_pickup"].includes(row?.deliveryService) && !String(row?.pickupPointId || row?.packetaId || "").trim()) {
+    add("pickup", "Chybí výdejní místo nebo box.");
+  }
+  if (!row?.deliveryService || row.deliveryService === "manual") add("delivery", "Doprava vyžaduje ruční kontrolu.", "warning");
+  if (["unpaid", "missing", "unknown", "error"].includes(paymentCheckKind(row))) {
+    add("payment", row.paymentCheckMessage || "Platba vyžaduje kontrolu.", "warning");
+  }
+  if ((row?.shipments || []).some((shipment) => shipment.status === "pending_replacement")) {
+    add("replacement", "Náhradní zásilka čeká na vytvoření.");
+  }
+  return problems;
+}
+
+function completionProblemPriority(row) {
+  const categories = new Set(inferredCompletionProblems(row).map((item) => item.category));
+  if (categories.has("address")) return 0;
+  if (categories.has("pickup")) return 1;
+  if (categories.has("delivery") || categories.has("contact") || categories.has("parcel")) return 2;
+  if (categories.has("replacement")) return 3;
+  if (categories.has("payment")) return 4;
+  return 9;
+}
+
+function completionMatchesProblemFilter(row, filter = completionFilters.problem) {
+  const categories = new Set(inferredCompletionProblems(row).map((item) => item.category));
+  if (filter === "ready") return categories.size === 0;
+  if (filter === "issues") return categories.size > 0;
+  if (filter === "delivery") return categories.has("delivery") || categories.has("contact") || categories.has("parcel");
+  return categories.has(filter);
+}
+
+function completionRowsProblemSorted(rows = completionState.rows) {
+  return [...rows].sort((a, b) => {
+    const priority = completionProblemPriority(a) - completionProblemPriority(b);
+    if (priority) return priority;
+    return toNumber(a.expeditionNumber || a.rowNumber, 999999) - toNumber(b.expeditionNumber || b.rowNumber, 999999);
+  });
+}
+
+function renderCompletionProblemFilters(rows) {
+  if (!els.completionProblemFilters) return;
+  els.completionProblemFilters.innerHTML = COMPLETION_PROBLEM_FILTERS.map(([key, label]) => {
+    const count = rows.filter((row) => completionMatchesProblemFilter(row, key)).length;
+    return `<button type="button" class="problem-filter ${completionFilters.problem === key ? "active" : ""}" data-problem-filter="${escapeHtml(
+      key
+    )}"><span>${escapeHtml(label)}</span><b>${escapeHtml(count)}</b></button>`;
+  }).join("");
+}
+
+function completionProblemBadges(row) {
+  const problems = inferredCompletionProblems(row);
+  if (!problems.length) return `<span class="queue-state ready">Připravené</span>`;
+  return problems
+    .slice(0, 3)
+    .map((item) => `<span class="queue-state ${escapeHtml(item.severity === "warning" ? "warning" : "danger")}" title="${escapeHtml(item.message)}">${escapeHtml(
+      { address: "Adresa", pickup: "Výdejní místo", delivery: "Doprava", contact: "Kontakt", parcel: "Zásilka", payment: "Platba", replacement: "Náhrada" }[
+        item.category
+      ] || "Kontrola"
+    )}</span>`)
+    .join("");
+}
+
+function setEditorAlert(message = "", tone = "neutral") {
+  if (!els.expeditionEditorAlert) return;
+  els.expeditionEditorAlert.textContent = message;
+  els.expeditionEditorAlert.className = `message ${tone} ${message ? "" : "hidden"}`.trim();
+}
+
+function editorSetDirty(dirty = true) {
+  expeditionEditorState.dirty = dirty;
+  els.expeditionEditor?.classList.toggle("dirty", dirty);
+}
+
+function editorPickupCarrier() {
+  const service = els.editorDeliveryService?.value || "";
+  if (service === "packeta_pickup") return "packeta";
+  if (service === "dpd_pickup") return "dpd";
+  return "";
+}
+
+function editorDetails() {
+  const details = {};
+  Object.entries(EDITOR_DETAIL_FIELDS).forEach(([field, elementKey]) => {
+    details[field] = els[elementKey]?.value?.trim?.() ?? "";
+  });
+  details.deliveryCarrier = editorPickupCarrier() || ({ packeta_home: "packeta", dpd_courier: "dpd", gift_voucher_email: "email", manual: "manual" }[
+    details.deliveryService
+  ] || "");
+  const point = expeditionEditorState.pickupPoint;
+  if (point && String(point.id) === String(details.pickupPointId)) {
+    details.pickupPointName = point.name || "";
+    details.pickupPointAddress = point.address || "";
+    details.pickupPointCountry = point.country || details.country;
+    details.pickupPointCodAllowed = point.codAllowed;
+  }
+  return details;
+}
+
+function renderEditorPickupSelection(point) {
+  expeditionEditorState.pickupPoint = point || null;
+  if (!els.editorPickupSelected) return;
+  if (!point) {
+    els.editorPickupSelected.className = "editor-pickup-selected neutral";
+    els.editorPickupSelected.textContent = "Výdejní místo není vybrané.";
+    return;
+  }
+  els.editorPickupId.value = point.id || "";
+  els.editorPickupSelected.className = "editor-pickup-selected success";
+  els.editorPickupSelected.innerHTML = `<strong>${escapeHtml(point.name || point.id || "Výdejní místo")}</strong><span>${escapeHtml(
+    [point.address, point.zipCode, point.city, point.country].filter(Boolean).join(", ")
+  )}</span><small>${point.codAllowed === false ? "Dobírka není podporovaná" : "Ověřeno v katalogu dopravce"}</small>`;
+}
+
+function renderEditorPickupPanel() {
+  const carrier = editorPickupCarrier();
+  els.editorPickupPanel?.classList.toggle("hidden", !carrier);
+  els.editorPacketaWidget?.classList.toggle("hidden", carrier !== "packeta");
+  if (!carrier) {
+    expeditionEditorState.pickupPoint = null;
+    if (els.editorPickupResults) els.editorPickupResults.innerHTML = "";
+  }
+}
+
+function shipmentStatusLabel(status) {
+  return {
+    active: "Aktivní",
+    pending_replacement: "Nepoužívat - čeká na náhradu",
+    replaced: "Nahrazená",
+    error: "Chybná",
+  }[status] || status || "Neurčeno";
+}
+
+function renderEditorShipments() {
+  const shipments = expeditionEditorState.shipments || [];
+  els.editorShipmentHistory.innerHTML = shipments.length
+    ? shipments
+        .map(
+          (shipment) => `<div class="editor-shipment ${escapeHtml(shipment.status || "")}">
+            <div><strong>${escapeHtml((shipment.carrier || "").toUpperCase())} · ${escapeHtml(shipment.externalId || shipment.labelNumber || "bez čísla")}</strong>
+            <span>${escapeHtml(shipmentStatusLabel(shipment.status))}</span></div>
+            <small>${escapeHtml(shipment.createdAt ? formatTime(shipment.createdAt) : "")} ${shipment.createdBy ? `· ${escapeHtml(shipment.createdBy)}` : ""}</small>
+          </div>`
+        )
+        .join("")
+    : `<div class="empty">Zatím nebyla vytvořena žádná zásilka.</div>`;
+  const canCreate = isAdmin() && shipments.some((item) => item.status === "pending_replacement");
+  els.editorCreateReplacement?.classList.toggle("hidden", !canCreate);
+}
+
+function renderEditorImportedData(row) {
+  const imported = row.importedExpeditionDetails || {};
+  const lines = [
+    ["Objednávka", row.orderNumber],
+    ["Expediční číslo", row.expeditionNumber],
+    ["Původní doprava", row.shippingMethod],
+    ["Původní adresa", [imported.streetWithNumber, imported.zipCode, imported.city].filter(Boolean).join(", ")],
+    ["Původní výdejní místo", imported.pickupPointId],
+    ["E-shop", row.shopCode || completionState.dataset?.shopCode],
+  ];
+  els.editorImportedData.innerHTML = lines
+    .filter(([, value]) => String(value || "").trim())
+    .map(([label, value]) => `<div><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`)
+    .join("");
+}
+
+function fillExpeditionEditor(row) {
+  expeditionEditorState.row = row;
+  Object.entries(EDITOR_DETAIL_FIELDS).forEach(([field, elementKey]) => {
+    const element = els[elementKey];
+    if (element) element.value = row[field] ?? "";
+  });
+  els.expeditionEditorTitle.textContent = `Objednávka ${row.orderNumber || "-"}`;
+  els.expeditionEditorSubtitle.textContent = `${row.expeditionNumber ? `Pořadí ${row.expeditionNumber} · ` : ""}${[row.firstName, row.lastName]
+    .filter(Boolean)
+    .join(" ")} · ${row.shopCode || completionState.dataset?.shopCode || ""}`;
+  els.editorProducts.innerHTML = completionProductListHtml(row);
+  renderEditorImportedData(row);
+  const existingPoint = row.pickupPointId
+    ? {
+        id: row.pickupPointId,
+        name: row.pickupPointName || "",
+        address: row.pickupPointAddress || "",
+        country: row.pickupPointCountry || row.country,
+        codAllowed: row.pickupPointCodAllowed,
+      }
+    : null;
+  renderEditorPickupSelection(existingPoint);
+  renderEditorPickupPanel();
+  const validationStatus = row.addressValidationStatus || "";
+  els.editorAddressResult.className = `editor-validation-result ${validationStatus === "verified" ? "success" : validationStatus ? "warning" : "neutral"}`;
+  els.editorAddressResult.textContent = row.addressValidationMessage || "Adresa zatím nebyla ověřena.";
+  editorSetDirty(false);
+}
+
+async function openExpeditionEditor(rowOrId) {
+  const row = typeof rowOrId === "object" ? rowOrId : completionState.rows.find((item) => String(item.id) === String(rowOrId));
+  if (!row?.id) return;
+  els.expeditionEditor.classList.remove("hidden");
+  document.body.classList.add("modal-open");
+  setEditorAlert("Načítám historii objednávky...", "neutral");
+  fillExpeditionEditor(row);
+  try {
+    const data = await fetchJson(`/api/completion/rows/${encodeURIComponent(row.id)}/shipments`);
+    expeditionEditorState.shipments = data.shipments || [];
+    expeditionEditorState.problems = data.problems || [];
+    if (data.row) {
+      replaceCompletionRow(data.row);
+      fillExpeditionEditor(data.row);
+    }
+    renderEditorShipments();
+    setEditorAlert("");
+  } catch (error) {
+    renderEditorShipments();
+    setEditorAlert(`Historii zásilek se nepodařilo načíst: ${error.message}`, "warning");
+  }
+  els.editorFirstName?.focus({ preventScroll: true });
+}
+
+function closeExpeditionEditor(force = false) {
+  if (!els.expeditionEditor || els.expeditionEditor.classList.contains("hidden")) return;
+  if (!force && expeditionEditorState.dirty && !window.confirm("V editoru jsou neuložené změny. Opravdu ho zavřít?")) return;
+  els.expeditionEditor.classList.add("hidden");
+  document.body.classList.remove("modal-open");
+  expeditionEditorState.row = null;
+  expeditionEditorState.shipments = [];
+  expeditionEditorState.problems = [];
+  editorSetDirty(false);
+}
+
+function replaceCompletionRow(row) {
+  const index = completionState.rows.findIndex((item) => String(item.id) === String(row.id));
+  if (index >= 0) completionState.rows[index] = row;
+  if (completionWorkflowState.row && String(completionWorkflowState.row.id) === String(row.id)) completionWorkflowState.row = row;
+}
+
+function applyEditorValidation(validation) {
+  const status = validation?.status || "";
+  const tone = status === "verified" ? "success" : status === "error" ? "danger" : "warning";
+  els.editorAddressResult.className = `editor-validation-result ${tone}`;
+  const issues = validation?.issues || [];
+  els.editorAddressResult.innerHTML = status === "verified"
+    ? `<strong>Ověřeno</strong><span>${escapeHtml(validation.message || "Údaje jsou připravené.")}</span>`
+    : `<strong>${status === "error" ? "Vyžaduje opravu" : "Neověřeno"}</strong>${issues
+        .map((item) => `<span>${escapeHtml(item.message)}</span>`)
+        .join("")}`;
+  const suggested = validation?.address?.suggestedAddress;
+  if (suggested) {
+    els.editorAddressResult.innerHTML += `<button type="button" class="secondary" data-editor-action="apply-address-suggestion" data-address="${escapeHtml(
+      JSON.stringify(suggested)
+    )}">Použít návrh: ${escapeHtml([suggested.streetWithNumber, suggested.zipCode, suggested.city].filter(Boolean).join(", "))}</button>`;
+  }
+}
+
+async function saveExpeditionEditor({ next = false, forceUnverified = false, confirmSupersede = false } = {}) {
+  const row = expeditionEditorState.row;
+  if (!row?.id || expeditionEditorState.loading) return;
+  expeditionEditorState.loading = true;
+  [els.editorSaveVerify, els.editorSaveNext].forEach((button) => {
+    if (button) button.disabled = true;
+  });
+  setEditorAlert("Ukládám a ověřuji expediční údaje...", "neutral");
+  try {
+    const data = await fetchJson(`/api/completion/rows/${encodeURIComponent(row.id)}/expedition-details`, {
+      method: "PATCH",
+      body: JSON.stringify({ details: editorDetails(), editVersion: row.editVersion || 0, forceUnverified, confirmSupersede }),
+    });
+    replaceCompletionRow(data.row);
+    expeditionEditorState.row = data.row;
+    expeditionEditorState.shipments = data.shipments || [];
+    expeditionEditorState.problems = data.problems || [];
+    fillExpeditionEditor(data.row);
+    renderEditorShipments();
+    applyEditorValidation(data.validation || data.row.addressValidationResult);
+    renderCompletion();
+    setEditorAlert(data.validation?.status === "verified" ? "Uloženo a ověřeno." : "Uloženo jako neověřené.", data.validation?.status === "verified" ? "success" : "warning");
+    if (next) {
+      const candidates = completionRowsProblemSorted().filter((item) => inferredCompletionProblems(item).length);
+      const currentIndex = candidates.findIndex((item) => String(item.id) === String(data.row.id));
+      const nextRow = candidates[currentIndex + 1] || candidates[0];
+      if (nextRow && String(nextRow.id) !== String(data.row.id)) await openExpeditionEditor(nextRow);
+      else setEditorAlert("Uloženo. Další problém už ve frontě není.", "success");
+    }
+  } catch (error) {
+    const code = error.data?.code;
+    if (code === "verification_required") {
+      applyEditorValidation(error.data.validation);
+      if (window.confirm(`${error.message}\n\nChceš údaje přesto uložit jako neověřené? Z takové objednávky nepůjde vytvořit zásilku.`)) {
+        expeditionEditorState.loading = false;
+        return saveExpeditionEditor({ next, forceUnverified: true, confirmSupersede });
+      }
+    } else if (code === "shipment_confirmation_required") {
+      if (window.confirm(`${error.message}\n\nPůvodní zásilka se u dopravce nezruší a její štítek nebude možné běžně vytisknout.`)) {
+        expeditionEditorState.loading = false;
+        return saveExpeditionEditor({ next, forceUnverified, confirmSupersede: true });
+      }
+    } else if (code === "edit_conflict") {
+      if (error.data.row) {
+        replaceCompletionRow(error.data.row);
+        expeditionEditorState.shipments = error.data.shipments || [];
+        fillExpeditionEditor(error.data.row);
+        renderEditorShipments();
+      }
+      setEditorAlert("Objednávku mezitím upravil jiný uživatel. Načetl jsem novější údaje; svou změnu prosím zkontroluj znovu.", "warning");
+    } else {
+      setEditorAlert(`Uložení selhalo: ${error.message}`, "danger");
+    }
+  } finally {
+    expeditionEditorState.loading = false;
+    [els.editorSaveVerify, els.editorSaveNext].forEach((button) => {
+      if (button) button.disabled = false;
+    });
+  }
+}
+
+async function loadEditorPickupResults() {
+  const carrier = editorPickupCarrier();
+  if (!carrier) return;
+  const query = els.editorPickupSearch.value.trim();
+  if (query.length < 2) {
+    els.editorPickupResults.innerHTML = "";
+    return;
+  }
+  els.editorPickupResults.innerHTML = `<div class="empty">Hledám výdejní místa...</div>`;
+  try {
+    const params = new URLSearchParams({ carrier, country: els.editorCountry.value || "CZ", q: query, limit: "30" });
+    if (expeditionEditorState.row?.shopCode) params.set("shopCode", expeditionEditorState.row.shopCode);
+    const data = await fetchJson(`/api/pickup-points?${params.toString()}`);
+    expeditionEditorState.pickupWidgetKey = data.widgetKey || expeditionEditorState.pickupWidgetKey;
+    const points = data.points || [];
+    els.editorPickupResults.innerHTML = points.length
+      ? points
+          .map(
+            (point) => `<button type="button" class="pickup-result" data-editor-action="select-pickup" data-point="${escapeHtml(
+              JSON.stringify(point)
+            )}"><strong>${escapeHtml(point.name || point.id)}</strong><span>${escapeHtml(
+              [point.address, point.zipCode, point.city].filter(Boolean).join(", ")
+            )}</span><small>ID ${escapeHtml(point.id)}${point.codAllowed === false ? " · bez dobírky" : ""}</small></button>`
+          )
+          .join("")
+      : `<div class="empty">Žádné odpovídající místo nebylo nalezeno.</div>`;
+    const refreshed = data.catalog?.refreshedAt ? formatTime(data.catalog.refreshedAt) : "zatím neznámé";
+    els.editorPickupCache.textContent = `Katalog: ${data.catalog?.rowsCount || 0} míst · aktualizace ${refreshed}`;
+  } catch (error) {
+    els.editorPickupResults.innerHTML = `<div class="empty danger">Hledání selhalo: ${escapeHtml(error.message)}</div>`;
+  }
+}
+
+async function verifyEditorPickupId() {
+  const carrier = editorPickupCarrier();
+  const id = els.editorPickupId.value.trim();
+  if (!carrier || !id) return setEditorAlert("Zadej ID výdejního místa.", "warning");
+  try {
+    const data = await fetchJson(`/api/pickup-points/${encodeURIComponent(carrier)}/${encodeURIComponent(id)}?country=${encodeURIComponent(
+      els.editorCountry.value || "CZ"
+    )}`);
+    renderEditorPickupSelection(data.point);
+    editorSetDirty(true);
+    setEditorAlert("Výdejní místo bylo ověřeno v katalogu dopravce.", "success");
+  } catch (error) {
+    renderEditorPickupSelection(null);
+    els.editorPickupId.value = id;
+    setEditorAlert(error.message, "danger");
+  }
+}
+
+function loadPacketaWidgetScript() {
+  if (window.Packeta?.Widget) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const existing = document.querySelector("script[data-packeta-widget]");
+    if (existing) {
+      existing.addEventListener("load", resolve, { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      return;
+    }
+    const script = document.createElement("script");
+    script.src = "https://widget.packeta.com/v6/www/js/library.js";
+    script.async = true;
+    script.dataset.packetaWidget = "1";
+    script.addEventListener("load", resolve, { once: true });
+    script.addEventListener("error", () => reject(new Error("Mapový widget Packety se nepodařilo načíst.")), { once: true });
+    document.head.appendChild(script);
+  });
+}
+
+async function openPacketaWidget() {
+  try {
+    if (!expeditionEditorState.pickupWidgetKey) {
+      const params = new URLSearchParams({ carrier: "packeta", country: els.editorCountry.value || "CZ", limit: "1" });
+      if (expeditionEditorState.row?.shopCode) params.set("shopCode", expeditionEditorState.row.shopCode);
+      const data = await fetchJson(`/api/pickup-points?${params.toString()}`);
+      expeditionEditorState.pickupWidgetKey = data.widgetKey || "";
+    }
+    if (!expeditionEditorState.pickupWidgetKey) throw new Error("V Nastavení chybí Packeta API key pro mapový widget.");
+    await loadPacketaWidgetScript();
+    window.Packeta.Widget.pick(
+      expeditionEditorState.pickupWidgetKey,
+      (point) => {
+        if (!point) return;
+        renderEditorPickupSelection({
+          id: String(point.id || ""),
+          name: point.name || "",
+          address: [point.street, point.city].filter(Boolean).join(", "),
+          city: point.city || "",
+          zipCode: point.zip || "",
+          country: String(point.country || els.editorCountry.value || "CZ").toUpperCase(),
+          codAllowed: point.codAllowed,
+        });
+        editorSetDirty(true);
+      },
+      { country: String(els.editorCountry.value || "cz").toLowerCase(), language: "cs" }
+    );
+  } catch (error) {
+    setEditorAlert(error.message, "danger");
+  }
+}
+
+async function createEditorReplacementShipment() {
+  const row = expeditionEditorState.row;
+  if (!row?.id || !isAdmin()) return;
+  if (!window.confirm("Opravdu vytvořit novou skutečnou zásilku u dopravce? Původní zásilka se u dopravce automaticky nezruší.")) return;
+  setEditorAlert("Vytvářím náhradní zásilku u dopravce...", "neutral");
+  try {
+    const data = await fetchJson(`/api/completion/rows/${encodeURIComponent(row.id)}/shipments`, {
+      method: "POST",
+      body: JSON.stringify({ confirmCreate: true }),
+    });
+    replaceCompletionRow(data.row);
+    expeditionEditorState.row = data.row;
+    expeditionEditorState.shipments = data.shipments || [];
+    renderEditorShipments();
+    renderCompletion();
+    setEditorAlert(`Zásilka ${data.shipment?.externalId || ""} byla vytvořena.`, "success");
+  } catch (error) {
+    if (error.data?.validation) applyEditorValidation(error.data.validation);
+    setEditorAlert(`Zásilku se nepodařilo vytvořit: ${error.message}`, "danger");
+  }
+}
+
 function renderCompletion() {
   const allRows = completionState.rows;
   renderExpeditionBatchReport();
   renderCompletionFilterOptions(allRows);
-  const rows = filteredCompletionRows();
+  renderCompletionProblemFilters(allRows);
+  const rows = completionRowsProblemSorted(filteredCompletionRows()).filter((row) => completionMatchesProblemFilter(row));
   els.completionRowCount.textContent = `${rows.length} / ${allRows.length} řádků`;
   renderCompletionSummary(rows);
   els.completionBody.innerHTML = "";
 
   if (!rows.length) {
-    els.completionBody.innerHTML = `<tr><td colspan="14" class="empty">Zadna kompletace k zobrazeni.</td></tr>`;
+    els.completionBody.innerHTML = `<tr><td colspan="7" class="empty">Žádná objednávka neodpovídá vybraným filtrům.</td></tr>`;
     return;
   }
 
   rows.forEach((row) => {
     const status = completionStatus(row);
     const customer = [row.firstName, row.lastName].filter(Boolean).join(" ");
-    const address = [row.city, row.zipCode].filter(Boolean).join(" ");
+    const address = [row.streetWithNumber || [row.street, row.houseNumber].filter(Boolean).join(" "), row.zipCode, row.city]
+      .filter(Boolean)
+      .join(", ");
     const shop = row.shopCode || completionState.dataset?.shopCode || "-";
     const labelOrShipment = row.labelPrinted || completionLabelNumber(row);
-    const rowId = String(row.id);
-    const expanded = expandedCompletionRows.has(rowId);
     const tr = document.createElement("tr");
-    tr.className = `completion-main-row ${completionRowTone(row, status)} ${expanded ? "expanded" : ""}`;
+    tr.className = `completion-main-row completion-queue-row ${completionRowTone(row, status)}`;
     tr.dataset.completionRowId = row.id;
     tr.innerHTML = `
-      <td>
-        <div class="completion-actions">
-          <button type="button" data-action="save-completion-row" data-row-id="${escapeHtml(row.id)}">Uložit</button>
-          <button type="button" class="secondary" data-action="validate-address" data-row-id="${escapeHtml(row.id)}">Ověřit</button>
-          <button type="button" class="secondary" data-action="open-shop-order" data-row-id="${escapeHtml(row.id)}">E-shop</button>
-          ${carrierSendActionHtml(row)}
-        </div>
-      </td>
       <td class="completion-sequence">
         <strong class="code">${escapeHtml(row.expeditionNumber || row.rowNumber || "")}</strong>
         <span class="shop-chip">${escapeHtml(shop)}</span>
       </td>
       <td class="completion-order-cell">
         <strong class="code">${escapeHtml(row.orderNumber || "-")}</strong>
-        ${completionProductImagesHtml(row)}
-        <div class="completion-badges">${completionMainBadges(row, status)}</div>
-      </td>
-      <td class="completion-customer-cell">
-        <strong>${escapeHtml(customer || "-")}</strong>
-        <small>${escapeHtml(address)}</small>
-        ${completionMetaLine("E-shop", shop)}
-      </td>
-      <td class="completion-address-summary">
-        <strong>${escapeHtml(row.streetWithNumber || [row.street, row.houseNumber].filter(Boolean).join(" ") || "-")}</strong>
+        <span>${escapeHtml(customer || "-")}</span>
         <small>${escapeHtml(address)}</small>
       </td>
-      <td class="completion-contact-cell">
-        <strong>${escapeHtml(row.phone || "-")}</strong>
-        <small>${escapeHtml(row.email || "")}</small>
-      </td>
-      <td>${addressValidationHtml(row)}</td>
-      <td class="completion-carrier-cell">
+      <td class="completion-carrier-cell completion-queue-delivery">
         ${deliveryCarrierHtml(row)}
         ${labelOrShipment ? `<small class="code">${escapeHtml(labelOrShipment)}</small>` : ""}
       </td>
-      <td class="completion-carrier-note">${completionInput(row, "carrierNote", row.carrierNote || "", "carrier-note-input")}</td>
+      <td class="completion-queue-products">
+        ${completionProductImagesHtml(row, 3)}
+        <strong>${escapeHtml(row.quantity || "-")} ks</strong>
+      </td>
       <td class="completion-payment-cell">
         <span class="currency-chip ${escapeHtml((row.currency || "").toLowerCase())}">${escapeHtml(row.currency || "")}</span>
-        ${completionMetaLine("Dobírka", row.codAmount)}
-        ${completionMetaLine("Platba", row.paymentMethod || row.paidStatus)}
-        ${completionMetaLine("Kontrola", paymentCheckLabel(row))}
+        <strong>${escapeHtml(row.codAmount || row.amount || "bez dobírky")}</strong>
+        <small>${escapeHtml(paymentCheckLabel(row) || row.paymentMethod || row.paidStatus || "")}</small>
       </td>
-      <td><span class="qty">${escapeHtml(row.quantity || "")}</span></td>
-      <td><span class="status-chip ${status.tone}">${escapeHtml(status.label)}</span></td>
-      <td class="completion-note">${escapeHtml(row.note || "")}</td>
-      <td class="completion-tech-cell">
-        ${completionMetaLine("ID", row.orderId, "code")}
-        ${completionMetaLine("Datum", row.orderDate, "code")}
+      <td class="completion-queue-status">
+        ${completionProblemBadges(row)}
+        <small>${escapeHtml(inferredCompletionProblems(row)[0]?.message || status.label || "")}</small>
+      </td>
+      <td class="completion-queue-actions">
+        <button type="button" data-action="open-expedition-editor" data-row-id="${escapeHtml(row.id)}">Upravit</button>
+        <button type="button" class="secondary" data-action="open-shop-order" data-row-id="${escapeHtml(row.id)}">E-shop</button>
       </td>
     `;
     els.completionBody.appendChild(tr);
-
-    const detailRow = document.createElement("tr");
-    detailRow.className = `completion-detail-row ${expanded ? "" : "hidden"}`;
-    detailRow.dataset.detailFor = row.id;
-    detailRow.innerHTML = `<td colspan="14">${completionDetailHtml(row)}</td>`;
-    els.completionBody.appendChild(detailRow);
   });
 }
 
 function toggleCompletionDetail(rowId) {
-  const key = String(rowId);
-  if (expandedCompletionRows.has(key)) {
-    expandedCompletionRows.delete(key);
-  } else {
-    expandedCompletionRows.add(key);
-  }
-  renderCompletion();
+  openExpeditionEditor(rowId);
 }
 
 function renderUsers() {
@@ -6864,6 +7433,9 @@ els.importData.addEventListener("change", (event) => {
 els.sortingBody.addEventListener("click", async (event) => {
   const button = event.target.closest("button[data-action]");
   if (!button) return;
+  if (button.dataset.action === "open-expedition-editor") {
+    openExpeditionEditor(button.dataset.rowId);
+  }
   const id = button.dataset.id;
   if (button.dataset.action === "deduct") {
     const entry = await changeItem(id, -1, { mode: "ruční odpis" });
@@ -6984,6 +7556,12 @@ els.workflowBoxCode.addEventListener("input", () => {
     scanWorkflowBox().catch((error) => setWorkflowMessage(`Načtení boxu selhalo: ${error.message}`, "error"));
   }
 });
+els.completionProblemFilters?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-problem-filter]");
+  if (!button) return;
+  completionFilters.problem = button.dataset.problemFilter || "issues";
+  renderCompletion();
+});
 els.workflowExpeditionNumber.addEventListener("keydown", (event) => {
   if (event.key === "Enter") {
     event.preventDefault();
@@ -7069,12 +7647,72 @@ els.completionFilterReset?.addEventListener("click", () => {
   completionFilters.carrier = "";
   completionFilters.status = "";
   completionFilters.shop = "";
+  completionFilters.problem = "issues";
   els.completionFilterSearch.value = "";
   if (els.completionFilterFlow) els.completionFilterFlow.value = "";
   els.completionFilterCarrier.value = "";
   els.completionFilterStatus.value = "";
   els.completionFilterShop.value = "";
   renderCompletion();
+});
+els.expeditionEditor?.addEventListener("input", (event) => {
+  if (event.target.matches("input, select, textarea")) editorSetDirty(true);
+});
+els.expeditionEditor?.addEventListener("click", (event) => {
+  const actionTarget = event.target.closest("[data-editor-action]");
+  if (!actionTarget) return;
+  const action = actionTarget.dataset.editorAction;
+  if (action === "close") closeExpeditionEditor();
+  if (action === "select-pickup") {
+    try {
+      renderEditorPickupSelection(JSON.parse(actionTarget.dataset.point || "{}"));
+      editorSetDirty(true);
+      els.editorPickupResults.innerHTML = "";
+    } catch {
+      setEditorAlert("Výdejní místo se nepodařilo načíst.", "danger");
+    }
+  }
+  if (action === "apply-address-suggestion") {
+    try {
+      const address = JSON.parse(actionTarget.dataset.address || "{}");
+      [
+        [els.editorStreetWithNumber, address.streetWithNumber],
+        [els.editorStreet, address.street],
+        [els.editorHouseNumber, address.houseNumber],
+        [els.editorCity, address.city],
+        [els.editorZipCode, address.zipCode],
+      ].forEach(([input, value]) => {
+        if (input && value) input.value = value;
+      });
+      editorSetDirty(true);
+      setEditorAlert("Návrh adresy byl vložen. Ulož ji znovu pro ověření.", "warning");
+    } catch {
+      setEditorAlert("Návrh adresy se nepodařilo vložit.", "danger");
+    }
+  }
+});
+els.expeditionEditorClose?.addEventListener("click", () => closeExpeditionEditor());
+els.editorCancel?.addEventListener("click", () => closeExpeditionEditor());
+els.editorSaveVerify?.addEventListener("click", () => saveExpeditionEditor());
+els.editorSaveNext?.addEventListener("click", () => saveExpeditionEditor({ next: true }));
+els.editorOpenShop?.addEventListener("click", () => openCompletionOrder(expeditionEditorState.row));
+els.editorCreateReplacement?.addEventListener("click", createEditorReplacementShipment);
+els.editorDeliveryService?.addEventListener("change", () => {
+  renderEditorPickupPanel();
+  renderEditorPickupSelection(null);
+  if (els.editorPickupId) els.editorPickupId.value = "";
+});
+els.editorPickupVerify?.addEventListener("click", verifyEditorPickupId);
+els.editorPacketaWidget?.addEventListener("click", openPacketaWidget);
+els.editorPickupSearch?.addEventListener("input", () => {
+  window.clearTimeout(expeditionEditorState.pickupTimer);
+  expeditionEditorState.pickupTimer = window.setTimeout(loadEditorPickupResults, 350);
+});
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !els.expeditionEditor?.classList.contains("hidden")) {
+    event.preventDefault();
+    closeExpeditionEditor();
+  }
 });
 els.eansFilterSearch?.addEventListener("input", () => {
   eanFilters.search = els.eansFilterSearch.value.trim();
@@ -7135,6 +7773,7 @@ els.labelCacheBatch?.addEventListener("click", runLabelCacheBatch);
 els.dpdDryRun.addEventListener("click", runDpdDryRun);
 els.dpdSend.addEventListener("click", runDpdSend);
 els.printAgentTest?.addEventListener("click", testPrintAgent);
+els.settingsPickupCatalogRefresh?.addEventListener("click", refreshPickupCatalogs);
 els.workflowItems?.addEventListener("click", (event) => {
   const button = event.target.closest("[data-action='workflow-check-item']");
   if (!button || !els.workflowItems.contains(button)) return;

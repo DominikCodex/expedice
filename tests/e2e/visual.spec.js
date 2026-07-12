@@ -87,3 +87,36 @@ test("platný uživatelský zámek dne se po připojení obnoví", async ({ page
   await expect(page.locator("#expedition-batch-report")).toBeVisible();
   await expect(page.locator("#day-required-view")).toBeHidden();
 });
+
+test("admin fronta otevře kompaktní editor bez vodorovného přetečení", async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 720 });
+  await mockExpeditionApp(page);
+  await page.goto("/kompletace");
+  await page.locator("#expedition-day-list button").first().click();
+  await expect(page.locator("#completion-problem-filters")).toBeVisible();
+  await expect(page.locator("#completion-body .completion-queue-row")).toHaveCount(1);
+  await page.locator(".completion-filter-panel").scrollIntoViewIfNeeded();
+  await page.screenshot({ path: ".codex-playwright/expedition-queue-1280x720.png", fullPage: false });
+  await page.locator("#completion-body .completion-queue-row").first().click();
+  await expect(page.locator("#expedition-editor")).toBeVisible();
+  await expect(page.locator(".expedition-editor-actions")).toBeVisible();
+  await expect(page.locator("#editor-save-verify")).toBeInViewport();
+  await expect(page.locator("#editor-delivery-service")).toHaveValue("packeta_pickup");
+  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+  expect(overflow).toBeLessThanOrEqual(2);
+  const dialogOverflow = await page.locator(".expedition-editor-dialog").evaluate((element) => element.scrollWidth - element.clientWidth);
+  expect(dialogOverflow).toBeLessThanOrEqual(2);
+  await page.screenshot({ path: ".codex-playwright/expedition-editor-1280x720.png", fullPage: false });
+});
+
+test("editor ověří ručně zadané výdejní místo a uloží změnu", async ({ page }) => {
+  await mockExpeditionApp(page);
+  await page.goto("/kompletace");
+  await page.locator("#expedition-day-list button").first().click();
+  await page.locator("#completion-body .completion-queue-row").first().click();
+  await page.locator("#editor-pickup-id").fill("1001");
+  await page.locator("#editor-pickup-verify").click();
+  await expect(page.locator("#editor-pickup-selected")).toContainText("Pobočka Praha");
+  await page.locator("#editor-save-verify").click();
+  await expect(page.locator("#expedition-editor-alert")).toContainText("Uloženo a ověřeno");
+});

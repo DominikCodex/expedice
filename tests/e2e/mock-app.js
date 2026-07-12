@@ -13,6 +13,38 @@ const completionRows = [
   { id: 202, datasetId: 12, shopCode: "galantra_cz", orderNumber: "42006264", expeditionNumber: "20", expeditionOrderCode: "0.8", firstName: "KVĚTOSLAVA", lastName: "MALÁ", streetWithNumber: "U Branišovského lesa 1", city: "České Budějovice", zipCode: "37005", quantity: "1", paidStatus: "Zaplaceno", shippingMethod: "Zásilkovna", completionStatus: "STORNO", raw: { items: [{ variantCode: "03019-MBH-LXL-UPE", quantity: 1, name: "Velmi dlouhý název produktu pro kontrolu bezpečného ořezání textu na malém skladovém monitoru" }] }, cells: [] },
 ];
 
+completionRows[0] = {
+  ...completionRows[0],
+  country: "CZ",
+  currency: "CZK",
+  deliveryCarrier: "packeta",
+  deliveryCarrierLabel: "Zásilkovna/Packeta",
+  deliveryService: "packeta_pickup",
+  deliveryServiceLabel: "Výdejní místo Zásilkovna/Packeta",
+  pickupPointId: "",
+  addressValidationStatus: "",
+  editVersion: 0,
+  shipments: [],
+  problems: [{ category: "pickup", severity: "error", message: "Chybí výdejní místo nebo box." }],
+  importedExpeditionDetails: {},
+};
+completionRows[1] = {
+  ...completionRows[1],
+  country: "CZ",
+  currency: "CZK",
+  deliveryCarrier: "packeta",
+  deliveryCarrierLabel: "Zásilkovna/Packeta",
+  deliveryService: "packeta_pickup",
+  deliveryServiceLabel: "Výdejní místo Zásilkovna/Packeta",
+  pickupPointId: "1001",
+  pickupPointName: "Test pobočka",
+  addressValidationStatus: "verified",
+  editVersion: 1,
+  shipments: [],
+  problems: [],
+  importedExpeditionDetails: {},
+};
+
 async function json(route, value, status = 200) {
   await route.fulfill({ status, contentType: "application/json; charset=utf-8", body: JSON.stringify(value) });
 }
@@ -29,6 +61,18 @@ async function mockExpeditionApp(page, role = "admin") {
     if (pathname === "/api/expedition-days/1/report") return json(route, { day, snapshot: { id: 1, metrics: { orders: 2, pieces: 4, stockOrders: 1, stockPieces: 1, addressErrors: 0, paymentWarnings: 0, codeRanges: [{ start: 19, end: 19, code: "3", count: 1 }, { start: 20, end: 20, code: "0.8", count: 1 }] } }, live: { sortingRemaining: 2 } });
     if (pathname === "/api/expedition-days/1/integrity") return json(route, { ok: false, summary: { errors: 1, warnings: 0, info: 0 }, issues: [{ severity: "error", code: "variant_quantity", message: "Nesedí množství konkrétní varianty.", context: { orderNumber: "42006263" } }] });
     if (/\/api\/completion\/rows\/\d+\/sorting-check$/.test(pathname)) return json(route, { ok: false, dataset: sortingDataset, rows: sortingRows.filter((row) => pathname.includes("201") ? row.orderNumber === "42006263" : row.orderNumber === "42006264"), remainingTotal: 1, variantComparison: { hasExpectedVariants: true, matches: true, items: [] } });
+    if (/\/api\/completion\/rows\/\d+\/shipments$/.test(pathname) && request.method() === "GET") {
+      const row = pathname.includes("201") ? completionRows[0] : completionRows[1];
+      return json(route, { ok: true, row, shipments: row.shipments || [], problems: row.problems || [] });
+    }
+    if (/\/api\/completion\/rows\/\d+\/expedition-details$/.test(pathname) && request.method() === "PATCH") {
+      const source = pathname.includes("201") ? completionRows[0] : completionRows[1];
+      const payload = request.postDataJSON();
+      const updated = { ...source, ...(payload.details || {}), editVersion: (source.editVersion || 0) + 1, addressValidationStatus: "verified", addressValidationMessage: "Ověřeno v testu.", problems: [] };
+      return json(route, { ok: true, row: updated, shipments: [], problems: [], validation: { status: "verified", message: "Ověřeno v testu.", issues: [] } });
+    }
+    if (pathname === "/api/pickup-points") return json(route, { ok: true, widgetKey: "test-key", catalog: { rowsCount: 1, refreshedAt: "2026-07-08T06:00:00Z" }, points: [{ carrier: url.searchParams.get("carrier"), country: "CZ", id: "1001", name: "Pobočka Praha", address: "Václavské náměstí 1", city: "Praha", zipCode: "11000", codAllowed: true }] });
+    if (/\/api\/pickup-points\/(packeta|dpd)\//.test(pathname)) return json(route, { ok: true, point: { carrier: pathname.includes("dpd") ? "dpd" : "packeta", country: "CZ", id: "1001", name: "Pobočka Praha", address: "Václavské náměstí 1", city: "Praha", zipCode: "11000", codAllowed: true } });
     if (/\/api\/completion\/rows\/\d+\/workflow$/.test(pathname)) return json(route, { ok: true, row: { ...completionRows[0], completionStatus: "OK" }, integrityWarnings: [] });
     if (pathname === "/api/product-images") return json(route, { ok: true, images: {} });
     if (pathname === "/api/payment-feeds/updates") return json(route, { rows: [] });
