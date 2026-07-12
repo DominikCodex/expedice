@@ -73,6 +73,37 @@ APP_UI_FONT_DEFAULT = "system"
 APP_UI_FONT_CHOICES = {"system", "segoe", "aptos", "inter", "arial", "verdana", "tahoma", "roboto", "lexend", "georgia"}
 APP_COMPLETION_DENSITY_DEFAULT = "auto"
 APP_COMPLETION_DENSITY_CHOICES = {"auto", "comfortable", "warehouse", "ultra"}
+EXPEDITION_DETAIL_FIELDS = {
+    "firstName",
+    "lastName",
+    "phone",
+    "email",
+    "streetWithNumber",
+    "street",
+    "houseNumber",
+    "city",
+    "zipCode",
+    "country",
+    "deliveryCarrier",
+    "deliveryService",
+    "pickupPointId",
+    "pickupPointName",
+    "pickupPointAddress",
+    "pickupPointCountry",
+    "pickupPointCodAllowed",
+    "weight",
+    "codAmount",
+    "currency",
+    "carrierNote",
+}
+DELIVERY_SERVICES = {
+    "packeta_pickup": ("packeta", "Zásilkovna/Packeta", "Výdejní místo Zásilkovna/Packeta", False),
+    "packeta_home": ("packeta", "Zásilkovna/Packeta", "Packeta doručení na adresu", True),
+    "dpd_courier": ("dpd", "DPD", "DPD kurýr na adresu", True),
+    "dpd_pickup": ("dpd", "DPD", "DPD výdejní místo/box", False),
+    "gift_voucher_email": ("email", "E-mail", "Dárkový poukaz e-mailem", False),
+    "manual": ("manual", "Ruční kontrola", "Ruční doprava", True),
+}
 EXPEDITION_ORDER_CODE_LABELS_DEFAULT = {
     "0.8": "Komplet ze skladu Galantra.cz přes Zásilkovnu",
     "1": "Komplet ze skladu iVeronika.cz",
@@ -433,6 +464,75 @@ def ensure_schema():
             cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS payment_check_feed_shop TEXT")
             cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS payment_check_checked_at TIMESTAMPTZ")
             cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS payment_check_changed_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS expedition_override JSONB NOT NULL DEFAULT '{}'::jsonb")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS expedition_override_version INTEGER NOT NULL DEFAULT 0")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS expedition_override_updated_at TIMESTAMPTZ")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS expedition_override_updated_by TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS expedition_validation_status TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS expedition_validation_message TEXT")
+            cur.execute("ALTER TABLE completion_rows ADD COLUMN IF NOT EXISTS expedition_validation_result JSONB NOT NULL DEFAULT '{}'::jsonb")
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS completion_shipments (
+                    id BIGSERIAL PRIMARY KEY,
+                    expedition_day_id BIGINT REFERENCES expedition_days(id) ON DELETE SET NULL,
+                    completion_row_id BIGINT REFERENCES completion_rows(id) ON DELETE SET NULL,
+                    shop_code TEXT,
+                    order_number TEXT NOT NULL,
+                    carrier TEXT NOT NULL,
+                    service TEXT,
+                    external_id TEXT,
+                    label_number TEXT,
+                    status TEXT NOT NULL DEFAULT 'active',
+                    superseded_reason TEXT,
+                    request_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    response_payload JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    created_by_user_id BIGINT,
+                    created_by TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    superseded_at TIMESTAMPTZ,
+                    replaced_by_id BIGINT REFERENCES completion_shipments(id) ON DELETE SET NULL
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS pickup_points (
+                    carrier TEXT NOT NULL,
+                    country TEXT NOT NULL,
+                    external_id TEXT NOT NULL,
+                    name TEXT,
+                    address TEXT,
+                    city TEXT,
+                    zip_code TEXT,
+                    latitude TEXT,
+                    longitude TEXT,
+                    point_type TEXT,
+                    cod_allowed BOOLEAN,
+                    active BOOLEAN NOT NULL DEFAULT TRUE,
+                    search_text TEXT NOT NULL DEFAULT '',
+                    raw JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    source_updated_at TIMESTAMPTZ,
+                    refreshed_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    PRIMARY KEY (carrier, country, external_id)
+                )
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS pickup_catalog_syncs (
+                    carrier TEXT NOT NULL,
+                    country TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'never',
+                    rows_count INTEGER NOT NULL DEFAULT 0,
+                    message TEXT,
+                    started_at TIMESTAMPTZ,
+                    finished_at TIMESTAMPTZ,
+                    PRIMARY KEY (carrier, country)
+                )
+                """
+            )
             cur.execute(
                 """
                 CREATE TABLE IF NOT EXISTS payment_feed_syncs (
@@ -742,6 +842,18 @@ def ensure_schema():
                 """
                 CREATE INDEX IF NOT EXISTS idx_completion_rows_shop
                 ON completion_rows (shop_code)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_completion_shipments_order
+                ON completion_shipments (expedition_day_id, shop_code, order_number, created_at DESC)
+                """
+            )
+            cur.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_pickup_points_search
+                ON pickup_points (carrier, country, active, search_text)
                 """
             )
     SCHEMA_READY = True
@@ -1501,6 +1613,7 @@ def cleanup_audit_events(cur):
             ORDER BY created_at
             LIMIT 1000
         )
+        RETURNING id
         """,
         (AUDIT_RETENTION_DAYS,),
     )
@@ -1596,6 +1709,21 @@ def row_text_contains(row, *keys_and_needles):
 
 
 def delivery_info_from_row(row):
+    explicit_service = clean_text(row_value(row, "deliveryService", "delivery_service")).strip().lower()
+    if explicit_service in DELIVERY_SERVICES:
+        carrier, carrier_label, service_label, requires_address = DELIVERY_SERVICES[explicit_service]
+        return {
+            "carrier": carrier,
+            "carrierLabel": carrier_label,
+            "service": explicit_service,
+            "serviceLabel": service_label,
+            "requiresCarrier": carrier not in {"email"},
+            "requiresAddress": requires_address,
+            "isPacketa": carrier == "packeta",
+            "isDpd": carrier == "dpd",
+            "isGiftVoucher": carrier == "email",
+            "isSk": clean_text(row_value(row, "country", "country")).upper() == "SK",
+        }
     shipping = clean_text(row_value(row, "shippingMethod", "shipping_method"))
     dpd_flag = clean_text(row_value(row, "dpdFlag", "dpd_flag"))
     shop_code = clean_text(row_value(row, "shopCode", "shop_code")).lower()
@@ -2412,16 +2540,22 @@ def default_settings():
         },
         "packeta": {
             "apiUrl": os.environ.get("PACKETA_API_URL", "https://www.zasilkovna.cz/api/rest"),
+            "apiKey": os.environ.get("PACKETA_API_KEY", ""),
             "apiPassword": os.environ.get("PACKETA_API_PASSWORD", ""),
             "clients": {
                 "iveronika_cz": {
                     "name": "iVeronika.cz",
+                    "apiKey": os.environ.get("PACKETA_API_KEY_IVERONIKA_CZ")
+                    or os.environ.get("PACKETA_API_KEY_IVERONIKA")
+                    or os.environ.get("PACKETA_API_KEY", ""),
                     "apiPassword": os.environ.get("PACKETA_API_PASSWORD_IVERONIKA_CZ")
                     or os.environ.get("PACKETA_API_PASSWORD_IVERONIKA")
                     or os.environ.get("PACKETA_API_PASSWORD", ""),
                 },
                 "galantra_cz": {
                     "name": "Galantra.cz",
+                    "apiKey": os.environ.get("PACKETA_API_KEY_GALANTRA_CZ")
+                    or os.environ.get("PACKETA_API_KEY_GALANTRA", ""),
                     "apiPassword": os.environ.get("PACKETA_API_PASSWORD_GALANTRA_CZ")
                     or os.environ.get("PACKETA_API_PASSWORD_GALANTRA", ""),
                 },
@@ -2613,11 +2747,14 @@ def read_settings(include_secrets=False):
         return settings
 
     public_settings = json.loads(json.dumps(settings))
-    for section, field in (("mapy", "apiKey"), ("packeta", "apiPassword"), ("dpd", "apiKey")):
+    for section, field in (("mapy", "apiKey"), ("packeta", "apiKey"), ("packeta", "apiPassword"), ("dpd", "apiKey")):
         value = public_settings.get(section, {}).get(field, "")
         public_settings[section][f"has{field[0].upper()}{field[1:]}"] = bool(value)
         public_settings[section][field] = ""
     for code, client in (public_settings.get("packeta", {}).get("clients") or {}).items():
+        api_key = client.get("apiKey", "")
+        client["hasApiKey"] = bool(api_key)
+        client["apiKey"] = ""
         value = client.get("apiPassword", "")
         client["hasApiPassword"] = bool(value)
         client["apiPassword"] = ""
@@ -2671,9 +2808,11 @@ def save_settings_payload(payload):
     )
     next_settings.setdefault("productFeed", {})
     merge_secret_field(next_settings["mapy"], current["mapy"], "apiKey")
+    merge_secret_field(next_settings["packeta"], current["packeta"], "apiKey")
     merge_secret_field(next_settings["packeta"], current["packeta"], "apiPassword")
     merge_secret_field(next_settings["dpd"], current["dpd"], "apiKey")
     merge_secret_field(next_settings["productFeed"], current.get("productFeed", {}), "url")
+    merge_client_secret_fields(next_settings["packeta"], current["packeta"], "apiKey")
     merge_client_secret_fields(next_settings["packeta"], current["packeta"], "apiPassword")
     merge_client_secret_fields(next_settings["dpd"], current["dpd"], "apiKey")
     merge_shop_secret_fields(next_settings["paymentFeeds"], current["paymentFeeds"], "url")
@@ -3052,8 +3191,7 @@ def row_to_api(row):
 
 
 def completion_row_to_api(row):
-    delivery = delivery_info_from_row(row)
-    return {
+    result = {
         "id": row["id"],
         "datasetId": row["dataset_id"],
         "shopCode": row.get("shop_code"),
@@ -3112,19 +3250,64 @@ def completion_row_to_api(row):
         if row.get("address_validation_checked_at")
         else None,
         "addressValidationResult": row.get("address_validation_result") or {},
-        "deliveryCarrier": delivery["carrier"],
-        "deliveryCarrierLabel": delivery["carrierLabel"],
-        "deliveryService": delivery["service"],
-        "deliveryServiceLabel": delivery["serviceLabel"],
-        "deliveryRequiresCarrier": delivery["requiresCarrier"],
-        "deliveryRequiresAddress": delivery["requiresAddress"],
-        "deliveryIsPacketa": delivery["isPacketa"],
-        "deliveryIsDpd": delivery["isDpd"],
-        "deliveryIsGiftVoucher": delivery["isGiftVoucher"],
         "currency": shipment_currency(row),
         "cells": row["cells"],
         "raw": row["raw_row"],
     }
+    imported = {field: result.get(field) for field in EXPEDITION_DETAIL_FIELDS if field in result}
+    imported.update(
+        {
+            "country": country_from_order_number(result),
+            "deliveryCarrier": delivery_info_from_row(result)["carrier"],
+            "deliveryService": delivery_info_from_row(result)["service"],
+            "pickupPointId": result.get("packetaId") or "",
+            "pickupPointName": "",
+            "pickupPointAddress": "",
+            "pickupPointCountry": country_from_order_number(result),
+            "pickupPointCodAllowed": None,
+        }
+    )
+    override = row.get("expedition_override") or {}
+    if isinstance(override, dict):
+        for field in EXPEDITION_DETAIL_FIELDS:
+            if field in override:
+                result[field] = override.get(field)
+    result["pickupPointId"] = clean_text(result.get("pickupPointId") or result.get("packetaId"))
+    result["packetaId"] = result["pickupPointId"]
+    result["country"] = clean_text(result.get("country") or country_from_order_number(result)).upper() or "CZ"
+    result["currency"] = clean_text(result.get("currency") or ("EUR" if result["country"] == "SK" else "CZK")).upper()
+    if override:
+        result["addressValidationStatus"] = row.get("expedition_validation_status") or ""
+        result["addressValidationMessage"] = row.get("expedition_validation_message") or ""
+        result["addressValidationResult"] = row.get("expedition_validation_result") or {}
+        result["addressValidationCheckedAt"] = (
+            row["expedition_override_updated_at"].isoformat() if row.get("expedition_override_updated_at") else None
+        )
+    delivery = delivery_info_from_row(result)
+    result.update(
+        {
+            "deliveryCarrier": delivery["carrier"],
+            "deliveryCarrierLabel": delivery["carrierLabel"],
+            "deliveryService": delivery["service"],
+            "deliveryServiceLabel": delivery["serviceLabel"],
+            "deliveryRequiresCarrier": delivery["requiresCarrier"],
+            "deliveryRequiresAddress": delivery["requiresAddress"],
+            "deliveryIsPacketa": delivery["isPacketa"],
+            "deliveryIsDpd": delivery["isDpd"],
+            "deliveryIsGiftVoucher": delivery["isGiftVoucher"],
+            "importedExpeditionDetails": imported,
+            "hasExpeditionOverride": bool(override),
+            "editVersion": int(row.get("expedition_override_version") or 0),
+            "expeditionUpdatedAt": row["expedition_override_updated_at"].isoformat()
+            if row.get("expedition_override_updated_at")
+            else None,
+            "expeditionUpdatedBy": row.get("expedition_override_updated_by") or "",
+        }
+    )
+    shipment_summaries = row.get("shipment_summaries") or []
+    result["shipments"] = shipment_summaries if isinstance(shipment_summaries, list) else []
+    result["problems"] = completion_row_problems(result, result["shipments"]) if "completion_row_problems" in globals() else []
+    return result
 
 
 def packeta_text(value):
@@ -3180,6 +3363,8 @@ def packeta_eshop(row):
 def packeta_route(row):
     shipping = row.get("shippingMethod", "")
     delivery = delivery_info_from_row(row)
+    if delivery["service"] == "packeta_home":
+        return {"addressId": "131" if delivery.get("isSk") else "106", "service": "sk_courier" if delivery.get("isSk") else "cz_courier"}
     if delivery["service"] == "packeta_sk_courier":
         return {"addressId": "131", "service": "sk_courier"}
     if packeta_contains(shipping, "ceska posta", "česká pošta"):
@@ -4116,6 +4301,7 @@ def insert_completion_row(cur, dataset_id, item, shop_code=""):
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
             %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
         )
+        RETURNING id
         """,
         (
             dataset_id,
@@ -4157,6 +4343,53 @@ def insert_completion_row(cur, dataset_id, item, shop_code=""):
             Json(item),
         ),
     )
+    inserted_id = cur.fetchone()["id"]
+    order_number = clean_text(item.get("orderNumber"))
+    if order_number:
+        cur.execute(
+            """
+            SELECT previous.expedition_override, previous.expedition_override_version,
+                   previous.expedition_override_updated_at, previous.expedition_override_updated_by,
+                   previous.expedition_validation_status, previous.expedition_validation_message,
+                   previous.expedition_validation_result
+            FROM completion_rows previous
+            JOIN datasets previous_dataset ON previous_dataset.id = previous.dataset_id
+            JOIN datasets current_dataset ON current_dataset.id = %s
+            WHERE previous.id <> %s
+              AND previous_dataset.expedition_day_id = current_dataset.expedition_day_id
+              AND COALESCE(previous.shop_code, '') = COALESCE(%s, '')
+              AND previous.order_number = %s
+              AND previous.expedition_override <> '{}'::jsonb
+            ORDER BY previous_dataset.uploaded_at DESC, previous.id DESC
+            LIMIT 1
+            """,
+            (dataset_id, inserted_id, shop_code, order_number),
+        )
+        previous = cur.fetchone()
+        if previous:
+            cur.execute(
+                """
+                UPDATE completion_rows
+                SET expedition_override = %s,
+                    expedition_override_version = %s,
+                    expedition_override_updated_at = %s,
+                    expedition_override_updated_by = %s,
+                    expedition_validation_status = %s,
+                    expedition_validation_message = %s,
+                    expedition_validation_result = %s
+                WHERE id = %s
+                """,
+                (
+                    Json(previous["expedition_override"] or {}),
+                    previous["expedition_override_version"] or 0,
+                    previous["expedition_override_updated_at"],
+                    previous["expedition_override_updated_by"],
+                    previous["expedition_validation_status"],
+                    previous["expedition_validation_message"],
+                    Json(previous["expedition_validation_result"] or {}),
+                    inserted_id,
+                ),
+            )
 
 
 @app.route("/api/datasets")
@@ -4276,6 +4509,220 @@ def packeta_post_validation_xml(validation_xml, settings=None):
             "valid": False,
             "error": clean_text(getattr(exc, "reason", exc)),
         }
+
+
+def pickup_point_to_api(row):
+    if not row:
+        return None
+    return {
+        "carrier": row.get("carrier") or "",
+        "country": row.get("country") or "",
+        "id": row.get("external_id") or "",
+        "name": row.get("name") or "",
+        "address": row.get("address") or "",
+        "city": row.get("city") or "",
+        "zipCode": row.get("zip_code") or "",
+        "latitude": row.get("latitude") or "",
+        "longitude": row.get("longitude") or "",
+        "type": row.get("point_type") or "",
+        "codAllowed": row.get("cod_allowed"),
+        "active": row.get("active") is not False,
+        "refreshedAt": row["refreshed_at"].isoformat() if row.get("refreshed_at") else None,
+    }
+
+
+def pickup_value(item, *keys):
+    for key in keys:
+        value = item.get(key) if isinstance(item, dict) else None
+        if value not in (None, ""):
+            return value
+    return ""
+
+
+def normalize_pickup_point(carrier, country, item, point_type=""):
+    address_data = item.get("address") if isinstance(item.get("address"), dict) else {}
+    coordinates = item.get("coordinates") if isinstance(item.get("coordinates"), dict) else {}
+    external_id = clean_text(pickup_value(item, "id", "code", "parcelshop_id", "parcelShopId"))
+    city = clean_text(pickup_value(item, "city", "place", "municipality") or address_data.get("city"))
+    zip_code = clean_text(pickup_value(item, "zip", "zipCode", "postalCode") or address_data.get("zip"))
+    street = clean_text(pickup_value(item, "street", "streetName") or address_data.get("street"))
+    house = clean_text(pickup_value(item, "streetNumber", "houseNumber") or address_data.get("houseNumber"))
+    address = clean_text(pickup_value(item, "address", "fullAddress", "parcelshop_address")) if not address_data else ""
+    if not address:
+        address = ", ".join(part for part in [" ".join(part for part in [street, house] if part), " ".join(part for part in [zip_code, city] if part)] if part)
+    name = clean_text(pickup_value(item, "name", "company", "title", "parcelshop_name"))
+    item_country = clean_text(pickup_value(item, "country", "countryCode") or country).upper()
+    raw_cod = pickup_value(item, "codAllowed", "cod_allowed", "cod")
+    cod_allowed = None if raw_cod == "" else clean_text(raw_cod).lower() in {"1", "true", "yes", "ano"}
+    latitude = clean_text(pickup_value(item, "latitude", "lat") or coordinates.get("latitude"))
+    longitude = clean_text(pickup_value(item, "longitude", "lon", "lng") or coordinates.get("longitude"))
+    resolved_type = clean_text(point_type or pickup_value(item, "type", "pointType", "parcelshop_type"))
+    if not external_id:
+        return None
+    search_text = searchable_text(" ".join([external_id, name, address, city, zip_code]))
+    return {
+        "carrier": carrier,
+        "country": item_country or country,
+        "external_id": external_id,
+        "name": name,
+        "address": address,
+        "city": city,
+        "zip_code": zip_code,
+        "latitude": latitude,
+        "longitude": longitude,
+        "point_type": resolved_type,
+        "cod_allowed": cod_allowed,
+        "search_text": search_text,
+        "raw": item,
+    }
+
+
+def json_items(payload):
+    if isinstance(payload, list):
+        return payload
+    if not isinstance(payload, dict):
+        return []
+    data = payload.get("data")
+    if isinstance(data, list):
+        return data
+    if isinstance(data, dict):
+        if isinstance(data.get("items"), list):
+            return data["items"]
+        return [data]
+    if isinstance(payload.get("items"), list):
+        return payload["items"]
+    for key in ("parcelshops", "parcelShops", "points", "branches", "result"):
+        if isinstance(payload.get(key), list):
+            return payload[key]
+    return []
+
+
+def refresh_dpd_pickup_point(external_id, country):
+    params = urllib.parse.urlencode({"id": clean_text(external_id), "country": "703" if country == "SK" else "203"})
+    payload = fetch_json_url(f"https://pickup.dpd.cz/api/GetParcelShopById?{params}", timeout=25)
+    candidates = json_items(payload)
+    if not candidates and isinstance(payload, dict):
+        candidates = [payload]
+    point = normalize_pickup_point("dpd", country, candidates[0]) if candidates else None
+    if not point:
+        return None
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                INSERT INTO pickup_points (
+                    carrier, country, external_id, name, address, city, zip_code,
+                    latitude, longitude, point_type, cod_allowed, active,
+                    search_text, raw, source_updated_at, refreshed_at
+                ) VALUES (
+                    'dpd', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, %s, %s, NOW(), NOW()
+                )
+                ON CONFLICT (carrier, country, external_id) DO UPDATE SET
+                    name = EXCLUDED.name, address = EXCLUDED.address, city = EXCLUDED.city,
+                    zip_code = EXCLUDED.zip_code, latitude = EXCLUDED.latitude,
+                    longitude = EXCLUDED.longitude, point_type = EXCLUDED.point_type,
+                    cod_allowed = EXCLUDED.cod_allowed, active = TRUE,
+                    search_text = EXCLUDED.search_text, raw = EXCLUDED.raw,
+                    source_updated_at = NOW(), refreshed_at = NOW()
+                RETURNING *
+                """,
+                (
+                    point["country"], point["external_id"], point["name"], point["address"], point["city"],
+                    point["zip_code"], point["latitude"], point["longitude"], point["point_type"],
+                    point["cod_allowed"], point["search_text"], Json(point["raw"]),
+                ),
+            )
+            return cur.fetchone()
+
+
+def fetch_json_url(url, timeout=60):
+    req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "Expedice/1.0"}, method="GET")
+    with urllib.request.urlopen(req, timeout=timeout) as response:
+        return json.loads(response.read().decode("utf-8", "replace"))
+
+
+def refresh_pickup_catalog(carrier, country="CZ"):
+    carrier = clean_text(carrier).lower()
+    country = clean_text(country).upper() or "CZ"
+    if carrier not in {"packeta", "dpd"} or country not in {"CZ", "SK"}:
+        raise ValueError("Nepodporovaný dopravce nebo země katalogu.")
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO pickup_catalog_syncs (carrier, country, status, started_at, message)
+                VALUES (%s, %s, 'running', NOW(), '')
+                ON CONFLICT (carrier, country) DO UPDATE SET status = 'running', started_at = NOW(), message = ''
+                """,
+                (carrier, country),
+            )
+    try:
+        points = []
+        if carrier == "packeta":
+            settings = carrier_client_settings("packeta")
+            api_key = clean_text(settings.get("apiKey"))
+            if not api_key:
+                raise ValueError("V Nastavení chybí Packeta API key pro katalog výdejních míst.")
+            lang = "sk" if country == "SK" else "cs"
+            for feed, point_type in (("branch", "branch"), ("box", "box")):
+                url = f"https://pickup-point.api.packeta.com/v5/{urllib.parse.quote(api_key, safe='')}/{feed}/json?lang={lang}"
+                for item in json_items(fetch_json_url(url, timeout=90)):
+                    point = normalize_pickup_point(carrier, country, item, point_type)
+                    if point and point["country"] == country:
+                        points.append(point)
+        else:
+            country_number = "703" if country == "SK" else "203"
+            url = f"https://pickup.dpd.cz/api/getAll?country={country_number}&lang={'sk' if country == 'SK' else 'cs'}"
+            for item in json_items(fetch_json_url(url, timeout=90)):
+                point = normalize_pickup_point(carrier, country, item)
+                if point:
+                    points.append(point)
+        if not points:
+            raise ValueError("Katalog nevrátil žádná výdejní místa.")
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute("UPDATE pickup_points SET active = FALSE WHERE carrier = %s AND country = %s", (carrier, country))
+                for point in points:
+                    cur.execute(
+                        """
+                        INSERT INTO pickup_points (
+                            carrier, country, external_id, name, address, city, zip_code, latitude, longitude,
+                            point_type, cod_allowed, active, search_text, raw, refreshed_at
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, TRUE, %s, %s, NOW())
+                        ON CONFLICT (carrier, country, external_id) DO UPDATE SET
+                            name = EXCLUDED.name, address = EXCLUDED.address, city = EXCLUDED.city,
+                            zip_code = EXCLUDED.zip_code, latitude = EXCLUDED.latitude, longitude = EXCLUDED.longitude,
+                            point_type = EXCLUDED.point_type, cod_allowed = EXCLUDED.cod_allowed, active = TRUE,
+                            search_text = EXCLUDED.search_text, raw = EXCLUDED.raw, refreshed_at = NOW()
+                        """,
+                        (
+                            point["carrier"], point["country"], point["external_id"], point["name"], point["address"],
+                            point["city"], point["zip_code"], point["latitude"], point["longitude"], point["point_type"],
+                            point["cod_allowed"], point["search_text"], Json(point["raw"]),
+                        ),
+                    )
+                cur.execute(
+                    """
+                    UPDATE pickup_catalog_syncs
+                    SET status = 'ok', rows_count = %s, message = '', finished_at = NOW()
+                    WHERE carrier = %s AND country = %s
+                    """,
+                    (len(points), carrier, country),
+                )
+        return {"ok": True, "carrier": carrier, "country": country, "rowsCount": len(points)}
+    except Exception as exc:
+        with db_conn() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE pickup_catalog_syncs
+                    SET status = 'error', message = %s, finished_at = NOW()
+                    WHERE carrier = %s AND country = %s
+                    """,
+                    (clean_text(exc)[:500], carrier, country),
+                )
+        raise
 
 
 def dpd_api_url(settings=None):
@@ -5858,8 +6305,21 @@ def completion_row_label(row_id):
     ensure_schema()
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute("SELECT * FROM completion_rows WHERE id = %s", (row_id,))
-            row = cur.fetchone()
+            row = completion_row_with_day(cur, row_id)
+            if row:
+                shipments = completion_shipments_for_row(cur, row)
+                blocked = [item for item in shipments if item.get("status") in {"pending_replacement", "replaced", "error"}]
+                active = [item for item in shipments if item.get("status") == "active"]
+                if blocked and not active:
+                    return (
+                        jsonify(
+                            {
+                                "error": "Původní zásilka je označená jako nepoužívat. Vytvoř nejdříve náhradní zásilku.",
+                                "code": "shipment_not_printable",
+                            }
+                        ),
+                        409,
+                    )
     if not row:
         return jsonify({"error": "Řádek kompletace nebyl nalezen."}), 404
 
@@ -6784,6 +7244,143 @@ def list_completion_datasets():
     return jsonify({"datasets": fetch_datasets(include_deleted, "completion", request.args.get("shop"), request.args.get("date"))})
 
 
+def pickup_catalog_state(carrier, country):
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM pickup_catalog_syncs WHERE carrier = %s AND country = %s", (carrier, country))
+            sync = cur.fetchone()
+            cur.execute(
+                "SELECT COUNT(*) AS count, MAX(refreshed_at) AS refreshed_at FROM pickup_points WHERE carrier = %s AND country = %s AND active = TRUE",
+                (carrier, country),
+            )
+            summary = cur.fetchone()
+    refreshed_at = summary.get("refreshed_at") if summary else None
+    return {
+        "carrier": carrier,
+        "country": country,
+        "status": sync.get("status") if sync else "never",
+        "rowsCount": summary.get("count") if summary else 0,
+        "message": sync.get("message") if sync else "",
+        "refreshedAt": refreshed_at.isoformat() if refreshed_at else None,
+        "finishedAt": sync["finished_at"].isoformat() if sync and sync.get("finished_at") else None,
+    }
+
+
+def pickup_catalog_needs_refresh(state):
+    refreshed = state.get("refreshedAt")
+    if not refreshed:
+        return True
+    try:
+        refreshed_at = datetime.fromisoformat(refreshed)
+    except ValueError:
+        return True
+    ttl = timedelta(hours=4 if state.get("carrier") == "packeta" else 24)
+    return local_now().astimezone(refreshed_at.tzinfo) - refreshed_at >= ttl
+
+
+def ensure_pickup_catalog(carrier, country):
+    state = pickup_catalog_state(carrier, country)
+    if not pickup_catalog_needs_refresh(state):
+        return state
+    if not state.get("rowsCount"):
+        try:
+            refresh_pickup_catalog(carrier, country)
+        except Exception:
+            pass
+        return pickup_catalog_state(carrier, country)
+    if state.get("status") != "running":
+        threading.Thread(target=refresh_pickup_catalog, args=(carrier, country), daemon=True).start()
+    return state
+
+
+@app.route("/api/pickup-points")
+def pickup_points_search():
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+    carrier = clean_text(request.args.get("carrier")).lower()
+    country = clean_text(request.args.get("country") or "CZ").upper()
+    if carrier not in {"packeta", "dpd"} or country not in {"CZ", "SK"}:
+        return jsonify({"error": "Vyber podporovaného dopravce a zemi."}), 400
+    state = ensure_pickup_catalog(carrier, country)
+    query = searchable_text(clean_text(request.args.get("q")))
+    limit = min(max(int_from_text(request.args.get("limit")) or 30, 1), 100)
+    params = [carrier, country]
+    where = "carrier = %s AND country = %s AND active = TRUE"
+    if query:
+        where += " AND search_text LIKE %s"
+        params.append(f"%{query}%")
+    params.append(limit)
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                f"SELECT * FROM pickup_points WHERE {where} ORDER BY city, name, external_id LIMIT %s",
+                params,
+            )
+            points = [pickup_point_to_api(row) for row in cur.fetchall()]
+    widget_key = ""
+    if carrier == "packeta":
+        widget_key = clean_text(carrier_client_settings("packeta", request.args.get("shopCode") or "").get("apiKey"))
+    return jsonify({"ok": True, "points": points, "catalog": state, "widgetKey": widget_key})
+
+
+@app.route("/api/pickup-points/<carrier>/<path:external_id>")
+def pickup_point_detail(carrier, external_id):
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+    carrier = clean_text(carrier).lower()
+    country = clean_text(request.args.get("country") or "CZ").upper()
+    if carrier not in {"packeta", "dpd"} or country not in {"CZ", "SK"}:
+        return jsonify({"error": "Vyber podporovaného dopravce a zemi."}), 400
+    ensure_pickup_catalog(carrier, country)
+    live_verified = False
+    live_error = ""
+    if carrier == "dpd":
+        try:
+            live_point = refresh_dpd_pickup_point(external_id, country)
+            live_verified = bool(live_point)
+        except Exception as exc:
+            live_error = clean_text(exc)
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM pickup_points WHERE carrier = %s AND country = %s AND external_id = %s AND active = TRUE",
+                (carrier, country, clean_text(external_id)),
+            )
+            point = cur.fetchone()
+    if not point:
+        return jsonify({"error": "Výdejní místo nebylo v aktuálním katalogu nalezeno."}), 404
+    return jsonify(
+        {
+            "ok": True,
+            "point": pickup_point_to_api(point),
+            "catalog": pickup_catalog_state(carrier, country),
+            "liveVerified": live_verified if carrier == "dpd" else None,
+            "liveError": live_error,
+        }
+    )
+
+
+@app.route("/api/pickup-points/refresh", methods=["POST"])
+def pickup_points_refresh():
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+    data = request.get_json(silent=True) or {}
+    carriers = [clean_text(data.get("carrier")).lower()] if data.get("carrier") else ["packeta", "dpd"]
+    countries = [clean_text(data.get("country")).upper()] if data.get("country") else ["CZ", "SK"]
+    results = []
+    for carrier in carriers:
+        for country in countries:
+            try:
+                results.append(refresh_pickup_catalog(carrier, country))
+            except Exception as exc:
+                results.append({"ok": False, "carrier": carrier, "country": country, "error": clean_text(exc)})
+    return jsonify({"ok": all(item.get("ok") for item in results), "results": results})
+
+
 @app.route("/api/address/validate", methods=["POST"])
 def validate_address():
     auth_error = require_download_token_if_configured()
@@ -7587,6 +8184,605 @@ def update_completion_row(row_id):
     return jsonify({"ok": True, "row": completion_row_to_api(row)})
 
 
+def completion_row_with_day(cur, row_id, for_update=False):
+    lock = " FOR UPDATE OF cr" if for_update else ""
+    cur.execute(
+        f"""
+        SELECT cr.*, d.expedition_day_id
+        FROM completion_rows cr
+        JOIN datasets d ON d.id = cr.dataset_id
+        WHERE cr.id = %s
+        {lock}
+        """,
+        (row_id,),
+    )
+    return cur.fetchone()
+
+
+def completion_shipment_to_api(row):
+    if not row:
+        return None
+    return {
+        "id": row.get("id"),
+        "completionRowId": row.get("completion_row_id"),
+        "shopCode": row.get("shop_code") or "",
+        "orderNumber": row.get("order_number") or "",
+        "carrier": row.get("carrier") or "",
+        "service": row.get("service") or "",
+        "externalId": row.get("external_id") or "",
+        "labelNumber": row.get("label_number") or "",
+        "status": row.get("status") or "",
+        "supersededReason": row.get("superseded_reason") or "",
+        "createdBy": row.get("created_by") or "",
+        "createdAt": row["created_at"].isoformat() if row.get("created_at") else None,
+        "updatedAt": row["updated_at"].isoformat() if row.get("updated_at") else None,
+        "supersededAt": row["superseded_at"].isoformat() if row.get("superseded_at") else None,
+        "replacedById": row.get("replaced_by_id"),
+    }
+
+
+def completion_shipments_for_row(cur, row, create_legacy=True):
+    day_id = row.get("expedition_day_id")
+    shop_code = clean_text(row.get("shop_code"))
+    order_number = clean_text(row.get("order_number"))
+    if create_legacy:
+        legacy_id = completion_label_number(row)
+        if legacy_id:
+            legacy_carrier = label_carrier_for_row(row, legacy_id) or "packeta"
+            cur.execute(
+                """
+                SELECT id FROM completion_shipments
+                WHERE expedition_day_id IS NOT DISTINCT FROM %s
+                  AND shop_code = %s AND order_number = %s
+                  AND external_id = %s
+                LIMIT 1
+                """,
+                (day_id, shop_code, order_number, legacy_id),
+            )
+            if not cur.fetchone():
+                cur.execute(
+                    """
+                    INSERT INTO completion_shipments (
+                        expedition_day_id, completion_row_id, shop_code, order_number,
+                        carrier, service, external_id, label_number, status,
+                        request_payload, response_payload, created_by
+                    )
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'active', '{}'::jsonb, '{}'::jsonb, 'import')
+                    """,
+                    (
+                        day_id,
+                        row.get("id"),
+                        shop_code,
+                        order_number,
+                        legacy_carrier,
+                        delivery_info_from_row(completion_row_to_api(row)).get("service"),
+                        legacy_id,
+                        legacy_id,
+                    ),
+                )
+    cur.execute(
+        """
+        SELECT * FROM completion_shipments
+        WHERE expedition_day_id IS NOT DISTINCT FROM %s
+          AND shop_code = %s AND order_number = %s
+        ORDER BY created_at DESC, id DESC
+        """,
+        (day_id, shop_code, order_number),
+    )
+    return cur.fetchall()
+
+
+def editor_float(value):
+    text = clean_text(value).strip().replace(" ", "").replace(",", ".")
+    text = re.sub(r"[^0-9.\-]", "", text)
+    try:
+        return float(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def expedition_problem(category, message, field="", severity="error"):
+    return {"category": category, "message": message, "field": field, "severity": severity}
+
+
+def validate_expedition_details(details, cur=None):
+    prepared = {field: details.get(field) for field in EXPEDITION_DETAIL_FIELDS if field in details}
+    prepared["country"] = clean_text(prepared.get("country") or country_from_order_number(details)).upper() or "CZ"
+    prepared["currency"] = clean_text(
+        prepared.get("currency") or ("EUR" if prepared["country"] == "SK" else "CZK")
+    ).upper()
+    prepared["deliveryService"] = clean_text(prepared.get("deliveryService"))
+    delivery = delivery_info_from_row(prepared)
+    prepared["deliveryCarrier"] = delivery.get("carrier") or clean_text(prepared.get("deliveryCarrier"))
+    issues = []
+
+    if prepared["deliveryService"] not in DELIVERY_SERVICES:
+        issues.append(expedition_problem("delivery", "Vyber konkrétní službu dopravy.", "deliveryService"))
+    if not clean_text(prepared.get("firstName") or prepared.get("lastName")):
+        issues.append(expedition_problem("contact", "Chybí jméno zákazníka.", "firstName"))
+    if not clean_text(prepared.get("phone")) and not clean_text(prepared.get("email")):
+        issues.append(expedition_problem("contact", "Chybí telefon i e-mail.", "phone"))
+    weight = editor_float(prepared.get("weight"))
+    if weight is None or weight <= 0:
+        issues.append(expedition_problem("parcel", "Hmotnost musí být větší než nula.", "weight"))
+
+    cod_amount = editor_float(prepared.get("codAmount")) or 0
+    pickup_point = None
+    if prepared["deliveryService"] in {"packeta_pickup", "dpd_pickup"}:
+        pickup_id = clean_text(prepared.get("pickupPointId"))
+        carrier = "packeta" if prepared["deliveryService"] == "packeta_pickup" else "dpd"
+        if not pickup_id:
+            issues.append(expedition_problem("pickup", "Chybí výdejní místo nebo box.", "pickupPointId"))
+        elif cur:
+            cur.execute(
+                """
+                SELECT * FROM pickup_points
+                WHERE carrier = %s AND country = %s AND external_id = %s AND active = TRUE
+                """,
+                (carrier, prepared["country"], pickup_id),
+            )
+            pickup_point = cur.fetchone()
+            if not pickup_point:
+                issues.append(
+                    expedition_problem("pickup", "Výdejní místo nebylo nalezeno v aktuálním katalogu.", "pickupPointId")
+                )
+            else:
+                prepared.update(
+                    {
+                        "pickupPointId": pickup_point.get("external_id") or pickup_id,
+                        "pickupPointName": pickup_point.get("name") or "",
+                        "pickupPointAddress": pickup_point.get("address") or "",
+                        "pickupPointCountry": pickup_point.get("country") or prepared["country"],
+                        "pickupPointCodAllowed": pickup_point.get("cod_allowed"),
+                    }
+                )
+                if cod_amount > 0 and pickup_point.get("cod_allowed") is False:
+                    issues.append(
+                        expedition_problem("payment", "Vybrané výdejní místo nepodporuje dobírku.", "codAmount")
+                    )
+
+    address_result = {}
+    if delivery.get("requiresAddress"):
+        precheck = address_precheck_error(prepared)
+        if precheck:
+            issues.append(expedition_problem("address", precheck, "streetWithNumber"))
+        else:
+            query = mapy_address_query(prepared)
+            api_key = mapy_api_key()
+            if not api_key:
+                issues.append(expedition_problem("address", "Ověření adresy přes Mapy.com není nastavené.", severity="warning"))
+            else:
+                try:
+                    items = mapy_geocode_items(api_key, prepared, query, 15)
+                    exact_item = None
+                    match_message = "Mapy.com nenašly přesnou adresu."
+                    for item in items:
+                        matches, candidate_message = address_matches_mapy_result(prepared, item)
+                        if matches:
+                            exact_item = item
+                            break
+                        match_message = candidate_message or match_message
+                    address_result = {"query": query, "items": items, "suggestedAddress": mapy_address_from_item(items[0]) if items else None}
+                    if exact_item:
+                        normalized = mapy_address_from_item(exact_item)
+                        if normalized:
+                            prepared.update(normalized)
+                        address_result["matchedAddress"] = normalized
+                    else:
+                        issues.append(expedition_problem("address", match_message, "streetWithNumber"))
+                except Exception as exc:
+                    issues.append(
+                        expedition_problem("address", f"Mapy.com se nepodařilo ověřit: {clean_text(exc)}", severity="warning")
+                    )
+
+    errors = [item for item in issues if item.get("severity") == "error"]
+    warnings = [item for item in issues if item.get("severity") == "warning"]
+    status = "verified" if not errors and not warnings else ("unverified" if not errors else "error")
+    message = "Údaje jsou připravené pro vytvoření zásilky." if status == "verified" else issues[0]["message"]
+    return {
+        "status": status,
+        "readyForShipment": status == "verified",
+        "message": message,
+        "issues": issues,
+        "details": prepared,
+        "address": address_result,
+        "pickupPoint": pickup_point_to_api(pickup_point),
+    }
+
+
+def completion_row_problems(row_api, shipments=None):
+    problems = []
+    validation = row_api.get("addressValidationResult") or {}
+    for issue in validation.get("issues") or []:
+        if isinstance(issue, dict):
+            problems.append(issue)
+    if not row_api.get("hasExpeditionOverride"):
+        delivery = delivery_info_from_row(row_api)
+        if delivery.get("requiresAddress") and row_api.get("addressValidationStatus") != "verified":
+            problems.append(expedition_problem("address", "Adresa zatím není ověřená.", severity="warning"))
+        if delivery.get("service") in {"packeta_pickup", "dpd_pickup"} and not clean_text(row_api.get("pickupPointId")):
+            problems.append(expedition_problem("pickup", "Chybí výdejní místo nebo box."))
+    if clean_text(row_api.get("paymentCheckStatus")).lower() in {"error", "unpaid", "nezaplaceno"}:
+        problems.append(expedition_problem("payment", row_api.get("paymentCheckMessage") or "Platba vyžaduje kontrolu."))
+    if any(item.get("status") == "pending_replacement" for item in shipments or []):
+        problems.append(expedition_problem("replacement", "Náhradní zásilka čeká na vytvoření."))
+    unique = []
+    seen = set()
+    for item in problems:
+        key = (item.get("category"), item.get("message"))
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+    return unique
+
+
+@app.route("/api/completion/rows/<int:row_id>/expedition-details", methods=["PATCH"])
+def update_completion_expedition_details(row_id):
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+    payload = request.get_json(silent=True) or {}
+    incoming = payload.get("details") if isinstance(payload.get("details"), dict) else payload
+    expected_version = int_from_text(payload.get("editVersion"))
+    force_unverified = bool(payload.get("forceUnverified"))
+    confirm_supersede = bool(payload.get("confirmSupersede"))
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            row = completion_row_with_day(cur, row_id, for_update=True)
+            if not row:
+                return jsonify({"error": "Řádek kompletace nebyl nalezen."}), 404
+            current_version = int(row.get("expedition_override_version") or 0)
+            if expected_version != current_version:
+                current_api = completion_row_to_api(row)
+                shipments = completion_shipments_for_row(cur, row)
+                return (
+                    jsonify(
+                        {
+                            "error": "Objednávku mezitím upravil někdo jiný.",
+                            "code": "edit_conflict",
+                            "row": current_api,
+                            "shipments": [completion_shipment_to_api(item) for item in shipments],
+                        }
+                    ),
+                    409,
+                )
+
+            current_api = completion_row_to_api(row)
+            details = {field: current_api.get(field) for field in EXPEDITION_DETAIL_FIELDS}
+            for field in EXPEDITION_DETAIL_FIELDS:
+                if field in incoming:
+                    value = incoming.get(field)
+                    details[field] = value if isinstance(value, bool) or value is None else clean_text(value).strip()
+            validation = validate_expedition_details(details, cur)
+            effective_details = validation["details"]
+            if validation["status"] != "verified" and not force_unverified:
+                return (
+                    jsonify(
+                        {
+                            "error": validation["message"],
+                            "code": "verification_required",
+                            "validation": validation,
+                            "canForce": True,
+                        }
+                    ),
+                    422,
+                )
+
+            shipments = completion_shipments_for_row(cur, row)
+            active_shipments = [item for item in shipments if item.get("status") == "active"]
+            critical_fields = {"deliveryCarrier", "deliveryService", "pickupPointId", "country"}
+            critical_changes = {
+                field: {"from": current_api.get(field), "to": effective_details.get(field)}
+                for field in critical_fields
+                if clean_text(current_api.get(field)) != clean_text(effective_details.get(field))
+            }
+            if active_shipments and critical_changes and not confirm_supersede:
+                return (
+                    jsonify(
+                        {
+                            "error": "Objednávka už má vytvořenou zásilku. Potvrď označení původní zásilky jako nepoužívat.",
+                            "code": "shipment_confirmation_required",
+                            "changes": critical_changes,
+                            "shipments": [completion_shipment_to_api(item) for item in active_shipments],
+                        }
+                    ),
+                    409,
+                )
+            if active_shipments and critical_changes:
+                cur.execute(
+                    """
+                    UPDATE completion_shipments
+                    SET status = 'pending_replacement', superseded_reason = %s,
+                        superseded_at = NOW(), updated_at = NOW()
+                    WHERE id = ANY(%s)
+                    """,
+                    ("Změna dopravy nebo výdejního místa v editoru expedice", [item["id"] for item in active_shipments]),
+                )
+
+            user = current_user() or {}
+            next_version = current_version + 1
+            validation_payload = dict(validation)
+            validation_payload.pop("details", None)
+            cur.execute(
+                """
+                UPDATE completion_rows
+                SET expedition_override = %s,
+                    expedition_override_version = %s,
+                    expedition_override_updated_at = NOW(),
+                    expedition_override_updated_by = %s,
+                    expedition_validation_status = %s,
+                    expedition_validation_message = %s,
+                    expedition_validation_result = %s
+                WHERE id = %s
+                RETURNING *
+                """,
+                (
+                    Json(effective_details),
+                    next_version,
+                    user.get("username") or user.get("display_name") or "",
+                    validation["status"],
+                    validation["message"],
+                    Json(validation_payload),
+                    row_id,
+                ),
+            )
+            updated = cur.fetchone()
+            updated["expedition_day_id"] = row.get("expedition_day_id")
+            record_audit_event(
+                cur,
+                "completion_expedition_update",
+                dataset_id=row.get("dataset_id"),
+                shop_code=row.get("shop_code"),
+                order_number=row.get("order_number"),
+                row_ref=row.get("expedition_number"),
+                row_id=row_id,
+                row_kind="completion",
+                payload={"validation": validation_payload, "criticalChanges": critical_changes, "forcedUnverified": force_unverified},
+                previous_state={field: current_api.get(field) for field in EXPEDITION_DETAIL_FIELDS},
+                next_state=effective_details,
+                expedition_number=row.get("expedition_number"),
+                source="expedition_editor",
+            )
+            shipments = completion_shipments_for_row(cur, updated, create_legacy=False)
+            row_api = completion_row_to_api(updated)
+    return jsonify(
+        {
+            "ok": True,
+            "row": row_api,
+            "validation": validation_payload,
+            "shipments": [completion_shipment_to_api(item) for item in shipments],
+            "problems": completion_row_problems(row_api, shipments),
+        }
+    )
+
+
+@app.route("/api/completion/rows/<int:row_id>/shipments")
+def completion_row_shipments(row_id):
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            row = completion_row_with_day(cur, row_id)
+            if not row:
+                return jsonify({"error": "Řádek kompletace nebyl nalezen."}), 404
+            shipments = completion_shipments_for_row(cur, row)
+            row_api = completion_row_to_api(row)
+    return jsonify(
+        {
+            "ok": True,
+            "row": row_api,
+            "shipments": [completion_shipment_to_api(item) for item in shipments],
+            "problems": completion_row_problems(row_api, shipments),
+        }
+    )
+
+
+def response_identifier(value):
+    preferred = {
+        "parcelnumber",
+        "parcelident",
+        "shipmentid",
+        "shipmentnumber",
+        "packagenumber",
+        "id",
+    }
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if searchable_text(key).replace("_", "") in preferred and isinstance(item, (str, int)) and clean_text(item):
+                return clean_text(item)
+        for item in value.values():
+            found = response_identifier(item)
+            if found:
+                return found
+    if isinstance(value, list):
+        for item in value:
+            found = response_identifier(item)
+            if found:
+                return found
+    return ""
+
+
+@app.route("/api/completion/rows/<int:row_id>/shipments", methods=["POST"])
+def create_completion_replacement_shipment(row_id):
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+    payload = request.get_json(silent=True) or {}
+    if not payload.get("confirmCreate"):
+        return jsonify({"error": "Potvrď vytvoření skutečné zásilky.", "code": "confirmation_required"}), 409
+
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            row = completion_row_with_day(cur, row_id, for_update=True)
+            if not row:
+                return jsonify({"error": "Řádek kompletace nebyl nalezen."}), 404
+            row_api = completion_row_to_api(row)
+            if completion_row_is_cancelled(row_api):
+                return jsonify({"error": "Stornovanou objednávku nelze odeslat dopravci."}), 422
+            validation = validate_expedition_details(row_api, cur)
+            if not validation.get("readyForShipment"):
+                return (
+                    jsonify(
+                        {
+                            "error": "Zásilku nelze vytvořit, dokud nejsou expediční údaje ověřené.",
+                            "code": "shipment_not_ready",
+                            "validation": validation,
+                        }
+                    ),
+                    422,
+                )
+            shipments = completion_shipments_for_row(cur, row)
+            active = [item for item in shipments if item.get("status") == "active"]
+            pending = [item for item in shipments if item.get("status") == "pending_replacement"]
+            if active and not pending and not payload.get("allowAdditional"):
+                return (
+                    jsonify(
+                        {
+                            "error": "Objednávka už má aktivní zásilku. Nejprve změň dopravu nebo ji výslovně označ k náhradě.",
+                            "code": "active_shipment_exists",
+                            "shipments": [completion_shipment_to_api(item) for item in shipments],
+                        }
+                    ),
+                    409,
+                )
+
+            carrier = validation["details"].get("deliveryCarrier")
+            service = validation["details"].get("deliveryService")
+            request_payload = {}
+            response_payload = {}
+            external_id = ""
+            label_number = ""
+            response_text = ""
+
+            if carrier == "packeta":
+                packet = packeta_dry_run_packet(row_api)
+                client_settings = carrier_client_settings("packeta", packet.get("clientCode") or packet.get("shopCode"))
+                password = client_settings.get("apiPassword", "")
+                if not password:
+                    return jsonify({"error": "Pro tento e-shop chybí Packeta API heslo."}), 422
+                request_xml = packeta_create_xml(packet["requestXml"], password)
+                result = packeta_post_validation_xml(request_xml, client_settings)
+                external_id = xml_tag_text(result.get("responseText", ""), "id")
+                response_text = result.get("responseText") or result.get("error") or ""
+                request_payload = {key: value for key, value in packet.items() if key != "requestXml"}
+                response_payload = {
+                    "httpStatus": result.get("httpStatus"),
+                    "status": result.get("status"),
+                    "error": result.get("error"),
+                }
+                if not result.get("valid") or not external_id:
+                    return jsonify({"error": result.get("error") or "Packeta nevrátila ID zásilky.", "carrierResponse": response_payload}), 502
+                label_number = external_id
+            elif carrier == "dpd":
+                shipment = dpd_payload(row_api)
+                client_settings = carrier_client_settings("dpd", shipment.get("clientCode") or shipment.get("shopCode"))
+                request_payload = {
+                    "mode": payload.get("mode") or client_settings.get("mode") or "test",
+                    "source": "expedice-editor",
+                    "clientCode": client_settings.get("clientCode"),
+                    "clientName": client_settings.get("clientName"),
+                    "client": {
+                        "customerDsw": client_settings.get("customerDsw"),
+                        "customerId": client_settings.get("customerId"),
+                        "shipmentType": client_settings.get("shipmentType"),
+                    },
+                    "shipments": [shipment["payload"]],
+                }
+                result = dpd_post_payload(request_payload, client_settings)
+                response_text = result.get("responseText") or result.get("error") or ""
+                try:
+                    response_payload = json.loads(result.get("responseText") or "{}")
+                except (TypeError, ValueError):
+                    response_payload = {"responseText": clean_text(result.get("responseText"))[:4000]}
+                response_payload.update({"httpStatus": result.get("httpStatus"), "error": result.get("error")})
+                external_id = response_identifier(response_payload)
+                label_number = dpd_label_number_from_text(json.dumps(response_payload, ensure_ascii=False)) or external_id
+                if not result.get("ok") or not external_id:
+                    return jsonify({"error": result.get("error") or "DPD nevrátilo číslo zásilky.", "carrierResponse": response_payload}), 502
+            else:
+                return jsonify({"error": "Pro vybranou ruční nebo e-mailovou dopravu se zásilka u dopravce nevytváří."}), 422
+
+            user = current_user() or {}
+            cur.execute(
+                """
+                INSERT INTO completion_shipments (
+                    expedition_day_id, completion_row_id, shop_code, order_number,
+                    carrier, service, external_id, label_number, status,
+                    request_payload, response_payload, created_by_user_id, created_by
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'active', %s, %s, %s, %s)
+                RETURNING *
+                """,
+                (
+                    row.get("expedition_day_id"),
+                    row_id,
+                    row.get("shop_code"),
+                    row.get("order_number"),
+                    carrier,
+                    service,
+                    external_id,
+                    label_number,
+                    Json(request_payload),
+                    Json(response_payload),
+                    user.get("id"),
+                    user.get("username") or user.get("display_name") or "admin",
+                ),
+            )
+            created = cur.fetchone()
+            if pending:
+                cur.execute(
+                    """
+                    UPDATE completion_shipments
+                    SET status = 'replaced', replaced_by_id = %s, updated_at = NOW()
+                    WHERE id = ANY(%s)
+                    """,
+                    (created["id"], [item["id"] for item in pending]),
+                )
+            carrier_label = "DPD" if carrier == "dpd" else "Packeta"
+            cur.execute(
+                """
+                UPDATE completion_rows
+                SET packeta_status = 'ok', packeta_shipment_id = %s,
+                    label_printed = %s,
+                    note = CASE WHEN %s = '' THEN note WHEN note IS NULL OR note = '' THEN %s ELSE note || ' | ' || %s END
+                WHERE id = %s
+                RETURNING *
+                """,
+                (external_id, f"{carrier_label} ODESLÁNO", clean_text(response_text)[:220], clean_text(response_text)[:220], clean_text(response_text)[:220], row_id),
+            )
+            updated = cur.fetchone()
+            updated["expedition_day_id"] = row.get("expedition_day_id")
+            record_audit_event(
+                cur,
+                "completion_replacement_shipment_create",
+                dataset_id=row.get("dataset_id"),
+                shop_code=row.get("shop_code"),
+                order_number=row.get("order_number"),
+                row_ref=row.get("expedition_number"),
+                row_id=row_id,
+                row_kind="completion",
+                payload={"shipmentId": created["id"], "carrier": carrier, "externalId": external_id, "replacedIds": [item["id"] for item in pending]},
+                next_state=completion_shipment_to_api(created),
+                expedition_number=row.get("expedition_number"),
+                source="expedition_editor",
+            )
+            all_shipments = completion_shipments_for_row(cur, updated, create_legacy=False)
+            updated_api = completion_row_to_api(updated)
+    return jsonify(
+        {
+            "ok": True,
+            "row": updated_api,
+            "shipment": completion_shipment_to_api(created),
+            "shipments": [completion_shipment_to_api(item) for item in all_shipments],
+            "problems": completion_row_problems(updated_api, all_shipments),
+        }
+    )
+
+
 @app.route("/api/completion/latest")
 def latest_completion_dataset():
     auth_error = require_download_token_if_configured()
@@ -7659,7 +8855,31 @@ def get_dataset(dataset_id):
                 return jsonify({"error": "Dataset not found"}), 404
             if dataset["dataset_kind"] == "completion":
                 cur.execute(
-                    "SELECT * FROM completion_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
+                    """
+                    SELECT cr.*, d.expedition_day_id,
+                           COALESCE((
+                               SELECT jsonb_agg(
+                                   jsonb_build_object(
+                                       'id', cs.id,
+                                       'carrier', cs.carrier,
+                                       'service', cs.service,
+                                       'externalId', cs.external_id,
+                                       'labelNumber', cs.label_number,
+                                       'status', cs.status,
+                                       'createdAt', cs.created_at,
+                                       'createdBy', cs.created_by
+                                   ) ORDER BY cs.created_at DESC, cs.id DESC
+                               )
+                               FROM completion_shipments cs
+                               WHERE cs.expedition_day_id IS NOT DISTINCT FROM d.expedition_day_id
+                                 AND cs.shop_code = cr.shop_code
+                                 AND cs.order_number = cr.order_number
+                           ), '[]'::jsonb) AS shipment_summaries
+                    FROM completion_rows cr
+                    JOIN datasets d ON d.id = cr.dataset_id
+                    WHERE cr.dataset_id = %s
+                    ORDER BY cr.row_number NULLS LAST, cr.id
+                    """,
                     (dataset_id,),
                 )
                 rows = [completion_row_to_api(row) for row in cur.fetchall()]
