@@ -1516,7 +1516,15 @@ function postUploadChecksHtml() {
     return `<div class="batch-checks neutral"><strong>Načítám stav automatické kontroly...</strong></div>`;
   }
   const job = batchReportState.checks;
-  if (!job) return "";
+  if (!job) {
+    return `
+      <div class="batch-checks neutral">
+        <div class="batch-checks-head">
+          <div><span>Automatická kontrola</span><strong>Pro tuto várku zatím nebyla spuštěna.</strong></div>
+          ${isAdmin() ? `<button type="button" class="secondary" data-action="retry-post-upload-checks">Spustit kontrolu</button>` : ""}
+        </div>
+      </div>`;
+  }
   const result = job.result || {};
   const active = ["queued", "running"].includes(job.status);
   const progress = job.progress !== null && job.progress !== undefined && Number.isFinite(Number(job.progress))
@@ -1622,7 +1630,7 @@ function printExpeditionBatchReport() {
       <head>
         <meta charset="UTF-8" />
         <title>Report vybrané várky</title>
-        <link rel="stylesheet" href="styles.css?v=post-upload-checks-20260712-1" />
+        <link rel="stylesheet" href="styles.css?v=post-upload-checks-20260712-2" />
       </head>
       <body class="batch-report-print-page">
         ${reportClone.outerHTML}
