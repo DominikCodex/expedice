@@ -515,6 +515,63 @@ select:focus {
   min-width: 0;
 }
 
+.batch-report-actions {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.batch-report-actions button {
+  min-height: 34px;
+  padding: 5px 9px;
+  white-space: nowrap;
+}
+
+.batch-integrity-status {
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid #cbd8d3;
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: #f5f8f7;
+  color: #42554e;
+  font-size: 12px;
+}
+
+.batch-integrity-status.success {
+  border-color: #82c8aa;
+  background: #eaf8f1;
+  color: #0f684b;
+}
+
+.batch-integrity-status.danger {
+  border-color: #e18a87;
+  background: #fff0ef;
+  color: #9f292b;
+}
+
+.batch-integrity-status summary {
+  margin-top: 5px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.batch-integrity-list {
+  display: grid;
+  gap: 4px;
+  margin-top: 5px;
+}
+
+.batch-integrity-list p {
+  display: grid;
+  grid-template-columns: minmax(48px, auto) minmax(0, 1fr);
+  gap: 6px;
+  margin: 0;
+  padding: 4px 6px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.75);
+}
+
 .batch-report-head span {
   color: var(--muted);
   font-size: 10px;
@@ -4554,6 +4611,88 @@ tbody tr.done {
   cursor: pointer;
   color: var(--accent-dark);
   font-weight: 900;
+}
+
+.audit-admin-panel {
+  min-width: 0;
+}
+
+.audit-filter-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  align-items: end;
+  padding: 10px;
+  border-top: 1px solid #dce4e1;
+  border-bottom: 1px solid #dce4e1;
+  background: #f5f8f7;
+}
+
+.audit-filter-panel input,
+.audit-filter-panel select,
+.audit-filter-panel button {
+  min-height: 34px;
+}
+
+.audit-table-wrap {
+  max-height: calc(100vh - 310px);
+  overflow: auto;
+}
+
+.audit-table {
+  min-width: 980px;
+}
+
+.audit-table td {
+  vertical-align: top;
+}
+
+.audit-table td strong,
+.audit-table td small {
+  display: block;
+}
+
+.audit-table details {
+  margin-top: 4px;
+}
+
+.audit-table summary {
+  cursor: pointer;
+  color: #16684e;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.audit-table pre {
+  max-width: 520px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 7px;
+  border-radius: 4px;
+  background: #18211e;
+  color: #eef7f3;
+  font: 11px/1.4 Consolas, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.audit-reverted {
+  opacity: 0.62;
+}
+
+.workflow-variant-warning {
+  display: grid;
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px solid #e38a3e;
+  border-left-width: 4px;
+  border-radius: 6px;
+  background: #fff3e5;
+  color: #8c4300;
+}
+
+.workflow-variant-warning span {
+  font-size: clamp(10px, 0.85cqw, 12px);
 }
 
 .ean-detail-grid {

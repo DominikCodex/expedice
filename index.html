@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Roztřídění zboží</title>
-    <link rel="stylesheet" href="styles.css?v=order-code-label-settings-20260708" />
+    <link rel="stylesheet" href="styles.css?v=stabilization-20260712" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=order-code-label-settings-20260708"></script>
+    <script defer src="app.js?v=stabilization-20260712"></script>
   </head>
   <body>
     <aside id="global-progress" class="global-progress hidden" role="status" aria-live="polite" aria-atomic="true">
@@ -117,6 +117,7 @@
             <button id="tab-sorting" type="button" class="tab-button active">Roztřídění</button>
             <button id="tab-completion" type="button" class="tab-button">Kompletace</button>
             <button id="tab-eans" type="button" class="tab-button hidden">EANY</button>
+            <button id="tab-audit" type="button" class="tab-button hidden">Audit</button>
             <button id="tab-settings" type="button" class="tab-button">Nastavení</button>
           </nav>
 
@@ -529,6 +530,46 @@
                     </tr>
                   </thead>
                   <tbody id="eans-map-body"></tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+
+          <section id="audit-view" class="app-view hidden">
+            <section class="table-panel audit-admin-panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Admin audit</p>
+                  <h2>Historie provozních změn</h2>
+                </div>
+                <div id="audit-retention" class="row-count">Uchování 90 dní</div>
+              </div>
+              <section class="audit-filter-panel" aria-label="Filtry auditu">
+                <label class="field"><span>Od</span><input id="audit-filter-from" type="date" /></label>
+                <label class="field"><span>Do</span><input id="audit-filter-to" type="date" /></label>
+                <label class="field"><span>Uživatel</span><input id="audit-filter-actor" autocomplete="off" /></label>
+                <label class="field"><span>Objednávka</span><input id="audit-filter-order" autocomplete="off" /></label>
+                <label class="field"><span>EAN</span><input id="audit-filter-ean" autocomplete="off" /></label>
+                <label class="field">
+                  <span>Operace</span>
+                  <select id="audit-filter-type">
+                    <option value="">Všechny operace</option>
+                    <option value="sorting">Odpisy a vrácení</option>
+                    <option value="completion">Kompletace</option>
+                    <option value="address">Adresy</option>
+                    <option value="print">Tisk</option>
+                    <option value="settings">Nastavení</option>
+                    <option value="expedition_day">Expediční dny</option>
+                  </select>
+                </label>
+                <button id="audit-refresh" type="button">Obnovit</button>
+                <button id="audit-filter-reset" type="button" class="secondary">Vyčistit</button>
+              </section>
+              <div id="audit-message" class="message neutral" aria-live="polite">Audit se načte po otevření záložky.</div>
+              <div class="table-wrap audit-table-wrap">
+                <table class="audit-table">
+                  <thead><tr><th>Čas</th><th>Uživatel</th><th>Operace</th><th>Objednávka / EAN</th><th>Změna</th><th>Akce</th></tr></thead>
+                  <tbody id="audit-body"></tbody>
                 </table>
               </div>
             </section>

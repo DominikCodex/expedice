@@ -73,6 +73,19 @@ const completionWorkflowState = {
   sortingRefreshInFlight: false,
   expeditionNumberInputTimer: null,
 };
+
+const batchReportState = {
+  snapshot: null,
+  live: null,
+  integrity: null,
+  loading: false,
+};
+
+const auditState = {
+  events: [],
+  loaded: false,
+  loading: false,
+};
 const workflowAutoPrintedRows = new Set();
 
 const settingsState = {
@@ -103,6 +116,7 @@ const VIEW_ROUTES = {
   sorting: "/roztrideni",
   completion: "/kompletace",
   eans: "/eany",
+  audit: "/audit",
   settings: "/nastaveni",
 };
 
@@ -111,6 +125,7 @@ const ROUTE_VIEWS = {
   "/roztrideni": "sorting",
   "/kompletace": "completion",
   "/eany": "eans",
+  "/audit": "audit",
   "/nastaveni": "settings",
 };
 
@@ -232,6 +247,7 @@ const els = {
   tabSorting: document.getElementById("tab-sorting"),
   tabCompletion: document.getElementById("tab-completion"),
   tabEans: document.getElementById("tab-eans"),
+  tabAudit: document.getElementById("tab-audit"),
   tabSettings: document.getElementById("tab-settings"),
   dayRequiredView: document.getElementById("day-required-view"),
   sortingView: document.getElementById("sorting-view"),
@@ -298,6 +314,18 @@ const els = {
   eansBody: document.getElementById("eans-body"),
   eansMapRowCount: document.getElementById("eans-map-row-count"),
   eansMapBody: document.getElementById("eans-map-body"),
+  auditView: document.getElementById("audit-view"),
+  auditRetention: document.getElementById("audit-retention"),
+  auditFilterFrom: document.getElementById("audit-filter-from"),
+  auditFilterTo: document.getElementById("audit-filter-to"),
+  auditFilterActor: document.getElementById("audit-filter-actor"),
+  auditFilterOrder: document.getElementById("audit-filter-order"),
+  auditFilterEan: document.getElementById("audit-filter-ean"),
+  auditFilterType: document.getElementById("audit-filter-type"),
+  auditRefresh: document.getElementById("audit-refresh"),
+  auditFilterReset: document.getElementById("audit-filter-reset"),
+  auditMessage: document.getElementById("audit-message"),
+  auditBody: document.getElementById("audit-body"),
   settingsView: document.getElementById("settings-view"),
   settingsSave: document.getElementById("settings-save"),
   settingsMessage: document.getElementById("settings-message"),
@@ -973,6 +1001,7 @@ function showPasswordChange(user) {
 function applyRoleVisibility() {
   const admin = isAdmin();
   els.tabEans?.classList.toggle("hidden", !admin);
+  els.tabAudit?.classList.toggle("hidden", !admin);
   els.tabSettings.classList.toggle("hidden", !admin);
   els.expeditionDeleteDay?.classList.toggle("hidden", !admin);
   els.expeditionTrashToggle?.classList.toggle("hidden", !admin);
@@ -987,7 +1016,12 @@ function applyRoleVisibility() {
   els.packetaSend?.classList.toggle("hidden", !admin);
   els.labelCacheBatch?.classList.toggle("hidden", !admin);
   els.dpdSend.classList.toggle("hidden", !admin);
-  if (!admin && (!els.settingsView.classList.contains("hidden") || (els.eansView && !els.eansView.classList.contains("hidden")))) {
+  if (
+    !admin &&
+    (!els.settingsView.classList.contains("hidden") ||
+      (els.eansView && !els.eansView.classList.contains("hidden")) ||
+      (els.auditView && !els.auditView.classList.contains("hidden")))
+  ) {
     switchView("sorting");
   }
 }
@@ -1310,8 +1344,10 @@ function completionCodeRanges(rows) {
   return { ranges, withoutExpeditionNumber };
 }
 
-function batchReportRangesHtml(rows) {
-  const { ranges, withoutExpeditionNumber } = completionCodeRanges(rows);
+function batchReportRangesHtml(rows, serverRanges = null) {
+  const calculated = completionCodeRanges(rows);
+  const ranges = Array.isArray(serverRanges) ? serverRanges : calculated.ranges;
+  const withoutExpeditionNumber = calculated.withoutExpeditionNumber;
   if (!ranges.length && !withoutExpeditionNumber) return "";
   const showCodes = isAdmin();
 
@@ -1338,6 +1374,77 @@ function batchReportRangesHtml(rows) {
   return `<div class="batch-report-ranges" aria-label="Rozpis expedičních kódů">${rangeRows}${missing}</div>`;
 }
 
+function batchIntegrityHtml() {
+  if (batchReportState.loading) {
+    return `<div class="batch-integrity-status neutral"><strong>Načítám kontrolu várky...</strong></div>`;
+  }
+  const integrity = batchReportState.integrity;
+  if (!integrity) {
+    return `<div class="batch-integrity-status neutral"><strong>Kontrola várky zatím nebyla spuštěna.</strong></div>`;
+  }
+  const summary = integrity.summary || {};
+  const tone = integrity.ok ? "success" : "danger";
+  const issues = (integrity.issues || []).slice(0, 12);
+  return `
+    <div class="batch-integrity-status ${tone}">
+      <strong>${integrity.ok ? "Várka je bez kritických nesrovnalostí" : `${escapeHtml(summary.errors || 0)} chyb, ${escapeHtml(summary.warnings || 0)} varování`}</strong>
+      ${
+        issues.length
+          ? `<details><summary>Zobrazit dotčené položky</summary><div class="batch-integrity-list">${issues
+              .map((issue) => {
+                const context = issue.context || {};
+                const reference = context.orderNumber || context.ean || context.expeditionNumber || "";
+                return `<p class="${escapeHtml(issue.severity || "info")}"><b>${escapeHtml(reference)}</b><span>${escapeHtml(issue.message || "Nesrovnalost")}</span></p>`;
+              })
+              .join("")}</div></details>`
+          : ""
+      }
+    </div>`;
+}
+
+async function loadExpeditionBatchReportData() {
+  const dayId = expeditionState.day?.id;
+  if (!dayId) return;
+  batchReportState.loading = true;
+  renderExpeditionBatchReport();
+  try {
+    const data = await fetchJson(`/api/expedition-days/${encodeURIComponent(dayId)}/report`, {
+      progressLabel: "Načítám report várky...",
+    });
+    if (String(expeditionState.day?.id || "") !== String(dayId)) return;
+    batchReportState.snapshot = data.snapshot || null;
+    batchReportState.live = data.live || null;
+  } catch (error) {
+    console.warn("Serverový report várky se nepodařilo načíst.", error);
+  } finally {
+    batchReportState.loading = false;
+    renderExpeditionBatchReport();
+  }
+}
+
+async function checkExpeditionBatchIntegrity() {
+  const dayId = expeditionState.day?.id;
+  if (!dayId) return;
+  batchReportState.loading = true;
+  renderExpeditionBatchReport();
+  try {
+    batchReportState.integrity = await fetchJson(`/api/expedition-days/${encodeURIComponent(dayId)}/integrity`, {
+      method: "POST",
+      body: JSON.stringify({ eanMap: state.eanMap || {} }),
+      progressLabel: "Prověřuji várku...",
+    });
+  } catch (error) {
+    batchReportState.integrity = {
+      ok: false,
+      summary: { errors: 1, warnings: 0 },
+      issues: [{ severity: "error", message: `Kontrola se nepodařila: ${error.message}`, context: {} }],
+    };
+  } finally {
+    batchReportState.loading = false;
+    renderExpeditionBatchReport();
+  }
+}
+
 function printExpeditionBatchReport() {
   if (!els.expeditionBatchReport || els.expeditionBatchReport.classList.contains("hidden")) return;
   const reportClone = els.expeditionBatchReport.cloneNode(true);
@@ -1354,7 +1461,7 @@ function printExpeditionBatchReport() {
       <head>
         <meta charset="UTF-8" />
         <title>Report vybrané várky</title>
-        <link rel="stylesheet" href="styles.css?v=order-code-label-settings-20260708" />
+        <link rel="stylesheet" href="styles.css?v=stabilization-20260712" />
       </head>
       <body class="batch-report-print-page">
         ${reportClone.outerHTML}
@@ -1391,13 +1498,18 @@ function renderExpeditionBatchReport() {
   const completionDataset = completionState.dataset;
   const sortingDataset = sortingState.dataset;
   const hasCompletionRows = rows.length > 0;
+  const serverMetrics = batchReportState.snapshot?.metrics || null;
 
   const title = completionDataset
     ? `${completionDataset.batchName || completionDataset.datasetDate || "Kompletace"} ${completionDataset.datasetTime || ""}`.trim()
     : "Kompletace není načtená";
   const rowsFallback = completionDataset?.rowsCount || 0;
-  const ordersValue = hasCompletionRows ? countUniqueOrders(rows) : rowsFallback || "-";
-  const piecesValue = hasCompletionRows ? pieces : "-";
+  const ordersValue = serverMetrics ? serverMetrics.orders : hasCompletionRows ? countUniqueOrders(rows) : rowsFallback || "-";
+  const piecesValue = serverMetrics ? serverMetrics.pieces : hasCompletionRows ? pieces : "-";
+  const stockOrdersValue = serverMetrics ? serverMetrics.stockOrders : hasCompletionRows ? flowCounts.stock : "-";
+  const stockPiecesValue = serverMetrics ? serverMetrics.stockPieces : hasCompletionRows ? stockPieces : "-";
+  const addressErrorsValue = serverMetrics ? serverMetrics.addressErrors : hasCompletionRows ? addressErrors : "-";
+  const paymentWarningsValue = serverMetrics ? serverMetrics.paymentWarnings : hasCompletionRows ? paymentWarnings : "-";
 
   const notes = [];
   if (completionDataset) {
@@ -1418,17 +1530,21 @@ function renderExpeditionBatchReport() {
         <span>Report vybrané várky</span>
         <strong>${escapeHtml(title)}</strong>
       </div>
-      <button type="button" class="batch-report-print" data-action="print-batch-report">Tisk</button>
+      <div class="batch-report-actions">
+        <button type="button" class="secondary" data-action="check-batch-integrity">Prověřit</button>
+        <button type="button" class="batch-report-print" data-action="print-batch-report">Tisk</button>
+      </div>
     </div>
     <div class="batch-report-grid">
       ${batchReportMetricHtml("Objednávek", ordersValue)}
       ${batchReportMetricHtml("Kusů", piecesValue)}
-      ${batchReportMetricHtml("Skladovek (objednávek)", hasCompletionRows ? flowCounts.stock : "-")}
-      ${batchReportMetricHtml("Skladovky (kusů)", hasCompletionRows ? stockPieces : "-")}
-      ${batchReportMetricHtml("Chybné adresy", hasCompletionRows ? addressErrors : "-", addressErrors ? "danger" : "")}
-      ${batchReportMetricHtml("Platby k řešení", hasCompletionRows ? paymentWarnings : "-", paymentWarnings ? "warning" : "")}
+      ${batchReportMetricHtml("Skladovek (objednávek)", stockOrdersValue)}
+      ${batchReportMetricHtml("Skladovky (kusů)", stockPiecesValue)}
+      ${batchReportMetricHtml("Chybné adresy", addressErrorsValue, toNumber(addressErrorsValue, 0) ? "danger" : "")}
+      ${batchReportMetricHtml("Platby k řešení", paymentWarningsValue, toNumber(paymentWarningsValue, 0) ? "warning" : "")}
     </div>
-    ${hasCompletionRows ? batchReportRangesHtml(rows) : ""}
+    ${batchIntegrityHtml()}
+    ${hasCompletionRows || serverMetrics ? batchReportRangesHtml(rows, serverMetrics?.codeRanges) : ""}
     <p class="batch-report-note">${notes.map((note) => `<span>${escapeHtml(note)}</span>`).join("")}</p>
   `;
   els.expeditionBatchReport.classList.remove("hidden");
@@ -1459,6 +1575,7 @@ function hasSelectedExpeditionDay() {
 function activeModuleView() {
   if (els.tabCompletion?.classList.contains("active")) return "completion";
   if (els.tabEans?.classList.contains("active")) return "eans";
+  if (els.tabAudit?.classList.contains("active")) return "audit";
   if (els.tabSettings?.classList.contains("active")) return "settings";
   return "sorting";
 }
@@ -1473,6 +1590,9 @@ function clearSelectedExpeditionDayData(options = {}) {
   completionState.dataset = null;
   completionState.rows = [];
   resetCompletionStockPiecesSnapshot();
+  batchReportState.snapshot = null;
+  batchReportState.live = null;
+  batchReportState.integrity = null;
   completionState.loaded = false;
   completionState.paymentUpdatesSince = null;
   completionState.paymentPollInFlight = false;
@@ -1513,6 +1633,7 @@ function renderDayRequiredGuard(view = activeModuleView()) {
   els.sortingView.classList.toggle("hidden", view !== "sorting" || guarded);
   els.completionView.classList.toggle("hidden", view !== "completion" || guarded);
   els.eansView?.classList.toggle("hidden", view !== "eans");
+  els.auditView?.classList.toggle("hidden", view !== "audit");
   els.settingsView.classList.toggle("hidden", view !== "settings");
   return guarded;
 }
@@ -1539,16 +1660,18 @@ function focusBarcodeInputForView(view) {
 }
 
 function switchView(view, options = {}) {
-  if ((view === "settings" || view === "eans") && !isAdmin()) {
+  if ((view === "settings" || view === "eans" || view === "audit") && !isAdmin()) {
     setMessage("Tahle stránka je dostupná jen adminovi.", "warning");
     view = "sorting";
   }
   const completion = view === "completion";
   const eans = view === "eans";
+  const audit = view === "audit";
   const settings = view === "settings";
-  els.tabSorting.classList.toggle("active", !completion && !eans && !settings);
+  els.tabSorting.classList.toggle("active", !completion && !eans && !audit && !settings);
   els.tabCompletion.classList.toggle("active", completion);
   els.tabEans?.classList.toggle("active", eans);
+  els.tabAudit?.classList.toggle("active", audit);
   els.tabSettings.classList.toggle("active", settings);
 
   const dayGuarded = renderDayRequiredGuard(view);
@@ -1561,6 +1684,10 @@ function switchView(view, options = {}) {
     renderEanAudit();
   }
 
+  if (audit) {
+    loadAuditEvents();
+  }
+
   if (settings && !settingsState.loaded) {
     loadSettings();
   }
@@ -1570,7 +1697,7 @@ function switchView(view, options = {}) {
   }
 
   if (!dayGuarded) {
-    focusBarcodeInputForView(completion ? "completion" : !eans && !settings ? "sorting" : "");
+    focusBarcodeInputForView(completion ? "completion" : !eans && !audit && !settings ? "sorting" : "");
   }
 
   if (options.updateRoute !== false) {
@@ -1685,6 +1812,9 @@ async function loadExpeditionDay(dayDate) {
   completionState.dataset = null;
   completionState.rows = [];
   resetCompletionStockPiecesSnapshot();
+  batchReportState.snapshot = null;
+  batchReportState.live = null;
+  batchReportState.integrity = null;
   completionWorkflowState.row = null;
   completionWorkflowState.index = -1;
   completionWorkflowState.checkedItemKeys = new Set();
@@ -1741,6 +1871,8 @@ async function loadExpeditionDay(dayDate) {
     renderCompletion();
     setCompletionMessage("Pro vybraný expediční den není nahraná kompletace.", "warning");
   }
+
+  await loadExpeditionBatchReportData();
 
   const view = activeModuleView();
   const guarded = renderDayRequiredGuard(view);
@@ -4910,6 +5042,7 @@ async function refreshWorkflowSortingCheck(row, options = {}) {
       ...row,
       workflowSortingItems: sortingItems,
       workflowSortingDataset: data.dataset || null,
+      workflowVariantComparison: data.variantComparison || null,
       workflowSortingError: "",
       workflowSortingCheckedAt: new Date().toISOString(),
     };
@@ -4933,6 +5066,17 @@ function workflowSortingCheckHtml(row) {
   const physicalCheck = workflowPhysicalCheck(row);
   const flowKind = completionFlowKind(row);
   const physicalItems = workflowPhysicalItems(row);
+  const variantComparison = row?.workflowVariantComparison;
+  const variantWarning =
+    variantComparison?.hasExpectedVariants && !variantComparison.matches
+      ? `<div class="workflow-variant-warning"><strong>Nesedí množství konkrétní varianty</strong>${(variantComparison.items || [])
+          .filter((item) => !item.matches)
+          .map(
+            (item) =>
+              `<span>${escapeHtml(item.variantCode || item.variantKey)}: objednávka ${escapeHtml(item.expected ?? "-")} ks, roztřídění ${escapeHtml(item.sortingInitial ?? 0)} ks</span>`
+          )
+          .join("")}</div>`
+      : "";
   const checkMessage = flowKind === "stock" ? "" : check.message;
   const itemRows = physicalItems.length
     ? physicalItems
@@ -4998,6 +5142,7 @@ function workflowSortingCheckHtml(row) {
           : ""
       }
       <div class="workflow-sorting-list">${itemRows}</div>
+      ${variantWarning}
     </section>
   `;
 }
@@ -5237,7 +5382,13 @@ async function saveWorkflowAction(action) {
     updateCompletionRowInState(data.row);
     renderWorkflow();
     renderCompletion();
-    setWorkflowMessage(`Uloženo: ${data.row.completionStatus || "stav vyčištěn"}.`, "success");
+    const issues = data.integrityWarnings || [];
+    setWorkflowMessage(
+      issues.length
+        ? `Uloženo OK přes ${issues.length} aktivní nesrovnalosti. Výjimka je zapsaná v auditu; zvaž Error.`
+        : `Uloženo: ${data.row.completionStatus || "stav vyčištěn"}.`,
+      issues.length ? "warning" : "success"
+    );
     return data.row;
   } catch (error) {
     setWorkflowMessage(`Uložení stavu selhalo: ${error.message}`, "error");
@@ -6038,6 +6189,114 @@ function renderEanAudit() {
   `;
 }
 
+const AUDIT_EVENT_LABELS = {
+  sorting_deduct: "Odpis 1 ks",
+  sorting_restore: "Vrácení kusu",
+  completion_workflow: "Stav kompletace",
+  completion_ok_with_issues: "OK přes nesrovnalost",
+  audit_revert: "Admin vrácení",
+  address_update: "Úprava adresy",
+  admin_settings_update: "Změna nastavení",
+  expedition_day_delete: "Smazání dne",
+  print_job: "Tisk",
+};
+
+function auditChangeText(event) {
+  const before = event.previousState || {};
+  const after = event.nextState || {};
+  if (before.remaining !== undefined || after.remaining !== undefined) {
+    return `${before.remaining ?? "-"} ks → ${after.remaining ?? "-"} ks`;
+  }
+  if (before.completionStatus !== undefined || after.completionStatus !== undefined) {
+    return `${before.completionStatus || "bez stavu"} → ${after.completionStatus || "bez stavu"}`;
+  }
+  if (event.eventType === "admin_settings_update") {
+    return `Sekce: ${(event.payload?.changedSections || []).join(", ") || "nastavení"}`;
+  }
+  return event.payload?.reason || event.payload?.message || "Změna je v podrobnostech";
+}
+
+function auditCanRevert(event) {
+  return (
+    !event.revertedAt &&
+    ["sorting_deduct", "sorting_restore", "completion_workflow", "completion_ok_with_issues"].includes(event.eventType)
+  );
+}
+
+function renderAuditEvents() {
+  if (!els.auditBody) return;
+  if (!auditState.events.length) {
+    els.auditBody.innerHTML = `<tr><td colspan="6" class="empty">Pro zvolené filtry nejsou žádné auditní události.</td></tr>`;
+    return;
+  }
+  els.auditBody.innerHTML = auditState.events
+    .map((event) => {
+      const reference = [event.orderNumber, event.ean ? `EAN ${event.ean}` : ""].filter(Boolean).join(" | ") || "-";
+      const details = escapeHtml(JSON.stringify({ payload: event.payload, before: event.previousState, after: event.nextState }, null, 2));
+      return `
+        <tr class="${event.revertedAt ? "audit-reverted" : ""}">
+          <td><strong>${escapeHtml(formatTime(event.createdAt) || "-")}</strong>${event.revertedAt ? `<small>Vráceno ${escapeHtml(formatTime(event.revertedAt))}</small>` : ""}</td>
+          <td>${escapeHtml(event.actor || "-")}</td>
+          <td><strong>${escapeHtml(AUDIT_EVENT_LABELS[event.eventType] || event.eventType)}</strong><small>${escapeHtml(event.source || "")}</small></td>
+          <td>${escapeHtml(reference)}</td>
+          <td><span>${escapeHtml(auditChangeText(event))}</span><details><summary>Technické podrobnosti</summary><pre>${details}</pre></details></td>
+          <td>${auditCanRevert(event) ? `<button type="button" class="secondary" data-action="revert-audit" data-event-id="${escapeHtml(event.id)}">Vrátit</button>` : "-"}</td>
+        </tr>`;
+    })
+    .join("");
+}
+
+function setAuditMessage(text, tone = "neutral") {
+  if (!els.auditMessage) return;
+  els.auditMessage.className = `message ${tone}`;
+  els.auditMessage.textContent = text;
+}
+
+async function loadAuditEvents() {
+  if (!isAdmin() || auditState.loading) return;
+  auditState.loading = true;
+  setAuditMessage("Načítám auditní historii...", "neutral");
+  const params = new URLSearchParams();
+  if (els.auditFilterFrom?.value) params.set("dateFrom", els.auditFilterFrom.value);
+  if (els.auditFilterTo?.value) params.set("dateTo", els.auditFilterTo.value);
+  if (els.auditFilterActor?.value.trim()) params.set("actor", els.auditFilterActor.value.trim());
+  if (els.auditFilterOrder?.value.trim()) params.set("orderNumber", els.auditFilterOrder.value.trim());
+  if (els.auditFilterEan?.value.trim()) params.set("ean", els.auditFilterEan.value.trim());
+  if (els.auditFilterType?.value) params.set("eventType", els.auditFilterType.value);
+  if (expeditionState.day?.id) params.set("expeditionDayId", expeditionState.day.id);
+  try {
+    const data = await fetchJson(`/api/audit-events?${params.toString()}`, { progressLabel: "Načítám audit..." });
+    auditState.events = data.events || [];
+    auditState.loaded = true;
+    if (els.auditRetention) els.auditRetention.textContent = `Uchování ${data.retentionDays || 90} dní`;
+    renderAuditEvents();
+    setAuditMessage(`Načteno ${auditState.events.length} událostí.`, "success");
+  } catch (error) {
+    setAuditMessage(`Audit se nepodařilo načíst: ${error.message}`, "error");
+  } finally {
+    auditState.loading = false;
+  }
+}
+
+async function revertAuditEvent(eventId) {
+  const event = auditState.events.find((item) => String(item.id) === String(eventId));
+  if (!event) return;
+  const reason = window.prompt("Důvod vrácení operace:", "Oprava chybné skladové operace");
+  if (reason === null) return;
+  try {
+    await fetchJson(`/api/audit-events/${encodeURIComponent(eventId)}/revert`, {
+      method: "POST",
+      body: JSON.stringify({ reason }),
+      progressLabel: "Vracím operaci...",
+    });
+    setAuditMessage("Operace byla bezpečně vrácena a zapsána do auditu.", "success");
+    await loadAuditEvents();
+    if (expeditionState.day?.date) await loadExpeditionDay(expeditionState.day.date);
+  } catch (error) {
+    setAuditMessage(`Operaci nelze vrátit: ${error.message}`, "error");
+  }
+}
+
 function visibleItems() {
   const query = normalize(els.manualSearch.value.trim());
   return state.items.filter((item) => {
@@ -6544,6 +6803,7 @@ els.expeditionDayList.addEventListener("click", (event) => {
 els.tabSorting.addEventListener("click", () => switchView("sorting"));
 els.tabCompletion.addEventListener("click", () => switchView("completion"));
 els.tabEans?.addEventListener("click", () => switchView("eans"));
+els.tabAudit?.addEventListener("click", () => switchView("audit"));
 els.tabSettings.addEventListener("click", () => switchView("settings"));
 window.addEventListener("popstate", () => {
   if (!authState.user) return;
@@ -6741,6 +7001,18 @@ els.eansFilterReset?.addEventListener("click", () => {
   if (els.eansFilterSort) els.eansFilterSort.value = eanFilters.sort;
   renderEanAudit();
 });
+els.auditRefresh?.addEventListener("click", loadAuditEvents);
+els.auditFilterReset?.addEventListener("click", () => {
+  [els.auditFilterFrom, els.auditFilterTo, els.auditFilterActor, els.auditFilterOrder, els.auditFilterEan].forEach((input) => {
+    if (input) input.value = "";
+  });
+  if (els.auditFilterType) els.auditFilterType.value = "";
+  loadAuditEvents();
+});
+els.auditBody?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-action='revert-audit']");
+  if (button) revertAuditEvent(button.dataset.eventId);
+});
 els.completionValidateAddresses?.addEventListener("click", validateAddressDeliveriesBulk);
 els.addressValidationLogRefresh?.addEventListener("click", loadAddressValidationLog);
 els.addressValidationLog?.addEventListener("click", (event) => {
@@ -6775,9 +7047,10 @@ els.workflowItems?.addEventListener("click", (event) => {
   );
 });
 els.expeditionBatchReport?.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-action='print-batch-report']");
+  const button = event.target.closest("[data-action]");
   if (!button || !els.expeditionBatchReport.contains(button)) return;
-  printExpeditionBatchReport();
+  if (button.dataset.action === "print-batch-report") printExpeditionBatchReport();
+  if (button.dataset.action === "check-batch-integrity") checkExpeditionBatchIntegrity();
 });
 
 checkAuth();
