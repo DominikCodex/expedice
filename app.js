@@ -1080,6 +1080,9 @@ function startAppForUser(user) {
     authState.appStarted = true;
   }
 
+  // A new authenticated session must not inherit an admin's previously opened day.
+  // Employees with a valid lock get their day back from loadExpeditionDays().
+  clearSelectedExpeditionDayData();
   switchView(viewFromRoute(), { replaceRoute: true });
   requestAnimationFrame(() => loadExpeditionDays());
   window.setTimeout(() => testPrintAgent(), 350);
@@ -1469,7 +1472,7 @@ function printExpeditionBatchReport() {
       <head>
         <meta charset="UTF-8" />
         <title>Report vybrané várky</title>
-        <link rel="stylesheet" href="styles.css?v=stabilization-20260712" />
+        <link rel="stylesheet" href="styles.css?v=day-reset-20260712" />
       </head>
       <body class="batch-report-print-page">
         ${reportClone.outerHTML}
@@ -1601,6 +1604,7 @@ function clearSelectedExpeditionDayData(options = {}) {
   batchReportState.snapshot = null;
   batchReportState.live = null;
   batchReportState.integrity = null;
+  batchReportState.loading = false;
   completionState.loaded = false;
   completionState.paymentUpdatesSince = null;
   completionState.paymentPollInFlight = false;
@@ -1793,6 +1797,7 @@ async function loadExpeditionDays(preferredDate = "") {
 
     if (!selectedDate) {
       clearSelectedExpeditionDayData();
+      renderExpeditionDayOptions();
       setExpeditionDaySummary(`<span>Vyber expediční den vlevo.</span>`, { employeeVisible: false });
       return;
     }

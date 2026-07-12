@@ -47,3 +47,35 @@ test("čekání na server neukazuje vymyšlená procenta", async ({ page }) => {
   await page.evaluate(() => window.__slowRequest);
   await expect(page.locator("#global-progress")).toBeHidden();
 });
+
+test("nové připojení nepřebírá dříve otevřený report dne", async ({ page }) => {
+  await mockExpeditionApp(page);
+  await page.goto("/kompletace");
+  await expect(page.locator("#expedition-batch-report")).toBeHidden();
+  await expect(page.locator("#expedition-day-list .day-card.active")).toHaveCount(0);
+
+  await page.locator("#expedition-day-list button").first().click();
+  await expect(page.locator("#expedition-batch-report")).toBeVisible();
+
+  await page.evaluate(() => {
+    showLogin();
+    startAppForUser({ id: 1, username: "test", displayName: "TEST", role: "admin" });
+  });
+  await expect(page.locator("#expedition-batch-report")).toBeHidden();
+  await expect(page.locator("#expedition-day-list .day-card.active")).toHaveCount(0);
+  await expect(page.locator("#day-required-view")).toBeVisible();
+});
+
+test("platný uživatelský zámek dne se po připojení obnoví", async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem(
+      "expedition-employee-day-lock-v1:1",
+      JSON.stringify({ date: "2026-07-08", expiresAt: Date.now() + 60 * 60 * 1000 })
+    );
+  });
+  await mockExpeditionApp(page, "user");
+  await page.goto("/kompletace");
+  await expect(page.locator("#expedition-day-list .day-card.active")).toHaveCount(1);
+  await expect(page.locator("#expedition-batch-report")).toBeVisible();
+  await expect(page.locator("#day-required-view")).toBeHidden();
+});
