@@ -572,6 +572,24 @@ def ensure_schema():
             )
             cur.execute(
                 """
+                CREATE TABLE IF NOT EXISTS operation_jobs (
+                    id TEXT PRIMARY KEY,
+                    kind TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    phase TEXT,
+                    progress INTEGER,
+                    current_value BIGINT NOT NULL DEFAULT 0,
+                    total_value BIGINT NOT NULL DEFAULT 0,
+                    message TEXT,
+                    result JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    error TEXT,
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            )
+            cur.execute(
+                """
                 CREATE INDEX IF NOT EXISTS idx_batch_snapshots_day_created
                 ON expedition_batch_snapshots (expedition_day_id, created_at DESC)
                 """
@@ -2733,7 +2751,7 @@ def product_feed_cache_signature(settings):
     return hashlib.sha256(json.dumps(payload, sort_keys=True).encode("utf-8")).hexdigest()
 
 
-def probe_product_feed(settings):
+def probe_product_feed(settings, progress_callback=None):
     product_settings = normalize_product_feed_settings(settings)
     feed_url = clean_text(product_settings.get("url")).strip()
     if not feed_url:
@@ -2759,6 +2777,8 @@ def probe_product_feed(settings):
                 raise ProductFeedError(
                     f"Feed hlásí velikost {format_size_mb(content_length_bytes)} MB, limit je {product_settings['maxDownloadMegabytes']} MB."
                 )
+            if progress_callback:
+                progress_callback("download", 0, content_length_bytes or 0, "Stahuji produktový feed.")
 
             bytes_read = 0
             with tempfile.TemporaryFile() as tmp:
@@ -2772,6 +2792,13 @@ def probe_product_feed(settings):
                             f"Feed je větší než povolený limit {product_settings['maxDownloadMegabytes']} MB."
                         )
                     tmp.write(chunk)
+                    if progress_callback:
+                        progress_callback(
+                            "download",
+                            bytes_read,
+                            content_length_bytes or 0,
+                            f"Staženo {format_size_mb(bytes_read)} MB.",
+                        )
 
                 tmp.seek(0)
                 text_stream = io.TextIOWrapper(
@@ -2805,8 +2832,10 @@ def probe_product_feed(settings):
                                 "image": product_feed_first_image(row, image_columns),
                             }
                         )
+                    if progress_callback and (rows_seen == 1 or rows_seen % 1000 == 0):
+                        progress_callback("parse", rows_seen, 0, f"Zpracováno {rows_seen} řádků.")
 
-        return {
+        result = {
             "ok": True,
             "rowsSeen": rows_seen,
             "bytesRead": bytes_read,
@@ -2820,6 +2849,9 @@ def probe_product_feed(settings):
             "contentType": content_type,
             "contentLength": content_length_bytes,
         }
+        if progress_callback:
+            progress_callback("done", rows_seen, rows_seen, "Produktový feed je ověřený.")
+        return result
     except ProductFeedError:
         raise
     except urllib.error.HTTPError as exc:
@@ -6432,6 +6464,111 @@ def update_settings():
                 source="settings",
             )
     return jsonify({"ok": True, "settings": updated})
+
+
+def update_operation_job(job_id, *, status=None, phase=None, progress=None, current=0, total=0, message="", result=None, error=""):
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE operation_jobs
+                SET status = COALESCE(%s, status), phase = COALESCE(%s, phase), progress = %s,
+                    current_value = %s, total_value = %s, message = %s,
+                    result = COALESCE(%s, result), error = %s, updated_at = NOW()
+                WHERE id = %s
+                """,
+                (status, phase, progress, current, total, message, Json(result) if result is not None else None, error, job_id),
+            )
+
+
+def run_product_feed_job(job_id, settings):
+    def progress_callback(phase, current, total, message):
+        percent = None
+        if total > 0:
+            percent = min(99, round((current / total) * (85 if phase == "download" else 100)))
+        update_operation_job(
+            job_id,
+            status="running",
+            phase=phase,
+            progress=percent,
+            current=current,
+            total=total,
+            message=message,
+        )
+
+    try:
+        update_operation_job(job_id, status="running", phase="connect", message="Připojuji se k produktovému feedu.")
+        result = probe_product_feed(settings, progress_callback=progress_callback)
+        update_operation_job(
+            job_id,
+            status="completed",
+            phase="done",
+            progress=100,
+            current=result.get("rowsSeen") or 0,
+            total=result.get("rowsSeen") or 0,
+            message="Produktový feed je ověřený.",
+            result=result,
+        )
+    except Exception as exc:
+        update_operation_job(job_id, status="failed", phase="error", message="Ověření feedu selhalo.", error=clean_text(exc))
+
+
+def operation_job_to_api(row):
+    return {
+        "id": row["id"],
+        "kind": row["kind"],
+        "status": row["status"],
+        "phase": row.get("phase") or "",
+        "progress": row.get("progress"),
+        "current": row.get("current_value") or 0,
+        "total": row.get("total_value") or 0,
+        "message": row.get("message") or "",
+        "result": row.get("result") or {},
+        "error": row.get("error") or "",
+        "createdAt": row["created_at"].isoformat() if row.get("created_at") else None,
+        "updatedAt": row["updated_at"].isoformat() if row.get("updated_at") else None,
+    }
+
+
+@app.route("/api/product-feed/check/jobs", methods=["POST"])
+def start_product_feed_check_job():
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+    payload = request.get_json(silent=True) or {}
+    try:
+        settings = product_feed_settings_from_payload(payload.get("productFeed") or {})
+    except ProductFeedError as exc:
+        return jsonify({"error": clean_text(exc)}), 400
+    ensure_schema()
+    job_id = secrets.token_urlsafe(18)
+    with db_conn() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM operation_jobs WHERE created_at < NOW() - INTERVAL '7 days'")
+            cur.execute(
+                """
+                INSERT INTO operation_jobs (id, kind, status, phase, message)
+                VALUES (%s, 'product_feed_check', 'queued', 'queued', 'Čekám na spuštění kontroly feedu.')
+                """,
+                (job_id,),
+            )
+    threading.Thread(target=run_product_feed_job, args=(job_id, settings), daemon=True).start()
+    return jsonify({"ok": True, "jobId": job_id}), 202
+
+
+@app.route("/api/operation-jobs/<job_id>")
+def get_operation_job(job_id):
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM operation_jobs WHERE id = %s", (job_id,))
+            job = cur.fetchone()
+    if not job:
+        return jsonify({"error": "Serverová úloha nebyla nalezena."}), 404
+    return jsonify({"job": operation_job_to_api(job)})
 
 
 @app.route("/api/product-feed/check", methods=["POST"])

@@ -2,6 +2,7 @@ const { defineConfig } = require("@playwright/test");
 
 module.exports = defineConfig({
   testDir: "./tests/e2e",
+  outputDir: "test-results/results",
   timeout: 45_000,
   expect: { timeout: 7_500 },
   use: {
@@ -9,6 +10,5 @@ module.exports = defineConfig({
     trace: "retain-on-failure",
     screenshot: "only-on-failure",
   },
-  reporter: [["list"], ["html", { outputFolder: "test-results/html", open: "never" }]],
+  reporter: [["list"], ["html", { outputFolder: "playwright-report", open: "never" }]],
 });
-

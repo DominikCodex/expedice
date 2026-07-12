@@ -658,13 +658,15 @@ function renderGlobalProgress() {
 
   const latest = visible[visible.length - 1];
   const percent = clampProgressPercent(latest.percent ?? 0);
+  const indeterminate = Boolean(latest.indeterminate);
   els.globalProgressLabel.textContent = latest.label || "Načítám data...";
   els.globalProgressDetail.textContent = visible.length > 1 ? `Běží ${visible.length} požadavky. ${latest.detail || ""}`.trim() : latest.detail || "Chvilku strpení.";
   if (els.globalProgressBar) {
-    els.globalProgressBar.style.setProperty("--global-progress", `${percent}%`);
+    els.globalProgressBar.parentElement?.classList.toggle("indeterminate", indeterminate);
+    els.globalProgressBar.style.setProperty("--global-progress", indeterminate ? "35%" : `${percent}%`);
   }
   if (els.globalProgressPercent) {
-    els.globalProgressPercent.textContent = `${percent} %`;
+    els.globalProgressPercent.textContent = indeterminate ? "—" : `${percent} %`;
   }
 }
 
@@ -676,6 +678,7 @@ function updateGlobalProgress(id, patch = {}) {
   if (patch.detail !== undefined) entry.detail = patch.detail;
   if (patch.percent !== undefined) entry.percent = clampProgressPercent(patch.percent);
   if (patch.phase !== undefined) entry.phase = patch.phase;
+  if (patch.indeterminate !== undefined) entry.indeterminate = Boolean(patch.indeterminate);
   renderGlobalProgress();
 }
 
@@ -685,7 +688,8 @@ function beginGlobalProgress(label) {
     id,
     label,
     detail: "Připravuji požadavek.",
-    percent: 2,
+    percent: 0,
+    indeterminate: true,
     phase: "queued",
     startedAt: Date.now(),
     visible: false,
@@ -700,12 +704,11 @@ function beginGlobalProgress(label) {
     const current = globalProgressState.active.get(id);
     if (!current || !current.visible || current.phase !== "waiting") return;
     const seconds = Math.max(1, Math.round((Date.now() - current.startedAt) / 1000));
-    current.percent = Math.min(35, Math.max(current.percent || 8, 8 + seconds * 3));
     current.detail = `Čekám na server ${seconds} s.`;
     renderGlobalProgress();
   }, 1000);
   globalProgressState.active.set(id, entry);
-  updateGlobalProgress(id, { phase: "waiting", percent: 6, detail: "Odesílám požadavek na server." });
+  updateGlobalProgress(id, { phase: "waiting", indeterminate: true, detail: "Odesílám požadavek na server." });
   return id;
 }
 
@@ -721,7 +724,7 @@ function endGlobalProgress(id) {
 
 async function responseTextWithProgress(response, progressId) {
   if (!progressId || !response.body?.getReader) {
-    updateGlobalProgress(progressId, { phase: "download", percent: 70, detail: "Stahuji odpověď ze serveru." });
+    updateGlobalProgress(progressId, { phase: "download", indeterminate: true, detail: "Stahuji odpověď ze serveru." });
     return response.text();
   }
 
@@ -732,7 +735,8 @@ async function responseTextWithProgress(response, progressId) {
 
   updateGlobalProgress(progressId, {
     phase: "download",
-    percent: total ? 35 : 40,
+    percent: 0,
+    indeterminate: !total,
     detail: total ? `Stahuji odpověď, zbývá ${formatBytes(total)}.` : "Stahuji odpověď, velikost server neposlal.",
   });
 
@@ -743,16 +747,17 @@ async function responseTextWithProgress(response, progressId) {
       chunks.push(value);
       received += value.length;
       if (total) {
-        const bodyPercent = Math.min(88, 35 + (received / total) * 53);
+        const bodyPercent = Math.min(90, (received / total) * 90);
         updateGlobalProgress(progressId, {
           phase: "download",
           percent: bodyPercent,
+          indeterminate: false,
           detail: `Staženo ${formatBytes(received)} z ${formatBytes(total)}, zbývá ${formatBytes(Math.max(0, total - received))}.`,
         });
       } else {
         updateGlobalProgress(progressId, {
           phase: "download",
-          percent: Math.min(84, 40 + Math.log10(Math.max(received, 1)) * 10),
+          indeterminate: true,
           detail: `Staženo ${formatBytes(received)}. Celkovou velikost server neposlal.`,
         });
       }
@@ -775,9 +780,9 @@ async function fetchJson(path, options = {}) {
     : customHeaders || {};
   const progressId = progress ? beginGlobalProgress(progressLabel || progressLabelForRequest(path, fetchOptions)) : null;
   try {
-    updateGlobalProgress(progressId, { phase: "waiting", percent: 8, detail: "Čekám na odpověď serveru." });
+    updateGlobalProgress(progressId, { phase: "waiting", indeterminate: true, detail: "Čekám na odpověď serveru." });
     const response = await fetch(path, { cache: "no-store", ...fetchOptions, headers });
-    updateGlobalProgress(progressId, { phase: "headers", percent: 32, detail: "Server odpověděl, stahuji data." });
+    updateGlobalProgress(progressId, { phase: "headers", indeterminate: true, detail: "Server odpověděl, stahuji data." });
     const responseText = await responseTextWithProgress(response, progressId);
     if (!response.ok) {
       let message = `API vrátilo chybu ${response.status}`;
@@ -797,9 +802,9 @@ async function fetchJson(path, options = {}) {
       error.data = errorData;
       throw error;
     }
-    updateGlobalProgress(progressId, { phase: "parse", percent: 92, detail: "Zpracovávám stažená data." });
+    updateGlobalProgress(progressId, { phase: "parse", indeterminate: true, detail: "Zpracovávám stažená data." });
     const data = responseText ? JSON.parse(responseText) : null;
-    updateGlobalProgress(progressId, { phase: "done", percent: 100, detail: "Hotovo." });
+    updateGlobalProgress(progressId, { phase: "done", percent: 100, indeterminate: false, detail: "Hotovo." });
     return data;
   } finally {
     endGlobalProgress(progressId);
@@ -3110,11 +3115,38 @@ async function testProductFeed() {
   els.settingsProductFeedStatus.classList.remove("settings-hint-ok", "settings-hint-missing");
   els.settingsProductFeedStatus.textContent = "Ověřuju produktový feed...";
   setSettingsMessage("Ověřuju produktový feed...", "neutral");
+  let progressId = null;
   try {
-    const data = await fetchJson("/api/product-feed/check", {
+    const started = await fetchJson("/api/product-feed/check/jobs", {
       method: "POST",
       body: JSON.stringify({ productFeed: collectProductFeedSettings() }),
     });
+    progressId = beginGlobalProgress("Ověřuji produktový feed...");
+    let data = null;
+    const deadline = Date.now() + 16 * 60 * 1000;
+    while (Date.now() < deadline) {
+      const response = await fetchJson(`/api/operation-jobs/${encodeURIComponent(started.jobId)}`, { progress: false });
+      const job = response.job || {};
+      const measurable = Number.isFinite(Number(job.progress));
+      const countText = job.total
+        ? `${Number(job.current || 0).toLocaleString("cs-CZ")} / ${Number(job.total).toLocaleString("cs-CZ")}`
+        : job.current
+          ? Number(job.current).toLocaleString("cs-CZ")
+          : "";
+      updateGlobalProgress(progressId, {
+        phase: job.phase || "waiting",
+        percent: measurable ? Number(job.progress) : 0,
+        indeterminate: !measurable,
+        detail: `${job.message || "Server zpracovává feed."}${countText ? ` ${countText}` : ""}`,
+      });
+      if (job.status === "completed") {
+        data = job.result || {};
+        break;
+      }
+      if (job.status === "failed") throw new Error(job.error || "Ověření feedu selhalo.");
+      await new Promise((resolve) => window.setTimeout(resolve, 750));
+    }
+    if (!data) throw new Error("Ověření feedu překročilo maximální dobu čekání.");
     const imageColumns = (data.imageColumns || []).slice(0, 6).join(", ");
     const rowsSeen = Number(data.rowsSeen || 0).toLocaleString("cs-CZ");
     els.settingsProductFeedStatus.textContent =
@@ -3127,6 +3159,7 @@ async function testProductFeed() {
     els.settingsProductFeedStatus.classList.add("settings-hint-missing");
     setSettingsMessage(`Produktový feed se nepodařilo ověřit: ${error.message}`, "error");
   } finally {
+    endGlobalProgress(progressId);
     els.productFeedTest.disabled = false;
   }
 }
@@ -3552,6 +3585,13 @@ async function validateAddressDeliveriesBulk() {
   let failed = 0;
   const results = [];
   const queue = rows.slice();
+  const progressId = beginGlobalProgress("Ověřuji adresy...");
+  updateGlobalProgress(progressId, {
+    phase: "validate",
+    percent: 0,
+    indeterminate: false,
+    detail: `0 / ${rows.length} adres`,
+  });
   const workers = Array.from({ length: Math.min(4, queue.length) }, async () => {
     while (queue.length) {
       const row = queue.shift();
@@ -3565,6 +3605,12 @@ async function validateAddressDeliveriesBulk() {
         failed += 1;
       } finally {
         checked += 1;
+        updateGlobalProgress(progressId, {
+          phase: "validate",
+          percent: rows.length ? (checked / rows.length) * 100 : 100,
+          indeterminate: false,
+          detail: `${checked} / ${rows.length} adres hotovo`,
+        });
         if (checked === rows.length || checked % 5 === 0) {
           setCompletionMessage(`Ověřuji adresy: ${checked}/${rows.length} hotovo...`, "neutral");
         }
@@ -3585,6 +3631,7 @@ async function validateAddressDeliveriesBulk() {
       addressErrors || failed ? "warning" : "success"
     );
   } finally {
+    endGlobalProgress(progressId);
     els.completionValidateAddresses.disabled = !completionState.dataset;
   }
 }
@@ -3605,7 +3652,7 @@ function completionStatus(row) {
     .filter(Boolean)
     .join(" ");
   const text = normalize(raw);
-  if (text.includes("storno")) return { label: "STORNO", tone: "danger" };
+  if (text.includes("storno")) return { label: "STORNO", tone: "cancelled" };
   if (text.includes("error") || text.includes("chyba")) return { label: "CHYBA", tone: "danger" };
   if (text.includes("label printed") || text.includes("stit")) return { label: "STITek", tone: "ok" };
   if (!completionRowIsCod(row) && normalize(row.paidStatus).includes("nezaplaceno")) return { label: "NEZAPLACENO", tone: "warning" };

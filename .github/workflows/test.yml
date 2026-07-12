@@ -8,6 +8,22 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: expedice_test
+          POSTGRES_USER: expedice
+          POSTGRES_PASSWORD: expedice_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U expedice -d expedice_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://expedice:expedice_test@127.0.0.1:5432/expedice_test
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -15,5 +31,17 @@ jobs:
           python-version: "3.11"
       - run: pip install -r requirements-dev.txt
       - run: pytest -q
+      - run: python -c "import app; app.ensure_schema(); print('schema ok')"
       - run: python -m py_compile app.py expedition_integrity.py
 
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - run: nohup node tests/e2e/static-server.js >/tmp/expedice-test-server.log 2>&1 &
+      - run: npm run test:e2e
