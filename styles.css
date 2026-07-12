@@ -256,6 +256,55 @@ h2 {
   border-radius: 8px;
 }
 
+.print-agent-top-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 28px;
+  padding: 3px 7px;
+  border: 1px solid #d4deda;
+  border-radius: 5px;
+  color: #53635d;
+  background: #f4f7f6;
+  font-size: 10px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.print-agent-top-status.success {
+  border-color: #9ed2ba;
+  color: #0d6849;
+  background: #eaf8f1;
+}
+
+.print-agent-top-status.danger {
+  border-color: #e6aaa8;
+  color: #9f292b;
+  background: #fff0ef;
+}
+
+.print-agent-jobs {
+  display: grid;
+  gap: 5px;
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.print-agent-job {
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+  border: 1px solid #dce5e1;
+  border-left: 4px solid #5a9d7e;
+  border-radius: 5px;
+  background: #fff;
+  font-size: 11px;
+}
+
+.print-agent-job.danger {
+  border-left-color: #c53639;
+  background: #fff5f4;
+}
+
 .user-panel span {
   color: var(--text);
   font-size: 13px;

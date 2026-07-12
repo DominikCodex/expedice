@@ -7351,6 +7351,42 @@ def revert_audit_event(event_id):
     return jsonify({"ok": True, "event": audit_event_to_api(reverted), "reversal": audit_event_to_api(reversal), "row": row_api})
 
 
+@app.route("/api/completion/rows/<int:row_id>/print-audit", methods=["POST"])
+def audit_completion_print(row_id):
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+    data = request.get_json(silent=True) or {}
+    ensure_schema()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM completion_rows WHERE id = %s", (row_id,))
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "Řádek kompletace nebyl nalezen."}), 404
+            event = record_audit_event(
+                cur,
+                "print_job",
+                dataset_id=row["dataset_id"],
+                shop_code=row["shop_code"],
+                order_number=row["order_number"],
+                row_ref=row["expedition_number"],
+                row_id=row["id"],
+                row_kind="completion",
+                payload={
+                    "jobId": clean_text(data.get("jobId")),
+                    "printer": clean_text(data.get("printer")),
+                    "type": clean_text(data.get("type")),
+                    "carrier": clean_text(data.get("carrier")),
+                    "filename": clean_text(data.get("filename")),
+                    "durationMs": int_from_text(data.get("durationMs")),
+                },
+                expedition_number=row["expedition_number"],
+                source="print_agent_v2",
+            )
+    return jsonify({"ok": True, "event": audit_event_to_api(event)})
+
+
 @app.route("/api/completion/rows/<int:row_id>", methods=["PATCH"])
 def update_completion_row(row_id):
     auth_error = require_upload_token()

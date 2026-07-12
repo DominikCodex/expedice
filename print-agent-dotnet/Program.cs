@@ -14,8 +14,11 @@ internal static class Program
 {
     private const string AppName = "ExpedicePrintAgentV2";
     private const string InstalledExeName = "ExpedicePrintAgentV2.exe";
-    private const string Version = "2.0.0-dotnet";
+    private const string Version = "2.1.0-dotnet";
     private const int MaxRequestBytes = 80 * 1024 * 1024;
+    private const int MaxPdfBytes = 25 * 1024 * 1024;
+    private const int MaxCopies = 10;
+    private static readonly object JobsLock = new();
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -144,6 +147,12 @@ internal static class Program
                 return;
             }
 
+            if (IsProtectedPath(request.Path) && !IsAllowedRequestOrigin(request, config))
+            {
+                await WriteJson(client, request, config, 403, new { error = "Puvod pozadavku neni povoleny." });
+                return;
+            }
+
             if (request.Method.Equals("OPTIONS", StringComparison.OrdinalIgnoreCase))
             {
                 await WriteResponse(client, request, config, 204, "text/plain; charset=utf-8", Array.Empty<byte>());
@@ -173,6 +182,13 @@ internal static class Program
                 return;
             }
 
+            if (request.Method == "GET" && request.Path == "/jobs")
+            {
+                var limit = QueryInt(request.Query, "limit", 20, 1, 100);
+                await WriteJson(client, request, config, 200, new { ok = true, jobs = LoadJobs().Take(limit).ToArray() });
+                return;
+            }
+
             if (request.Method == "POST" && request.Path == "/print")
             {
                 var printRequest = JsonSerializer.Deserialize<PrintRequest>(request.Body, JsonOptions);
@@ -182,8 +198,33 @@ internal static class Program
                     return;
                 }
 
-                var result = PrintPdf(printRequest, config);
-                await WriteJson(client, request, config, 200, result);
+                var jobId = Guid.NewGuid().ToString("N");
+                var startedAt = DateTimeOffset.Now;
+                var timer = Stopwatch.StartNew();
+                try
+                {
+                    ValidatePrintRequest(printRequest, config);
+                    var result = PrintPdf(printRequest, config);
+                    timer.Stop();
+                    var job = new PrintJob(jobId, startedAt, printRequest.Type, printRequest.Carrier, result.Printer, result.Filename, "printed", timer.ElapsedMilliseconds, "");
+                    SaveJob(job);
+                    await WriteJson(client, request, config, 200, new
+                    {
+                        ok = true,
+                        result.Mode,
+                        result.Printer,
+                        result.Filename,
+                        jobId,
+                        durationMs = timer.ElapsedMilliseconds
+                    });
+                }
+                catch (Exception error)
+                {
+                    timer.Stop();
+                    var printer = SafeRequestedPrinter(printRequest, config);
+                    SaveJob(new PrintJob(jobId, startedAt, printRequest.Type, printRequest.Carrier, printer, SafeFileName(printRequest.Filename), "error", timer.ElapsedMilliseconds, SafeError(error.Message)));
+                    throw;
+                }
                 return;
             }
 
@@ -231,14 +272,17 @@ internal static class Program
                 ? $"-print-to-default -silent \"{pdfPath}\""
                 : $"-print-to \"{printer}\" -silent \"{pdfPath}\"";
 
-            using var process = Process.Start(new ProcessStartInfo
+            for (var copy = 0; copy < request.Copies; copy++)
             {
-                FileName = sumatra,
-                Arguments = arguments,
-                UseShellExecute = false,
-                CreateNoWindow = true
-            });
-            process?.WaitForExit(20000);
+                using var process = Process.Start(new ProcessStartInfo
+                {
+                    FileName = sumatra,
+                    Arguments = arguments,
+                    UseShellExecute = false,
+                    CreateNoWindow = true
+                });
+                process?.WaitForExit(20000);
+            }
         }
         else
         {
@@ -254,7 +298,10 @@ internal static class Program
                 startInfo.Arguments = $"\"{printer}\"";
             }
 
-            Process.Start(startInfo);
+            for (var copy = 0; copy < request.Copies; copy++)
+            {
+                Process.Start(startInfo);
+            }
         }
 
         if (!config.KeepPrintedFiles)
@@ -276,25 +323,65 @@ internal static class Program
             return request.Printer.Trim();
         }
 
-        if (request.Type.Equals("default", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(request.Type, "default", StringComparison.OrdinalIgnoreCase))
         {
             return EmptyToNull(config.Printers.DefaultDocument);
         }
 
-        if (request.Carrier.Equals("dpd", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(request.Carrier, "dpd", StringComparison.OrdinalIgnoreCase))
         {
             return EmptyToNull(config.Printers.DpdLabel);
         }
 
         if (
-            request.Carrier.Equals("packeta", StringComparison.OrdinalIgnoreCase) ||
-            request.Carrier.Equals("zasilkovna", StringComparison.OrdinalIgnoreCase)
+            string.Equals(request.Carrier, "packeta", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(request.Carrier, "zasilkovna", StringComparison.OrdinalIgnoreCase)
         )
         {
             return EmptyToNull(config.Printers.PacketaLabel);
         }
 
         return null;
+    }
+
+    private static void ValidatePrintRequest(PrintRequest request, AgentConfig config)
+    {
+        if (request.Copies < 1 || request.Copies > MaxCopies)
+        {
+            throw new InvalidOperationException($"Pocet kopii musi byt 1 az {MaxCopies}.");
+        }
+        byte[] pdfBytes;
+        try
+        {
+            pdfBytes = Convert.FromBase64String(request.ContentBase64);
+        }
+        catch (FormatException)
+        {
+            throw new InvalidOperationException("PDF obsah neni platny Base64 dokument.");
+        }
+        if (pdfBytes.Length == 0 || pdfBytes.Length > MaxPdfBytes)
+        {
+            throw new InvalidOperationException("PDF je prazdne nebo prekrocilo limit 25 MB.");
+        }
+        if (pdfBytes.Length < 5 || Encoding.ASCII.GetString(pdfBytes, 0, 5) != "%PDF-")
+        {
+            throw new InvalidOperationException("Dokument nema platnou PDF signaturu.");
+        }
+        if (!string.IsNullOrWhiteSpace(request.Printer))
+        {
+            var allowed = new[] { config.Printers.DpdLabel, config.Printers.PacketaLabel, config.Printers.DefaultDocument }
+                .Where(value => !string.IsNullOrWhiteSpace(value));
+            if (!allowed.Any(value => value.Equals(request.Printer.Trim(), StringComparison.OrdinalIgnoreCase)))
+            {
+                throw new InvalidOperationException("Pozadovana tiskarna neni v konfiguraci agenta.");
+            }
+        }
+    }
+
+    private static string SafeRequestedPrinter(PrintRequest request, AgentConfig config)
+    {
+        try { return ChoosePrinter(request, config) ?? "default"; }
+        catch { return "unknown"; }
     }
 
     private static async Task<LocalRequest?> ReadRequest(NetworkStream stream)
@@ -361,7 +448,8 @@ internal static class Program
             body = received.Skip(bodyStart).Take(contentLength).ToArray();
         }
 
-        return new LocalRequest(firstLine[0], new Uri("http://local" + firstLine[1]).AbsolutePath, headers, body);
+        var uri = new Uri("http://local" + firstLine[1]);
+        return new LocalRequest(firstLine[0], uri.AbsolutePath, uri.Query, headers, body);
     }
 
     private static int HeaderEndIndex(List<byte> bytes)
@@ -397,6 +485,7 @@ internal static class Program
             200 => "OK",
             204 => "No Content",
             400 => "Bad Request",
+            403 => "Forbidden",
             404 => "Not Found",
             500 => "Internal Server Error",
             _ => "OK"
@@ -435,13 +524,72 @@ internal static class Program
             return false;
         }
 
-        if (origin.StartsWith("http://127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
-            origin.StartsWith("http://localhost", StringComparison.OrdinalIgnoreCase))
+        if (Uri.TryCreate(origin, UriKind.Absolute, out var uri) &&
+            (uri.Host.Equals("127.0.0.1", StringComparison.OrdinalIgnoreCase) ||
+             uri.Host.Equals("localhost", StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }
 
         return config.AllowedOrigins.Any(allowed => allowed.Equals(origin, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool IsProtectedPath(string path) => path is "/print" or "/printers" or "/jobs";
+
+    private static bool IsAllowedRequestOrigin(LocalRequest request, AgentConfig config)
+    {
+        return request.Headers.TryGetValue("Origin", out var origin) && IsAllowedOrigin(origin, config);
+    }
+
+    private static int QueryInt(string query, string name, int fallback, int minimum, int maximum)
+    {
+        foreach (var part in query.TrimStart('?').Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var pair = part.Split('=', 2);
+            if (pair.Length == 2 && Uri.UnescapeDataString(pair[0]).Equals(name, StringComparison.OrdinalIgnoreCase) && int.TryParse(Uri.UnescapeDataString(pair[1]), out var value))
+            {
+                return Math.Clamp(value, minimum, maximum);
+            }
+        }
+        return fallback;
+    }
+
+    private static List<PrintJob> LoadJobs()
+    {
+        lock (JobsLock)
+        {
+            try
+            {
+                var path = JobsPath();
+                if (!File.Exists(path)) return new List<PrintJob>();
+                return (JsonSerializer.Deserialize<List<PrintJob>>(File.ReadAllText(path, Encoding.UTF8), JsonOptions) ?? new List<PrintJob>())
+                    .OrderByDescending(job => job.StartedAt)
+                    .Take(100)
+                    .ToList();
+            }
+            catch { return new List<PrintJob>(); }
+        }
+    }
+
+    private static void SaveJob(PrintJob job)
+    {
+        lock (JobsLock)
+        {
+            try
+            {
+                Directory.CreateDirectory(ConfigDir());
+                var jobs = LoadJobs();
+                jobs.Insert(0, job);
+                File.WriteAllText(JobsPath(), JsonSerializer.Serialize(jobs.Take(100), JsonOptions), Encoding.UTF8);
+            }
+            catch { }
+        }
+    }
+
+    private static string SafeError(string message)
+    {
+        var safe = (message ?? "Chyba tisku").Replace(Path.GetTempPath(), "", StringComparison.OrdinalIgnoreCase).Trim();
+        return safe.Length <= 300 ? safe : safe[..300];
     }
 
     private static object PublicConfig(AgentConfig config)
@@ -557,8 +705,9 @@ internal static class Program
         }
     }
 
-    private static string SafeFileName(string value)
+    private static string SafeFileName(string? value)
     {
+        value ??= "document.pdf";
         foreach (var invalid in Path.GetInvalidFileNameChars())
         {
             value = value.Replace(invalid, '-');
@@ -601,11 +750,15 @@ internal static class Program
     {
         return Path.Combine(ConfigDir(), "config.json");
     }
+
+    private static string JobsPath() => Path.Combine(ConfigDir(), "jobs.json");
 }
 
-internal sealed record LocalRequest(string Method, string Path, Dictionary<string, string> Headers, byte[] Body);
+internal sealed record LocalRequest(string Method, string Path, string Query, Dictionary<string, string> Headers, byte[] Body);
 
 internal sealed record PrintResult(bool Ok, string Mode, string Printer, string Filename);
+
+internal sealed record PrintJob(string Id, DateTimeOffset StartedAt, string Type, string Carrier, string Printer, string Filename, string Status, long DurationMs, string Error);
 
 internal sealed class PrintRequest
 {

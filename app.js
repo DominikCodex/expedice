@@ -211,6 +211,7 @@ const els = {
   changeNewPassword: document.getElementById("change-new-password"),
   authMessage: document.getElementById("auth-message"),
   authUserName: document.getElementById("auth-user-name"),
+  printAgentTopStatus: document.getElementById("print-agent-top-status"),
   authLogout: document.getElementById("auth-logout"),
   eanInput: document.getElementById("ean-input"),
   manualSearch: document.getElementById("manual-search"),
@@ -388,6 +389,7 @@ const els = {
   settingsPrintTestingMode: document.getElementById("settings-print-testing-mode"),
   printAgentTest: document.getElementById("print-agent-test"),
   printAgentStatus: document.getElementById("print-agent-status"),
+  printAgentJobs: document.getElementById("print-agent-jobs"),
   usersPanel: document.getElementById("users-admin-panel"),
   usersRefresh: document.getElementById("users-refresh"),
   usersList: document.getElementById("users-list"),
@@ -1075,6 +1077,7 @@ function startAppForUser(user) {
 
   switchView(viewFromRoute(), { replaceRoute: true });
   requestAnimationFrame(() => loadExpeditionDays());
+  window.setTimeout(() => testPrintAgent(), 350);
 }
 
 async function checkAuth() {
@@ -3311,6 +3314,7 @@ async function printCompletionCarrierLabel(rowId, setStatus = setCompletionMessa
       type: "carrier_label",
       carrier,
       filename: `${labelNumber}.pdf`,
+      rowId,
     });
     if (result.cancelled) {
       setStatus(`TESTOVÁNÍ: tisk štítku ${labelNumber} byl zrušen, nic se neposlalo na tiskárnu.`, "warning");
@@ -3411,6 +3415,7 @@ async function printCompletionIssueDocument(rowId, kind, setStatus = setCompleti
       type: "default",
       carrier: "",
       filename: `${kind}-${orderNumber}.pdf`,
+      rowId,
     });
     if (result.cancelled) {
       setStatus(`TESTOVÁNÍ: tisk dokumentu pro objednávku ${orderNumber} byl zrušen.`, "warning");
@@ -4283,7 +4288,29 @@ async function confirmPrintAgentJob({ type, carrier, filename }) {
   return window.confirm(lines.join("\n"));
 }
 
-async function printPdfViaAgent({ pdfUrl, type, carrier, filename }) {
+function setPrintAgentTopStatus(label, tone = "neutral") {
+  if (!els.printAgentTopStatus) return;
+  els.printAgentTopStatus.className = `print-agent-top-status ${tone}`;
+  els.printAgentTopStatus.textContent = label;
+}
+
+async function auditPrintedDocument(rowId, result, type, carrier, filename) {
+  if (!rowId || result?.cancelled) return;
+  await fetchJson(`/api/completion/rows/${encodeURIComponent(rowId)}/print-audit`, {
+    method: "POST",
+    body: JSON.stringify({
+      jobId: result.jobId || "",
+      printer: result.printer || "",
+      type,
+      carrier,
+      filename,
+      durationMs: result.durationMs || 0,
+    }),
+    progress: false,
+  }).catch((error) => console.warn("Audit tisku se nepodařilo uložit.", error));
+}
+
+async function printPdfViaAgent({ pdfUrl, type, carrier, filename, rowId = null }) {
   if (!(await confirmPrintAgentJob({ type, carrier, filename }))) {
     return { ok: true, cancelled: true, printer: "" };
   }
@@ -4315,9 +4342,35 @@ async function printPdfViaAgent({ pdfUrl, type, carrier, filename }) {
   );
   const data = await printResponse.json().catch(() => ({}));
   if (!printResponse.ok || !data.ok) {
+    setPrintAgentTopStatus("Tisk: chyba", "danger");
     throw new Error(data.error || "Tiskový agent vrátil chybu.");
   }
+  setPrintAgentTopStatus("Tisk: připojen", "success");
+  await auditPrintedDocument(rowId, data, type, carrier, filename);
   return data;
+}
+
+async function loadPrintAgentJobs() {
+  if (!els.printAgentJobs) return;
+  try {
+    const response = await fetchWithTimeout(`${PRINT_AGENT_URL}/jobs?limit=20`, { cache: "no-store" }, 1800);
+    if (!response.ok) throw new Error(response.status === 404 ? "Agent potřebuje aktualizaci na V2.1." : "Historie není dostupná.");
+    const data = await response.json();
+    const jobs = data.jobs || [];
+    els.printAgentJobs.innerHTML = jobs.length
+      ? jobs
+          .map(
+            (job) => `<div class="print-agent-job ${job.status === "error" ? "danger" : "success"}">
+              <strong>${escapeHtml(job.status === "error" ? "Chyba" : "Vytištěno")} · ${escapeHtml(job.printer || "výchozí")}</strong>
+              <span>${escapeHtml(formatTime(job.startedAt) || "")} · ${escapeHtml(job.filename || "dokument")} · ${escapeHtml(job.durationMs || 0)} ms</span>
+              ${job.error ? `<small>${escapeHtml(job.error)}</small>` : ""}
+            </div>`
+          )
+          .join("")
+      : `<span>Zatím nejsou zaznamenané žádné tiskové úlohy.</span>`;
+  } catch (error) {
+    els.printAgentJobs.innerHTML = `<span>${escapeHtml(error.message)}</span>`;
+  }
 }
 
 async function testPrintAgent() {
@@ -4335,9 +4388,12 @@ async function testPrintAgent() {
     }. DPD: ${printers.dpdLabel || "výchozí"}, Zásilkovna: ${printers.packetaLabel || "výchozí"}, dokumenty: ${
       printers.defaultDocument || "výchozí Windows tiskárna"
     }.`;
+    setPrintAgentTopStatus("Tisk: připojen", "success");
+    await loadPrintAgentJobs();
   } catch (error) {
     els.printAgentStatus.classList.add("settings-hint-missing");
     els.printAgentStatus.textContent = `Agent neběží nebo není dostupný: ${error.message}`;
+    setPrintAgentTopStatus("Tisk: nedostupný", "danger");
   }
 }
 

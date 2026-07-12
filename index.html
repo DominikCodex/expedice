@@ -68,6 +68,7 @@
         </div>
         <div class="user-panel" aria-label="Uživatel">
           <span id="auth-user-name">Nepřihlášen</span>
+          <span id="print-agent-top-status" class="print-agent-top-status neutral" title="Stav lokálního tiskového agenta">Tisk: zjišťuji</span>
           <button id="auth-logout" type="button" class="secondary">Odhlásit</button>
         </div>
         <div class="metrics" aria-label="Souhrn">
@@ -1013,12 +1014,10 @@
                   <div class="print-agent-actions">
                     <button id="print-agent-test" type="button" class="secondary">Otestovat agenta</button>
                     <a class="button-link secondary" href="print-agent.html">Instalace tisku pro uživatele</a>
-                    <a class="button-link secondary" href="https://github.com/DominikCodex/expedice/releases/download/print-agent-latest/ExpedicePrintAgentSetup.exe" target="_blank" rel="noreferrer">Stáhnout instalátor V1</a>
-                    <a class="button-link secondary" href="https://github.com/DominikCodex/expedice/releases/download/print-agent-latest/ExpedicePrintAgentUninstall.exe" target="_blank" rel="noreferrer">Stáhnout odinstalátor V1</a>
-                    <a class="button-link secondary" href="print-agent/install.ps1" download>Servisní instalace PS</a>
                     <a class="button-link secondary" href="print-agent/README.md" target="_blank" rel="noreferrer">Návod</a>
                   </div>
                   <div id="print-agent-status" class="settings-hint">Agent se otestuje po kliknutí.</div>
+                  <div id="print-agent-jobs" class="print-agent-jobs"><span>Historie tisku se načte při testu agenta.</span></div>
                 </fieldset>
                     </div>
                   </section>

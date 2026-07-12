@@ -48,6 +48,21 @@ jobs:
           Copy-Item -Force print-agent-dotnet/dist/ExpedicePrintAgentV2.exe print-agent-dotnet/ExpedicePrintAgentV2Setup.exe
           Copy-Item -Force print-agent-dotnet/dist/ExpedicePrintAgentV2.exe print-agent-dotnet/ExpedicePrintAgentV2Uninstall.exe
 
+      - name: Sign V2 release files
+        if: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 != '' }}
+        shell: pwsh
+        env:
+          SIGNING_CERT_BASE64: ${{ secrets.WINDOWS_SIGNING_CERT_BASE64 }}
+          SIGNING_CERT_PASSWORD: ${{ secrets.WINDOWS_SIGNING_CERT_PASSWORD }}
+        run: |
+          $certPath = Join-Path $env:RUNNER_TEMP "expedice-signing.pfx"
+          [IO.File]::WriteAllBytes($certPath, [Convert]::FromBase64String($env:SIGNING_CERT_BASE64))
+          $signtool = Get-ChildItem "C:\Program Files (x86)\Windows Kits\10\bin" -Filter signtool.exe -Recurse | Sort-Object FullName -Descending | Select-Object -First 1
+          if (-not $signtool) { throw "signtool.exe not found" }
+          & $signtool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certPath /p $env:SIGNING_CERT_PASSWORD print-agent-dotnet/ExpedicePrintAgentV2Setup.exe
+          & $signtool.FullName sign /fd SHA256 /td SHA256 /tr http://timestamp.digicert.com /f $certPath /p $env:SIGNING_CERT_PASSWORD print-agent-dotnet/ExpedicePrintAgentV2Uninstall.exe
+          Remove-Item -LiteralPath $certPath -Force
+
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
@@ -72,9 +87,9 @@ jobs:
           tag_name: print-agent-v2-latest
           name: Expedice Print Agent V2 dotnet
           body: |
-            Nova paralelni C#/.NET verze lokalniho tiskoveho agenta.
+            Podporovana C#/.NET verze lokalniho tiskoveho agenta.
 
-            V1 zustava k dispozici; V2 pouziva stejne lokalni API na 127.0.0.1:8787.
+            V2 pouziva lokalni API na 127.0.0.1:8787 a prijima tisk jen z povolenych domen.
           make_latest: false
           overwrite_files: true
           files: |
