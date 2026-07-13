@@ -42,3 +42,37 @@ test("existing shipment number suppresses a missing pickup point problem", async
   expect(result.withShipment.some((item) => item.category === "pickup")).toBe(false);
   expect(result.withoutShipment.some((item) => item.category === "pickup")).toBe(true);
 });
+
+test("confirmed unpaid payment is ready but still prints an unpaid notice", async ({ page }) => {
+  await mockExpeditionApp(page);
+  await page.goto("/kompletace");
+  const result = await page.evaluate(() => {
+    const unpaid = {
+      deliveryService: "packeta_pickup",
+      pickupPointId: "1001",
+      paymentCheckStatus: "unpaid",
+      paymentCheckMessage: "Platba není podle feedu uhrazená.",
+      problems: [{ category: "payment", severity: "warning", message: "Platba není podle feedu uhrazená." }],
+    };
+    const unknown = {
+      deliveryService: "packeta_pickup",
+      pickupPointId: "1001",
+      paymentCheckStatus: "unknown",
+      paymentCheckMessage: "Stav platby se nepodařilo spolehlivě určit.",
+      problems: [],
+    };
+    return {
+      unpaidProblems: inferredCompletionProblems(unpaid),
+      unpaidReady: completionMatchesProblemFilter(unpaid, "ready"),
+      unpaidPrint: workflowIsUnpaid(unpaid),
+      unknownProblems: inferredCompletionProblems(unknown),
+      unknownPrint: workflowIsUnpaid(unknown),
+    };
+  });
+
+  expect(result.unpaidProblems.some((item) => item.category === "payment")).toBe(false);
+  expect(result.unpaidReady).toBe(true);
+  expect(result.unpaidPrint).toBe(true);
+  expect(result.unknownProblems.some((item) => item.category === "payment")).toBe(true);
+  expect(result.unknownPrint).toBe(false);
+});

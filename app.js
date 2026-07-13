@@ -1527,6 +1527,10 @@ function postUploadChecksHtml() {
   }
   const result = job.result || {};
   const active = ["queued", "running"].includes(job.status);
+  const paymentResult = { ...(result.payments || {}) };
+  if (!active && completionState.rows.length) {
+    paymentResult.problems = completionState.rows.filter((row) => paymentCheckNeedsAttention(row)).length;
+  }
   const progress = job.progress !== null && job.progress !== undefined && Number.isFinite(Number(job.progress))
     ? Math.max(0, Math.min(100, Number(job.progress)))
     : null;
@@ -1537,7 +1541,7 @@ function postUploadChecksHtml() {
         ${isAdmin() ? `<button type="button" class="secondary" data-action="retry-post-upload-checks" ${active ? "disabled" : ""}>Zopakovat kontrolu</button>` : ""}
       </div>
       <div class="batch-check-grid">
-        ${postUploadCheckSectionHtml("Platby", result.payments)}
+        ${postUploadCheckSectionHtml("Platby", paymentResult)}
         ${postUploadCheckSectionHtml("Adresy", result.addresses)}
       </div>
       ${progress !== null ? `<div class="batch-check-progress" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${progress}"><span style="width:${progress}%"></span></div><small>${progress} %</small>` : ""}
@@ -1630,7 +1634,7 @@ function printExpeditionBatchReport() {
       <head>
         <meta charset="UTF-8" />
         <title>Report vybrané várky</title>
-        <link rel="stylesheet" href="styles.css?v=completion-actions-20260713-2" />
+        <link rel="stylesheet" href="styles.css?v=payment-status-20260713-1" />
       </head>
       <body class="batch-report-print-page">
         ${reportClone.outerHTML}
@@ -1660,7 +1664,7 @@ function renderExpeditionBatchReport() {
   const stockPieces = completionStockPiecesForReport(rows);
   const addressRows = rows.filter((row) => completionRequiresAddressValidation(row));
   const addressErrors = addressRows.filter((row) => completionAddressHasError(row)).length;
-  const paymentWarnings = rows.filter((row) => ["warning", "danger"].includes(paymentCheckTone(row))).length;
+  const paymentWarnings = rows.filter((row) => paymentCheckNeedsAttention(row)).length;
   const statusErrors = rows.filter((row) => normalize(row?.completionStatus || "").includes("error")).length;
   const sortingRows = state.items || [];
   const sortingRemaining = sortingRows.reduce((total, item) => total + Math.max(0, Math.trunc(toNumber(item.remaining, 0))), 0);
@@ -1678,7 +1682,7 @@ function renderExpeditionBatchReport() {
   const stockOrdersValue = serverMetrics ? serverMetrics.stockOrders : hasCompletionRows ? flowCounts.stock : "-";
   const stockPiecesValue = serverMetrics ? serverMetrics.stockPieces : hasCompletionRows ? stockPieces : "-";
   const addressErrorsValue = serverMetrics ? serverMetrics.addressErrors : hasCompletionRows ? addressErrors : "-";
-  const paymentWarningsValue = serverMetrics ? serverMetrics.paymentWarnings : hasCompletionRows ? paymentWarnings : "-";
+  const paymentWarningsValue = hasCompletionRows ? paymentWarnings : serverMetrics ? serverMetrics.paymentWarnings : "-";
 
   const notes = [];
   if (completionDataset) {
@@ -2889,18 +2893,24 @@ function paymentCheckLabel(row) {
   if (status === "storno") return "STORNO";
   if (completionRowIsCod(row)) return "Dobírka";
   if (status === "paid") return "Zaplaceno";
-  if (status === "unpaid") return "Nezaplaceno";
+  if (["unpaid", "nezaplaceno"].includes(status)) return "Nezaplaceno";
   if (status === "missing") return "Platba nezjištěna";
   if (status === "unknown") return "Platba nejasná";
+  if (["error", "danger"].includes(status)) return "Chyba kontroly platby";
   return "";
 }
 
 function paymentCheckTone(row) {
   const status = paymentCheckKind(row);
   if (status === "storno") return "danger";
+  if (["error", "danger"].includes(status)) return "danger";
   if (status === "paid" || completionRowIsCod(row)) return "ok";
-  if (status === "unpaid" || status === "missing" || status === "unknown") return "warning";
+  if (["unpaid", "nezaplaceno", "missing", "unknown"].includes(status)) return "warning";
   return "neutral";
+}
+
+function paymentCheckNeedsAttention(row) {
+  return ["error", "missing", "unknown", "warning", "danger"].includes(paymentCheckKind(row));
 }
 
 function completionFlowValue(row) {
@@ -4752,9 +4762,9 @@ function workflowStatusTone(row) {
   const paymentStatus = paymentCheckKind(row);
   if (!row) return "neutral";
   if (paymentStatus === "storno" || status.includes("storno")) return "storno";
-  if (status.includes("error") || status.includes("chyba")) return "danger";
+  if (["error", "danger"].includes(paymentStatus) || status.includes("error") || status.includes("chyba")) return "danger";
   if (status.includes("nezaplac")) return "warning";
-  if (["unpaid", "missing", "unknown"].includes(paymentStatus)) return "warning";
+  if (["unpaid", "nezaplaceno", "missing", "unknown"].includes(paymentStatus)) return "warning";
   return "ok";
 }
 
@@ -4776,8 +4786,8 @@ function workflowAutoPrintKey(row) {
 function workflowIsUnpaid(row) {
   if (completionRowIsCod(row)) return false;
   const paymentStatus = paymentCheckKind(row);
-  if (paymentStatus === "unpaid" || paymentStatus === "missing" || paymentStatus === "unknown") return true;
-  if (paymentStatus === "paid" || paymentStatus === "cod" || paymentStatus === "storno") return false;
+  if (["unpaid", "nezaplaceno"].includes(paymentStatus)) return true;
+  if (["paid", "cod", "storno", "missing", "unknown", "error"].includes(paymentStatus)) return false;
   const text = normalize(
     [
       row?.paidStatus,
@@ -5514,15 +5524,16 @@ function renderWorkflow() {
   const fullName = row ? `${row.firstName || ""} ${row.lastName || ""}`.trim() : "Načti expediční box";
   const expeditionNumber = workflowExpeditionNumberText(row);
   const tone = workflowStatusTone(row);
+  const paymentStatus = paymentCheckKind(row);
   let statusText = row ? "OK - připraveno" : "Čekám na sken boxu";
   const isDpd = row && (row.delivery?.isDpd || normalize(row.shippingMethod || "").includes("dpd"));
-  const paymentWarning = row && ["storno", "unpaid", "missing", "unknown"].includes(paymentCheckKind(row));
+  const paymentWarning = row && ["storno", "unpaid", "nezaplaceno", "missing", "unknown", "error"].includes(paymentStatus);
   if (tone === "storno") {
     statusText = "STORNO - neexpedovat";
   } else if (tone === "ok" && row) {
     statusText = "OK - připraveno";
   } else if (tone === "warning" && row) {
-    statusText = "NEZAPLACENO";
+    statusText = ["unpaid", "nezaplaceno"].includes(paymentStatus) ? "NEZAPLACENO" : "PLATBA K PROVĚŘENÍ";
   } else if (tone === "danger" && row) {
     statusText = "ERROR - řešit";
   }
@@ -5802,8 +5813,22 @@ const COMPLETION_PROBLEM_FILTERS = [
 
 function inferredCompletionProblems(row) {
   const hasShipmentNumber = Boolean(completionLabelNumber(row));
+  const confirmedUnpaid = ["unpaid", "nezaplaceno"].includes(paymentCheckKind(row));
   const problems = Array.isArray(row?.problems)
-    ? row.problems.filter((item) => !(hasShipmentNumber && item?.category === "pickup"))
+    ? row.problems.filter((item) => {
+        if (hasShipmentNumber && item?.category === "pickup") return false;
+        if (confirmedUnpaid && item?.category === "payment") {
+          const message = normalize(item?.message || "");
+          const checkMessage = normalize(row?.paymentCheckMessage || "");
+          return !(
+            !message ||
+            message === checkMessage ||
+            message.includes("neni podle feedu uhrazena") ||
+            message.includes("excel uvadi neuhrazenou objednavku")
+          );
+        }
+        return true;
+      })
     : [];
   const categories = new Set(problems.map((item) => item.category));
   const add = (category, message, severity = "error") => {
@@ -5823,7 +5848,7 @@ function inferredCompletionProblems(row) {
     add("pickup", "Chybí výdejní místo nebo box.");
   }
   if (!row?.deliveryService || row.deliveryService === "manual") add("delivery", "Doprava vyžaduje ruční kontrolu.", "warning");
-  if (["unpaid", "missing", "unknown", "error"].includes(paymentCheckKind(row))) {
+  if (paymentCheckNeedsAttention(row)) {
     add("payment", row.paymentCheckMessage || "Platba vyžaduje kontrolu.", "warning");
   }
   if ((row?.shipments || []).some((shipment) => shipment.status === "pending_replacement")) {

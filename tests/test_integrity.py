@@ -29,6 +29,17 @@ def test_snapshot_is_based_on_initial_sorting_quantity():
     assert snapshot["stockPieces"] == 5
 
 
+def test_confirmed_unpaid_payment_is_not_counted_as_attention():
+    unpaid = completion("A", 1, "0.8")
+    unpaid["paymentCheckStatus"] = "unpaid"
+    unresolved = completion("B", 2, "1")
+    unresolved["paymentCheckStatus"] = "unknown"
+
+    snapshot = build_batch_snapshot([unpaid, unresolved], [])
+
+    assert snapshot["paymentWarnings"] == 1
+
+
 def test_same_variant_in_multiple_orders_is_not_ambiguous():
     result = assess_integrity(
         [completion("A", 1, "3"), completion("B", 2, "3")],

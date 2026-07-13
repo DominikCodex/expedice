@@ -108,3 +108,27 @@ def test_completion_problems_ignore_pickup_when_shipment_number_exists():
     }
 
     assert not any(issue["category"] == "pickup" for issue in app.completion_row_problems(row))
+
+
+def test_confirmed_unpaid_payment_is_not_a_problem_to_resolve():
+    row = {
+        "deliveryService": "packeta_pickup",
+        "pickupPointId": "1001",
+        "paymentCheckStatus": "unpaid",
+        "paymentCheckMessage": "Platba není podle feedu uhrazená.",
+        "addressValidationResult": {},
+    }
+
+    assert not any(issue["category"] == "payment" for issue in app.completion_row_problems(row))
+
+
+def test_unknown_payment_remains_a_problem_to_resolve():
+    row = {
+        "deliveryService": "packeta_pickup",
+        "pickupPointId": "1001",
+        "paymentCheckStatus": "unknown",
+        "paymentCheckMessage": "Stav platby se nepodařilo spolehlivě určit.",
+        "addressValidationResult": {},
+    }
+
+    assert any(issue["category"] == "payment" for issue in app.completion_row_problems(row))

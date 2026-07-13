@@ -84,9 +84,12 @@ def address_has_error(row):
 
 
 def payment_needs_attention(row):
+    check_status = normalized(row.get("paymentCheckStatus") or row.get("payment_check_status"))
+    if check_status:
+        return check_status in {"error", "missing", "unknown", "warning", "danger"}
     status = normalized(row.get("paidStatus") or row.get("paid_status"))
     completion_status = normalized(row.get("completionStatus") or row.get("completion_status"))
-    return any(marker in status or marker in completion_status for marker in ("nezaplac", "unpaid", "error"))
+    return any(marker in status or marker in completion_status for marker in ("error", "chyba", "unknown", "nezjisten"))
 
 
 def code_ranges(rows):

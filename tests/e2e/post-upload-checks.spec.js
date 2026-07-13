@@ -7,6 +7,7 @@ test("report shows measurable post-upload checks and admin retry", async ({ page
   await page.locator("#expedition-day-list button").first().click();
   await expect(page.locator(".batch-checks")).toBeVisible();
   await expect(page.locator(".batch-check-row").first()).toContainText("2 / 2");
+  await expect(page.locator(".batch-check-row").first()).not.toContainText("k řešení");
   await expect(page.locator(".batch-check-progress")).toHaveAttribute("aria-valuenow", "100");
   await expect(page.locator("[data-action='retry-post-upload-checks']")).toBeVisible();
 });

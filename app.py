@@ -7071,7 +7071,7 @@ def post_upload_payment_summary(dataset_id):
                        COUNT(*) FILTER (WHERE payment_check_checked_at IS NOT NULL) AS checked,
                        COUNT(*) FILTER (
                            WHERE COALESCE(payment_check_status, '') IN (
-                               'warning', 'danger', 'error', 'missing', 'unpaid', 'unknown'
+                               'warning', 'danger', 'error', 'missing', 'unknown'
                            )
                        ) AS problems
                 FROM completion_rows
@@ -8992,7 +8992,7 @@ def completion_row_problems(row_api, shipments=None):
             and not clean_text(row_api.get("pickupPointId"))
         ):
             problems.append(expedition_problem("pickup", "Chybí výdejní místo nebo box."))
-    if clean_text(row_api.get("paymentCheckStatus")).lower() in {"error", "unpaid", "nezaplaceno"}:
+    if clean_text(row_api.get("paymentCheckStatus")).lower() in {"error", "missing", "unknown", "warning", "danger"}:
         problems.append(expedition_problem("payment", row_api.get("paymentCheckMessage") or "Platba vyžaduje kontrolu."))
     if any(item.get("status") == "pending_replacement" for item in shipments or []):
         problems.append(expedition_problem("replacement", "Náhradní zásilka čeká na vytvoření."))
