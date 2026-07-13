@@ -8,6 +8,11 @@ const types = { ".html": "text/html; charset=utf-8", ".js": "text/javascript; ch
 
 const server = http.createServer((request, response) => {
   const pathname = new URL(request.url, `http://127.0.0.1:${port}`).pathname;
+  if (pathname === "/__shutdown" && request.method === "POST") {
+    response.writeHead(204);
+    response.end(() => setImmediate(shutdown));
+    return;
+  }
   let filename = pathname === "/" || !path.extname(pathname) ? "index.html" : pathname.replace(/^\//, "");
   const target = path.resolve(root, filename);
   if (!target.startsWith(root) || !fs.existsSync(target)) {
@@ -26,4 +31,3 @@ function shutdown() {
 
 process.on("SIGINT", shutdown);
 process.on("SIGTERM", shutdown);
-setTimeout(shutdown, Number(process.env.TEST_SERVER_MAX_MS || 30_000)).unref();

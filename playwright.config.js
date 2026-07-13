@@ -2,6 +2,8 @@ const { defineConfig } = require("@playwright/test");
 
 module.exports = defineConfig({
   testDir: "./tests/e2e",
+  globalTeardown: "./tests/e2e/global-teardown.js",
+  workers: 2,
   outputDir: "test-results/results",
   timeout: 45_000,
   expect: { timeout: 7_500 },
@@ -17,7 +19,6 @@ module.exports = defineConfig({
         url: "http://127.0.0.1:8123",
         reuseExistingServer: false,
         timeout: 15_000,
-        gracefulShutdown: { signal: "SIGTERM", timeout: 2_000 },
       },
   reporter: [["list"], ["html", { outputFolder: "playwright-report", open: "never" }]],
 });

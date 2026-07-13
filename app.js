@@ -1630,7 +1630,7 @@ function printExpeditionBatchReport() {
       <head>
         <meta charset="UTF-8" />
         <title>Report vybrané várky</title>
-        <link rel="stylesheet" href="styles.css?v=post-upload-checks-20260712-2" />
+        <link rel="stylesheet" href="styles.css?v=completion-actions-20260713-1" />
       </head>
       <body class="batch-report-print-page">
         ${reportClone.outerHTML}
@@ -4498,18 +4498,19 @@ function labelCacheStatusHtml(row) {
   return `<span class="label-cache-chip missing" title="PDF štítek zatím není připravený na serveru">chybí cache</span>`;
 }
 
-function carrierSendActionHtml(row) {
+function carrierSendActionHtml(row, options = {}) {
   const carrier = row.deliveryCarrier || "manual";
   const labelNumber = completionLabelNumber(row);
+  const compact = Boolean(options.compact);
   if ((carrier === "dpd" || carrier === "packeta") && labelNumber) {
     return `
-      <div class="carrier-actions">
+      <div class="carrier-actions ${compact ? "compact" : ""}">
         <button type="button" class="label-print ${escapeHtml(carrier)}" data-action="print-carrier-label" data-row-id="${escapeHtml(
       row.id
     )}">Tisk štítku</button>
         <button type="button" class="secondary label-download" data-action="download-carrier-label" data-row-id="${escapeHtml(
       row.id
-    )}">Test PDF</button>
+    )}">${compact ? "PDF" : "Test PDF"}</button>
         ${labelCacheStatusHtml(row)}
       </div>
     `;
@@ -6303,8 +6304,17 @@ function renderCompletion() {
         <small>${escapeHtml(inferredCompletionProblems(row)[0]?.message || status.label || "")}</small>
       </td>
       <td class="completion-queue-actions">
-        <button type="button" data-action="open-expedition-editor" data-row-id="${escapeHtml(row.id)}">Upravit</button>
-        <button type="button" class="secondary" data-action="open-shop-order" data-row-id="${escapeHtml(row.id)}">E-shop</button>
+        <div class="completion-quick-actions">
+          <button type="button" data-action="open-expedition-editor" data-row-id="${escapeHtml(row.id)}">Upravit</button>
+          <a class="mapy-link completion-mapy-action" href="${escapeHtml(mapyAddressUrl(row))}" target="_blank" rel="noopener">Mapy</a>
+          ${
+            completionRequiresAddressValidation(row)
+              ? `<button type="button" class="secondary" data-action="validate-address" data-row-id="${escapeHtml(row.id)}">Ověřit</button>`
+              : ""
+          }
+          <button type="button" class="secondary" data-action="open-shop-order" data-row-id="${escapeHtml(row.id)}">E-shop</button>
+          ${carrierSendActionHtml(row, { compact: true })}
+        </div>
       </td>
     `;
     els.completionBody.appendChild(tr);
