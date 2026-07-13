@@ -8868,7 +8868,7 @@ def expedition_problem(category, message, field="", severity="error"):
     return {"category": category, "message": message, "field": field, "severity": severity}
 
 
-def validate_expedition_details(details, cur=None):
+def validate_expedition_details(details, cur=None, accept_existing_shipment_pickup=False):
     prepared = {field: details.get(field) for field in EXPEDITION_DETAIL_FIELDS if field in details}
     prepared["country"] = clean_text(prepared.get("country") or country_from_order_number(details)).upper() or "CZ"
     prepared["currency"] = clean_text(
@@ -8891,7 +8891,7 @@ def validate_expedition_details(details, cur=None):
 
     cod_amount = editor_float(prepared.get("codAmount")) or 0
     pickup_point = None
-    if prepared["deliveryService"] in {"packeta_pickup", "dpd_pickup"}:
+    if prepared["deliveryService"] in {"packeta_pickup", "dpd_pickup"} and not accept_existing_shipment_pickup:
         pickup_id = clean_text(prepared.get("pickupPointId"))
         carrier = "packeta" if prepared["deliveryService"] == "packeta_pickup" else "dpd"
         if not pickup_id:
@@ -8975,15 +8975,22 @@ def validate_expedition_details(details, cur=None):
 
 def completion_row_problems(row_api, shipments=None):
     problems = []
+    has_shipment_number = bool(completion_label_number(row_api))
     validation = row_api.get("addressValidationResult") or {}
     for issue in validation.get("issues") or []:
         if isinstance(issue, dict):
+            if has_shipment_number and issue.get("category") == "pickup":
+                continue
             problems.append(issue)
     if not row_api.get("hasExpeditionOverride"):
         delivery = delivery_info_from_row(row_api)
         if delivery.get("requiresAddress") and row_api.get("addressValidationStatus") != "verified":
             problems.append(expedition_problem("address", "Adresa zatím není ověřená.", severity="warning"))
-        if delivery.get("service") in {"packeta_pickup", "dpd_pickup"} and not clean_text(row_api.get("pickupPointId")):
+        if (
+            not has_shipment_number
+            and delivery.get("service") in {"packeta_pickup", "dpd_pickup"}
+            and not clean_text(row_api.get("pickupPointId"))
+        ):
             problems.append(expedition_problem("pickup", "Chybí výdejní místo nebo box."))
     if clean_text(row_api.get("paymentCheckStatus")).lower() in {"error", "unpaid", "nezaplaceno"}:
         problems.append(expedition_problem("payment", row_api.get("paymentCheckMessage") or "Platba vyžaduje kontrolu."))
@@ -9037,7 +9044,14 @@ def update_completion_expedition_details(row_id):
                 if field in incoming:
                     value = incoming.get(field)
                     details[field] = value if isinstance(value, bool) or value is None else clean_text(value).strip()
-            validation = validate_expedition_details(details, cur)
+            accept_existing_shipment_pickup = bool(completion_label_number(current_api)) and clean_text(
+                details.get("deliveryService")
+            ) == clean_text(current_api.get("deliveryService"))
+            validation = validate_expedition_details(
+                details,
+                cur,
+                accept_existing_shipment_pickup=accept_existing_shipment_pickup,
+            )
             effective_details = validation["details"]
             if validation["status"] != "verified" and not force_unverified:
                 return (

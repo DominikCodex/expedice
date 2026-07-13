@@ -85,3 +85,26 @@ def test_cod_is_blocked_when_pickup_point_does_not_support_it():
 
     assert result["readyForShipment"] is False
     assert any(issue["category"] == "payment" for issue in result["issues"])
+
+
+def test_existing_shipment_can_keep_pickup_point_from_original_label():
+    details = base_details("dpd_pickup")
+    details["pickupPointId"] = ""
+    result = app.validate_expedition_details(details, PickupCursor(), accept_existing_shipment_pickup=True)
+
+    assert result["readyForShipment"] is True
+    assert not any(issue["category"] == "pickup" for issue in result["issues"])
+
+
+def test_completion_problems_ignore_pickup_when_shipment_number_exists():
+    row = {
+        "deliveryService": "dpd_pickup",
+        "pickupPointId": "",
+        "dpdOrderAndPieces": "13835080503326",
+        "addressValidationResult": {
+            "issues": [{"category": "pickup", "message": "Chybí výdejní místo nebo box.", "severity": "error"}]
+        },
+        "paymentCheckStatus": "paid",
+    }
+
+    assert not any(issue["category"] == "pickup" for issue in app.completion_row_problems(row))

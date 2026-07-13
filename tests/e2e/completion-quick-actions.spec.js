@@ -23,3 +23,22 @@ test("quick actions open Mapy and send the order to Packeta", async ({ page }) =
   const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
   expect(overflow).toBeLessThanOrEqual(2);
 });
+
+test("existing shipment number suppresses a missing pickup point problem", async ({ page }) => {
+  await mockExpeditionApp(page);
+  await page.goto("/kompletace");
+  const result = await page.evaluate(() => {
+    const base = {
+      deliveryService: "dpd_pickup",
+      pickupPointId: "",
+      dpdOrderAndPieces: "13835080503326",
+      problems: [{ category: "pickup", severity: "error", message: "Chybí výdejní místo nebo box." }],
+    };
+    return {
+      withShipment: inferredCompletionProblems(base),
+      withoutShipment: inferredCompletionProblems({ ...base, dpdOrderAndPieces: "" }),
+    };
+  });
+  expect(result.withShipment.some((item) => item.category === "pickup")).toBe(false);
+  expect(result.withoutShipment.some((item) => item.category === "pickup")).toBe(true);
+});

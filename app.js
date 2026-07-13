@@ -1630,7 +1630,7 @@ function printExpeditionBatchReport() {
       <head>
         <meta charset="UTF-8" />
         <title>Report vybrané várky</title>
-        <link rel="stylesheet" href="styles.css?v=completion-actions-20260713-1" />
+        <link rel="stylesheet" href="styles.css?v=completion-actions-20260713-2" />
       </head>
       <body class="batch-report-print-page">
         ${reportClone.outerHTML}
@@ -5801,7 +5801,10 @@ const COMPLETION_PROBLEM_FILTERS = [
 ];
 
 function inferredCompletionProblems(row) {
-  const problems = Array.isArray(row?.problems) ? [...row.problems] : [];
+  const hasShipmentNumber = Boolean(completionLabelNumber(row));
+  const problems = Array.isArray(row?.problems)
+    ? row.problems.filter((item) => !(hasShipmentNumber && item?.category === "pickup"))
+    : [];
   const categories = new Set(problems.map((item) => item.category));
   const add = (category, message, severity = "error") => {
     if (!categories.has(category)) {
@@ -5812,7 +5815,11 @@ function inferredCompletionProblems(row) {
   if (completionRequiresAddressValidation(row) && !completionAddressIsResolvedOk(row)) {
     add("address", row.addressValidationMessage || "Adresa zatím není ověřená.", "warning");
   }
-  if (["packeta_pickup", "dpd_pickup"].includes(row?.deliveryService) && !String(row?.pickupPointId || row?.packetaId || "").trim()) {
+  if (
+    !hasShipmentNumber &&
+    ["packeta_pickup", "dpd_pickup"].includes(row?.deliveryService) &&
+    !String(row?.pickupPointId || row?.packetaId || "").trim()
+  ) {
     add("pickup", "Chybí výdejní místo nebo box.");
   }
   if (!row?.deliveryService || row.deliveryService === "manual") add("delivery", "Doprava vyžaduje ruční kontrolu.", "warning");
