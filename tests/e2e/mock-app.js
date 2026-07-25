@@ -57,6 +57,10 @@ async function mockExpeditionApp(page, role = "admin") {
     if (pathname === "/api/auth/me") return json(route, { authenticated: true, user: { id: 1, username: "test", displayName: "TEST", role } });
     if (pathname === "/api/settings") return json(route, { settings: { appearance: { font: "system", completionDensity: "auto" }, automation: { postUploadPaymentCheck: true, postUploadAddressCheck: true }, expeditionOrderCodeLabels: {}, printAgent: { testingMode: false } } });
     if (pathname === "/api/expedition-days") return json(route, { days: [day] });
+    if (pathname === "/api/expedition-days/bulk-delete" && request.method() === "POST") {
+      const dates = request.postDataJSON()?.dates || [];
+      return json(route, { ok: true, deletedDays: dates.length, deletedDatasets: dates.length * 2, expeditionDays: dates.map((date) => ({ date, status: "deleted" })) });
+    }
     if (pathname === `/api/expedition-days/${day.date}/full`) return json(route, { day, sorting: [sortingDataset], completion: [completionDataset], activeSorting: { dataset: sortingDataset, rows: sortingRows }, activeCompletion: { dataset: completionDataset, rows: completionRows } });
     if (pathname === "/api/expedition-days/1/report") return json(route, { day, snapshot: { id: 1, metrics: { orders: 2, pieces: 4, stockOrders: 1, stockPieces: 1, addressErrors: 0, paymentWarnings: 0, codeRanges: [{ start: 19, end: 19, code: "3", count: 1 }, { start: 20, end: 20, code: "0.8", count: 1 }] } }, live: { sortingRemaining: 2 } });
     if (pathname === "/api/expedition-days/1/checks/latest") return json(route, { ok: true, automation: { postUploadPaymentCheck: true, postUploadAddressCheck: true }, job: { id: "check-1", kind: "post_upload_checks", status: "completed", phase: "done", progress: 100, current: 4, total: 4, message: "AutomatickĂˇ kontrola je dokonÄŤenĂˇ.", result: { payments: { status: "completed", current: 2, total: 2, problems: 2, errors: [] }, addresses: { status: "completed", current: 2, total: 2, problems: 1, suggestions: 1, errors: [] } } } });

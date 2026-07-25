@@ -1037,12 +1037,19 @@ select:focus {
 
 .day-sidebar-head {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   align-items: start;
   justify-content: space-between;
 }
 
+.day-sidebar-head > div {
+  flex: 1 1 100px;
+  min-width: 0;
+}
+
 .day-sidebar-head button {
+  flex: 0 1 auto;
   min-height: 34px;
   padding: 6px 9px;
 }
@@ -1067,6 +1074,58 @@ select:focus {
 .day-list {
   display: grid;
   gap: 8px;
+}
+
+.day-card-selectable {
+  position: relative;
+  min-width: 0;
+}
+
+.day-card-selectable .day-card {
+  width: 100%;
+  padding-right: 42px;
+}
+
+.day-card-selectable.selected .day-card {
+  border-color: #8dc8af;
+  box-shadow: inset 0 0 0 1px #8dc8af;
+}
+
+.day-card-selector {
+  position: absolute;
+  z-index: 2;
+  top: 9px;
+  right: 9px;
+  display: grid;
+  width: 26px;
+  height: 26px;
+  place-items: center;
+  margin: 0;
+  cursor: pointer;
+}
+
+.day-card-selector input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+
+.day-card-selector input:focus-visible {
+  outline: 3px solid rgba(22, 125, 91, 0.25);
+  outline-offset: 2px;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 .day-card {

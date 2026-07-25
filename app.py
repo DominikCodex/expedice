@@ -7183,7 +7183,7 @@ def classify_post_upload_address(api_key, data, timeout=15):
 def post_upload_address_key(row_api):
     return searchable_text(
         "|".join(
-            clean_text(row_api.get(key))
+            clean_text(row_api.get(key)).strip()
             for key in ("country", "streetWithNumber", "street", "houseNumber", "zipCode", "city")
         )
     )
@@ -7735,6 +7735,133 @@ def payment_feed_updates():
     return jsonify({"rows": rows, "latestSync": latest_payment_sync(), "syncAttempt": sync_attempt, "serverTime": datetime.utcnow().isoformat() + "Z"})
 
 
+def normalize_bulk_expedition_day_dates(values):
+    if not isinstance(values, list) or not values:
+        raise ValueError("Vyber alespoň jeden expediční den.")
+    if len(values) > 100:
+        raise ValueError("Najednou lze smazat nejvýše 100 expedičních dnů.")
+
+    parsed_dates = []
+    seen = set()
+    for value in values:
+        raw_value = clean_text(value)
+        try:
+            parsed_day = datetime.strptime(raw_value, "%Y-%m-%d").date()
+        except (TypeError, ValueError):
+            raise ValueError(f"Neplatné datum expedičního dne: {raw_value or value}") from None
+        if parsed_day in seen:
+            continue
+        seen.add(parsed_day)
+        parsed_dates.append(parsed_day)
+    return parsed_dates
+
+
+def soft_delete_expedition_day(cur, day, actor, reason, user):
+    cur.execute(
+        """
+        UPDATE datasets
+        SET status = 'deleted',
+            deleted_at = COALESCE(deleted_at, NOW()),
+            deleted_by = %s,
+            delete_reason = %s
+        WHERE expedition_day_id = %s
+          AND deleted_at IS NULL
+        RETURNING id
+        """,
+        (actor, reason, day["id"]),
+    )
+    deleted_dataset_ids = [row["id"] for row in cur.fetchall()]
+
+    cur.execute(
+        """
+        UPDATE expedition_days
+        SET status = 'deleted',
+            deleted_at = COALESCE(deleted_at, NOW()),
+            deleted_by = %s,
+            delete_reason = %s,
+            updated_at = NOW()
+        WHERE id = %s
+        RETURNING *
+        """,
+        (actor, reason, day["id"]),
+    )
+    updated_day = cur.fetchone()
+    if (day.get("status") != "deleted" or deleted_dataset_ids):
+        record_audit_event(
+            cur,
+            "expedition_day_delete",
+            row_id=day["id"],
+            row_kind="expedition_day",
+            row_ref=day["day_date"].isoformat(),
+            payload={"reason": reason, "datasetIds": deleted_dataset_ids},
+            previous_state={"status": day.get("status") or "active"},
+            next_state={"status": "deleted"},
+            source="expedition_days",
+            actor_user=user,
+        )
+    return updated_day, deleted_dataset_ids
+
+
+@app.route("/api/expedition-days/bulk-delete", methods=["POST"])
+def bulk_delete_expedition_days():
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+
+    data = request.get_json(silent=True) or {}
+    try:
+        parsed_dates = normalize_bulk_expedition_day_dates(data.get("dates"))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 400
+
+    user = current_user() or {}
+    actor = clean_text(data.get("deletedBy")) or user.get("username") or "admin"
+    reason = clean_text(data.get("reason")) or "Hromadně smazané expediční dny ve webovém rozhraní"
+
+    ensure_schema()
+    deleted_days = []
+    deleted_dataset_ids = []
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                "SELECT * FROM expedition_days WHERE day_date = ANY(%s) ORDER BY day_date DESC",
+                (parsed_dates,),
+            )
+            days_by_date = {day["day_date"]: day for day in cur.fetchall()}
+            missing_dates = [day_date for day_date in parsed_dates if day_date not in days_by_date]
+            if missing_dates:
+                missing = ", ".join(day_date.isoformat() for day_date in missing_dates)
+                return jsonify({"error": f"Expediční dny nebyly nalezeny: {missing}"}), 404
+
+            for day_date in parsed_dates:
+                updated_day, dataset_ids = soft_delete_expedition_day(
+                    cur,
+                    days_by_date[day_date],
+                    actor,
+                    reason,
+                    user,
+                )
+                deleted_days.append(
+                    {
+                        "id": updated_day["id"],
+                        "date": updated_day["day_date"].isoformat(),
+                        "label": updated_day["label"],
+                        "status": updated_day["status"],
+                    }
+                )
+                deleted_dataset_ids.extend(dataset_ids)
+
+    return jsonify(
+        {
+            "ok": True,
+            "deletedDays": len(deleted_days),
+            "expeditionDays": deleted_days,
+            "deletedDatasets": len(deleted_dataset_ids),
+            "deletedDatasetIds": deleted_dataset_ids,
+        }
+    )
+
+
 @app.route("/api/expedition-days/<day_date>", methods=["DELETE"])
 def delete_expedition_day(day_date):
     auth_error = require_admin()
@@ -7758,48 +7885,7 @@ def delete_expedition_day(day_date):
             day = cur.fetchone()
             if not day:
                 return jsonify({"error": "Expediční den nebyl nalezen."}), 404
-
-            cur.execute(
-                """
-                UPDATE datasets
-                SET status = 'deleted',
-                    deleted_at = COALESCE(deleted_at, NOW()),
-                    deleted_by = %s,
-                    delete_reason = %s
-                WHERE expedition_day_id = %s
-                  AND deleted_at IS NULL
-                RETURNING id
-                """,
-                (actor, reason, day["id"]),
-            )
-            deleted_dataset_ids = [row["id"] for row in cur.fetchall()]
-
-            cur.execute(
-                """
-                UPDATE expedition_days
-                SET status = 'deleted',
-                    deleted_at = COALESCE(deleted_at, NOW()),
-                    deleted_by = %s,
-                    delete_reason = %s,
-                    updated_at = NOW()
-                WHERE id = %s
-                RETURNING *
-                """,
-                (actor, reason, day["id"]),
-            )
-            updated_day = cur.fetchone()
-            record_audit_event(
-                cur,
-                "expedition_day_delete",
-                row_id=day["id"],
-                row_kind="expedition_day",
-                row_ref=day["day_date"].isoformat(),
-                payload={"reason": reason, "datasetIds": deleted_dataset_ids},
-                previous_state={"status": day.get("status") or "active"},
-                next_state={"status": "deleted"},
-                source="expedition_days",
-                actor_user=user,
-            )
+            updated_day, deleted_dataset_ids = soft_delete_expedition_day(cur, day, actor, reason, user)
 
     return jsonify(
         {

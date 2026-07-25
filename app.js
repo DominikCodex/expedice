@@ -27,6 +27,7 @@ const expeditionState = {
   day: null,
   loaded: false,
   showInactive: false,
+  selectedDates: new Set(),
 };
 
 const sortingState = {
@@ -1068,11 +1069,13 @@ function showPasswordChange(user) {
 
 function applyRoleVisibility() {
   const admin = isAdmin();
+  if (!admin) expeditionState.selectedDates.clear();
   els.tabEans?.classList.toggle("hidden", !admin);
   els.tabAudit?.classList.toggle("hidden", !admin);
   els.tabSettings.classList.toggle("hidden", !admin);
   els.expeditionDeleteDay?.classList.toggle("hidden", !admin);
   els.expeditionTrashToggle?.classList.toggle("hidden", !admin);
+  updateExpeditionDeleteButton();
   if (admin) {
     els.expeditionDayLock?.classList.add("hidden");
   }
@@ -1116,6 +1119,7 @@ function setRouteForView(view, replace = false) {
 function startAppForUser(user) {
   authState.user = user;
   employeeDayLockState.choosing = false;
+  expeditionState.selectedDates.clear();
   els.authView.classList.add("hidden");
   els.appShell.classList.remove("hidden");
   els.authUserName.textContent = `${user.displayName || user.username} · ${user.role === "admin" ? "admin" : "uživatel"}`;
@@ -1634,7 +1638,7 @@ function printExpeditionBatchReport() {
       <head>
         <meta charset="UTF-8" />
         <title>Report vybrané várky</title>
-        <link rel="stylesheet" href="styles.css?v=payment-status-20260713-1" />
+        <link rel="stylesheet" href="styles.css?v=bulk-day-delete-20260725-1" />
       </head>
       <body class="batch-report-print-page">
         ${reportClone.outerHTML}
@@ -1884,10 +1888,47 @@ function switchView(view, options = {}) {
   }
 }
 
+function activeSelectedExpeditionDates() {
+  if (!isAdmin() || expeditionState.showInactive) return [];
+  const activeDates = new Set(
+    expeditionState.days
+      .filter((day) => !day.status || day.status === "active")
+      .map((day) => day.date)
+  );
+  return [...expeditionState.selectedDates].filter((dayDate) => activeDates.has(dayDate));
+}
+
+function syncExpeditionDaySelection() {
+  const validDates = new Set(activeSelectedExpeditionDates());
+  expeditionState.selectedDates = new Set(validDates);
+  updateExpeditionDeleteButton();
+}
+
+function deleteDayCountLabel(count) {
+  if (count === 1) return "Smazat 1 den";
+  if (count >= 2 && count <= 4) return `Smazat ${count} dny`;
+  return `Smazat ${count} dnů`;
+}
+
+function updateExpeditionDeleteButton() {
+  if (!els.expeditionDeleteDay) return;
+  const selectedCount = activeSelectedExpeditionDates().length;
+  const currentDayIsActive = Boolean(
+    expeditionState.day?.date &&
+      (!expeditionState.day.status || expeditionState.day.status === "active")
+  );
+  els.expeditionDeleteDay.textContent = selectedCount ? deleteDayCountLabel(selectedCount) : "Smazat den";
+  els.expeditionDeleteDay.disabled = !isAdmin() || (!selectedCount && !currentDayIsActive);
+  els.expeditionDeleteDay.title = selectedCount
+    ? `Přesunout ${selectedCount} vybraných expedičních dnů do koše`
+    : "Přesunout otevřený expediční den do koše";
+}
+
 function renderExpeditionDayOptions() {
   els.expeditionDayList.innerHTML = "";
   const visible = employeeVisibleDays();
   renderEmployeeDayLockPanel(visible.lock);
+  syncExpeditionDaySelection();
 
   if (!visible.days.length) {
     setExpeditionDaySummary(`<span>Online zatím neobsahuje žádný expediční den.</span>`, { employeeVisible: true });
@@ -1911,7 +1952,22 @@ function renderExpeditionDayOptions() {
         <span>${deleted ? "V koši" : `${escapeHtml(batches)} aktivní dávky`}</span>
         <small>${escapeHtml(batches)} dávky | ${escapeHtml(rows)} řádků${day.latestUpload ? ` | ${escapeHtml(formatTime(day.latestUpload))}` : ""}</small>
       `;
-    els.expeditionDayList.appendChild(button);
+    if (isAdmin() && !deleted) {
+      const selected = expeditionState.selectedDates.has(day.date);
+      const wrapper = document.createElement("div");
+      wrapper.className = `day-card-selectable ${selected ? "selected" : ""}`;
+      const selector = document.createElement("label");
+      selector.className = "day-card-selector";
+      selector.title = `Vybrat den ${day.label || day.date} pro hromadné smazání`;
+      selector.innerHTML = `
+        <input type="checkbox" data-day-select="${escapeHtml(day.date)}" ${selected ? "checked" : ""} />
+        <span class="sr-only">Vybrat den ${escapeHtml(day.label || day.date)} pro hromadné smazání</span>
+      `;
+      wrapper.append(button, selector);
+      els.expeditionDayList.appendChild(wrapper);
+    } else {
+      els.expeditionDayList.appendChild(button);
+    }
   });
 }
 
@@ -1945,6 +2001,7 @@ async function loadExpeditionDays(preferredDate = "") {
     const data = await fetchJson(`/api/expedition-days${includeInactiveQuery()}`);
     expeditionState.days = data.days || [];
     expeditionState.loaded = true;
+    syncExpeditionDaySelection();
     renderExpeditionDayOptions();
 
     if (!expeditionState.days.length) {
@@ -2135,48 +2192,68 @@ async function deleteCurrentExpeditionDay() {
     setMessage("Smazání expedičního dne je dostupné jen adminovi.", "warning");
     return;
   }
-  const day = expeditionState.day;
-  if (!day?.date) {
+  const explicitlySelectedDates = activeSelectedExpeditionDates();
+  const currentDay = expeditionState.day;
+  const fallbackToCurrentDay = explicitlySelectedDates.length === 0;
+  const dates = fallbackToCurrentDay && currentDay?.date ? [currentDay.date] : explicitlySelectedDates;
+  if (!dates.length) {
     setMessage("Není vybraný žádný expediční den ke smazání.", "warning");
     return;
   }
-  if (day.status && day.status !== "active") {
+  if (fallbackToCurrentDay && currentDay.status && currentDay.status !== "active") {
     setMessage("Tenhle expediční den už je v koši.", "warning");
     return;
   }
 
-  const label = day.label || day.date;
+  const selectedDays = dates.map(
+    (dayDate) => expeditionState.days.find((day) => day.date === dayDate) || { date: dayDate, label: dayDate }
+  );
+  const labels = selectedDays.map((day) => day.label || day.date);
+  const visibleLabels = labels.slice(0, 8);
+  const labelList = `${visibleLabels.join("\n")}${labels.length > visibleLabels.length ? `\n+ ${labels.length - visibleLabels.length} dalších` : ""}`;
+  const question =
+    dates.length === 1
+      ? "Přesunout vybraný expediční den do koše?"
+      : `Přesunout ${dates.length} vybraných expedičních dnů do koše?`;
   const confirmed = confirm(
-    `Přesunout celý expediční den do koše?\n\n${label}\n\nDo koše se přesunou všechny dávky roztřídění i kompletace v tomto dni. Uvidí je jen admin v Koši.`
+    `${question}\n\n${labelList}\n\nDo koše se přesunou všechny dávky roztřídění i kompletace. Uvidí je jen admin v Koši.`
   );
   if (!confirmed) return;
 
   els.expeditionDeleteDay.disabled = true;
   try {
-    const data = await fetchJson(`/api/expedition-days/${encodeURIComponent(day.date)}`, {
-      method: "DELETE",
+    const data = await fetchJson("/api/expedition-days/bulk-delete", {
+      method: "POST",
       body: JSON.stringify({
+        dates,
         deletedBy: "web",
-        reason: "Smazán celý expediční den ve webovém rozhraní",
+        reason: dates.length === 1
+          ? "Smazán celý expediční den ve webovém rozhraní"
+          : "Hromadně smazané expediční dny ve webovém rozhraní",
       }),
+      progressLabel: dates.length === 1 ? "Přesouvám den do koše..." : "Přesouvám vybrané dny do koše...",
     });
-    sortingState.dataset = null;
-    sortingState.datasets = [];
-    sortingState.reportItems = [];
-    completionState.dataset = null;
-    completionState.datasets = [];
-    completionState.rows = [];
-    resetCompletionStockPiecesSnapshot();
-    expeditionState.day = null;
-    expeditionState.showInactive = true;
-    els.expeditionShowInactive.checked = true;
-    setMessage(`Expediční den ${label} je v koši. Přesunuto dávek: ${data.deletedDatasets || 0}.`, "success");
-    setCompletionMessage(`Expediční den ${label} je v koši.`, "success");
-    await loadExpeditionDays(day.date);
+    const currentDayWasDeleted = dates.includes(currentDay?.date);
+    expeditionState.selectedDates.clear();
+    if (currentDayWasDeleted) clearSelectedExpeditionDayData();
+
+    if (fallbackToCurrentDay) {
+      expeditionState.showInactive = true;
+      els.expeditionShowInactive.checked = true;
+    }
+
+    const deletedDays = data.deletedDays || dates.length;
+    const resultLabel = deletedDays === 1 ? labels[0] : `${deletedDays} expedičních dnů`;
+    const resultVerb = deletedDays === 1 ? "je" : "jsou";
+    await loadExpeditionDays(
+      fallbackToCurrentDay ? dates[0] : currentDayWasDeleted ? "" : currentDay?.date || ""
+    );
+    setMessage(`${resultLabel} ${resultVerb} v koši. Přesunuto dávek: ${data.deletedDatasets || 0}.`, "success");
+    setCompletionMessage(`${resultLabel} ${resultVerb} v koši.`, "success");
   } catch (error) {
-    setMessage(`Expediční den se nepodařilo smazat: ${error.message}`, "error");
+    setMessage(`Expediční dny se nepodařilo smazat: ${error.message}`, "error");
   } finally {
-    els.expeditionDeleteDay.disabled = false;
+    updateExpeditionDeleteButton();
   }
 }
 
@@ -7636,6 +7713,18 @@ els.expeditionDayLockChange?.addEventListener("click", () => {
   setExpeditionDaySummary("", { employeeVisible: false });
 });
 els.expeditionShowInactive.addEventListener("change", () => loadExpeditionDays(expeditionState.day?.date || ""));
+els.expeditionDayList.addEventListener("change", (event) => {
+  const checkbox = event.target.closest("input[data-day-select]");
+  if (!checkbox || !isAdmin() || expeditionState.showInactive) return;
+  const dayDate = checkbox.dataset.daySelect;
+  if (checkbox.checked) {
+    expeditionState.selectedDates.add(dayDate);
+  } else {
+    expeditionState.selectedDates.delete(dayDate);
+  }
+  checkbox.closest(".day-card-selectable")?.classList.toggle("selected", checkbox.checked);
+  updateExpeditionDeleteButton();
+});
 els.expeditionDayList.addEventListener("click", (event) => {
   const button = event.target.closest("button[data-date]");
   if (!button) return;
