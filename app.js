@@ -4568,6 +4568,37 @@ function mapySuggestedAddressUrl(address) {
   return `https://mapy.com/cs/zakladni?${params.toString()}`;
 }
 
+function mapyItemSuggestedAddress(item) {
+  if (!item || item.type !== "regional.address") return null;
+  const streetWithNumber = String(item.name || "").trim();
+  if (!streetWithNumber) return null;
+  const streetParts = streetWithNumber.split(/\s+/);
+  const possibleHouseNumber = streetParts.at(-1) || "";
+  const houseNumber = /\d/.test(possibleHouseNumber) ? possibleHouseNumber : "";
+  const street = houseNumber ? streetParts.slice(0, -1).join(" ") : streetWithNumber;
+  const cityPart = String(item.location || "")
+    .split(",")
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .find((part) => !["cesko", "czechia", "czech republic", "slovensko", "slovakia"].includes(normalize(part)));
+  const city = String(cityPart || "").replace(/^\d{3}\s?\d{2}\s+/, "").trim();
+  return {
+    streetWithNumber,
+    street,
+    houseNumber,
+    city,
+    zipCode: String(item.zip || "").trim(),
+  };
+}
+
+function editorSuggestedAddress(validation) {
+  const explicit = validation?.address?.suggestedAddress || validation?.suggestedAddress;
+  if (explicit) return explicit;
+  const items = validation?.address?.items || validation?.items || [];
+  const candidate = items.find((item) => item?.type === "regional.address");
+  return mapyItemSuggestedAddress(candidate);
+}
+
 function deliveryCarrierHtml(row) {
   const carrier = row.deliveryCarrier || "manual";
   const label = row.deliveryCarrierLabel || "Ruční kontrola";
@@ -6178,7 +6209,7 @@ function applyEditorValidation(validation) {
   els.editorAddressResult.innerHTML = `<strong>${
     status === "verified" ? "Ověřeno" : status === "error" ? "Vyžaduje opravu" : status ? "Neověřeno" : "Adresa"
   }</strong>${details}`;
-  const suggested = validation?.address?.suggestedAddress || validation?.suggestedAddress;
+  const suggested = editorSuggestedAddress(validation);
   if (suggested) {
     const addressJson = escapeHtml(JSON.stringify(suggested));
     const addressLabel = [suggested.streetWithNumber, suggested.zipCode, suggested.city].filter(Boolean).join(", ");

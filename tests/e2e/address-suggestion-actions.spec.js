@@ -28,7 +28,14 @@ test("návrh Mapy.com lze jedním kliknutím použít a uložit", async ({ page 
     addressValidationResult: {
       status: "suggestion",
       message: suggestionMessage,
-      suggestedAddress,
+      items: [
+        {
+          type: "regional.address",
+          name: suggestedAddress.streetWithNumber,
+          location: "250 80 Nehvizdy, Česko",
+          zip: suggestedAddress.zipCode,
+        },
+      ],
     },
     problems: [{ category: "address", severity: "warning", message: suggestionMessage }],
   };
