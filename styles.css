@@ -541,6 +541,38 @@ body.modal-open {
 .editor-validation-result.warning { border-color: #e6c57d; background: #fff8e6; color: #734c08; }
 .editor-validation-result.danger { border-color: #e3a3a3; background: #fff0f0; color: #8e2222; }
 
+.editor-validation-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: stretch;
+  gap: 6px;
+  margin-top: 5px;
+}
+
+.editor-validation-actions button,
+.editor-validation-actions .mapy-link {
+  display: inline-flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 6px;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.editor-validation-actions button {
+  flex: 1 1 320px;
+  overflow-wrap: anywhere;
+}
+
+.editor-validation-actions .mapy-link {
+  flex: 0 1 180px;
+  font-size: 12px;
+}
+
 .editor-pickup-panel {
   margin-top: 8px;
   padding: 8px;

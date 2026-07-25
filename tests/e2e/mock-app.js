@@ -91,4 +91,4 @@ async function mockExpeditionApp(page, role = "admin") {
   });
 }
 
-module.exports = { mockExpeditionApp, day };
+module.exports = { mockExpeditionApp, day, completionRows };

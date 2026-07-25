@@ -4561,6 +4561,13 @@ function mapyAddressUrl(row) {
   return `https://mapy.com/sk/zakladni?${params.toString()}`;
 }
 
+function mapySuggestedAddressUrl(address) {
+  const street = address?.streetWithNumber || [address?.street, address?.houseNumber].filter(Boolean).join(" ");
+  const query = [street, address?.zipCode, address?.city].filter(Boolean).join(", ");
+  const params = new URLSearchParams({ q: query || "adresa" });
+  return `https://mapy.com/cs/zakladni?${params.toString()}`;
+}
+
 function deliveryCarrierHtml(row) {
   const carrier = row.deliveryCarrier || "manual";
   const label = row.deliveryCarrierLabel || "Ruční kontrola";
@@ -6110,8 +6117,11 @@ function fillExpeditionEditor(row) {
   renderEditorPickupSelection(existingPoint);
   renderEditorPickupPanel();
   const validationStatus = row.addressValidationStatus || "";
-  els.editorAddressResult.className = `editor-validation-result ${validationStatus === "verified" ? "success" : validationStatus ? "warning" : "neutral"}`;
-  els.editorAddressResult.textContent = row.addressValidationMessage || "Adresa zatím nebyla ověřena.";
+  applyEditorValidation({
+    ...(row.addressValidationResult || {}),
+    status: validationStatus,
+    message: row.addressValidationMessage || row.addressValidationResult?.message || "Adresa zatím nebyla ověřena.",
+  });
   editorSetDirty(false);
 }
 
@@ -6158,20 +6168,44 @@ function replaceCompletionRow(row) {
 
 function applyEditorValidation(validation) {
   const status = validation?.status || "";
-  const tone = status === "verified" ? "success" : status === "error" ? "danger" : "warning";
+  const tone = status === "verified" ? "success" : status === "error" ? "danger" : status ? "warning" : "neutral";
   els.editorAddressResult.className = `editor-validation-result ${tone}`;
   const issues = validation?.issues || [];
-  els.editorAddressResult.innerHTML = status === "verified"
-    ? `<strong>Ověřeno</strong><span>${escapeHtml(validation.message || "Údaje jsou připravené.")}</span>`
-    : `<strong>${status === "error" ? "Vyžaduje opravu" : "Neověřeno"}</strong>${issues
-        .map((item) => `<span>${escapeHtml(item.message)}</span>`)
-        .join("")}`;
-  const suggested = validation?.address?.suggestedAddress;
+  const message = validation?.message || (status === "verified" ? "Údaje jsou připravené." : "Adresa zatím nebyla ověřena.");
+  const details = issues.length
+    ? issues.map((item) => `<span>${escapeHtml(item.message)}</span>`).join("")
+    : `<span>${escapeHtml(message)}</span>`;
+  els.editorAddressResult.innerHTML = `<strong>${
+    status === "verified" ? "Ověřeno" : status === "error" ? "Vyžaduje opravu" : status ? "Neověřeno" : "Adresa"
+  }</strong>${details}`;
+  const suggested = validation?.address?.suggestedAddress || validation?.suggestedAddress;
   if (suggested) {
-    els.editorAddressResult.innerHTML += `<button type="button" class="secondary" data-editor-action="apply-address-suggestion" data-address="${escapeHtml(
-      JSON.stringify(suggested)
-    )}">Použít návrh: ${escapeHtml([suggested.streetWithNumber, suggested.zipCode, suggested.city].filter(Boolean).join(", "))}</button>`;
+    const addressJson = escapeHtml(JSON.stringify(suggested));
+    const addressLabel = [suggested.streetWithNumber, suggested.zipCode, suggested.city].filter(Boolean).join(", ");
+    els.editorAddressResult.innerHTML += `
+      <div class="editor-validation-actions">
+        <button type="button" data-editor-action="apply-save-address-suggestion" data-address="${addressJson}">
+          Použít a uložit: ${escapeHtml(addressLabel)}
+        </button>
+        <a class="mapy-link" href="${escapeHtml(mapySuggestedAddressUrl(suggested))}" target="_blank" rel="noopener noreferrer">
+          Otevřít v Mapy.com
+        </a>
+      </div>
+    `;
   }
+}
+
+function applyEditorAddressSuggestion(address) {
+  [
+    [els.editorStreetWithNumber, address.streetWithNumber],
+    [els.editorStreet, address.street],
+    [els.editorHouseNumber, address.houseNumber],
+    [els.editorCity, address.city],
+    [els.editorZipCode, address.zipCode],
+  ].forEach(([input, value]) => {
+    if (input && value !== undefined && value !== null) input.value = value;
+  });
+  editorSetDirty(true);
 }
 
 async function saveExpeditionEditor({ next = false, forceUnverified = false, confirmSupersede = false } = {}) {
@@ -7914,7 +7948,7 @@ els.completionFilterReset?.addEventListener("click", () => {
 els.expeditionEditor?.addEventListener("input", (event) => {
   if (event.target.matches("input, select, textarea")) editorSetDirty(true);
 });
-els.expeditionEditor?.addEventListener("click", (event) => {
+els.expeditionEditor?.addEventListener("click", async (event) => {
   const actionTarget = event.target.closest("[data-editor-action]");
   if (!actionTarget) return;
   const action = actionTarget.dataset.editorAction;
@@ -7928,22 +7962,17 @@ els.expeditionEditor?.addEventListener("click", (event) => {
       setEditorAlert("Výdejní místo se nepodařilo načíst.", "danger");
     }
   }
-  if (action === "apply-address-suggestion") {
+  if (action === "apply-save-address-suggestion") {
     try {
       const address = JSON.parse(actionTarget.dataset.address || "{}");
-      [
-        [els.editorStreetWithNumber, address.streetWithNumber],
-        [els.editorStreet, address.street],
-        [els.editorHouseNumber, address.houseNumber],
-        [els.editorCity, address.city],
-        [els.editorZipCode, address.zipCode],
-      ].forEach(([input, value]) => {
-        if (input && value) input.value = value;
-      });
-      editorSetDirty(true);
-      setEditorAlert("Návrh adresy byl vložen. Ulož ji znovu pro ověření.", "warning");
+      applyEditorAddressSuggestion(address);
+      actionTarget.disabled = true;
+      setEditorAlert("Přebírám návrh Mapy.com a ukládám adresu...", "neutral");
+      await saveExpeditionEditor();
     } catch {
-      setEditorAlert("Návrh adresy se nepodařilo vložit.", "danger");
+      setEditorAlert("Návrh adresy se nepodařilo použít a uložit.", "danger");
+    } finally {
+      if (actionTarget.isConnected) actionTarget.disabled = false;
     }
   }
 });
