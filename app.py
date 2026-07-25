@@ -5099,7 +5099,9 @@ def address_matches_mapy_result(data, item):
     if not address_has_house_number(parts):
         return False, "Chybí číslo domu."
 
-    street = parts["street"] or parts["streetWithNumber"]
+    street_source = parts["street"] or parts["streetWithNumber"]
+    street, parsed_house_number = mapy_split_street_house(street_source)
+    wanted_house_number = parts["houseNumber"] or parsed_house_number
     street_words = [
         word
         for word in searchable_text(street).replace("/", " ").split()
@@ -5108,10 +5110,11 @@ def address_matches_mapy_result(data, item):
     if street_words and not any(word in result_text for word in street_words):
         return False, "Nalezená adresa neodpovídá zadané ulici."
 
-    if parts["houseNumber"]:
-        house_number = searchable_text(parts["houseNumber"]).replace(" ", "")
-        result_compact = result_text.replace(" ", "")
-        if house_number and house_number not in result_compact:
+    if wanted_house_number:
+        _, found_house_number = mapy_split_street_house(clean_text(item.get("name")))
+        wanted_house = re.sub(r"\s+", "", searchable_text(wanted_house_number))
+        found_house = re.sub(r"\s+", "", searchable_text(found_house_number))
+        if wanted_house and wanted_house != found_house:
             return False, "Nalezená adresa neodpovídá zadanému číslu domu."
 
     if parts["city"]:
@@ -5222,6 +5225,104 @@ def mapy_address_from_item(item):
         "city": mapy_city_from_item(item),
         "zipCode": clean_text(item.get("zip")),
     }
+
+
+def normalized_address_component(value):
+    return re.sub(r"[^a-z0-9]+", " ", searchable_text(value)).strip()
+
+
+def differs_by_one_character(left, right):
+    left = normalized_address_component(left)
+    right = normalized_address_component(right)
+    if not left or not right or left == right or abs(len(left) - len(right)) > 1:
+        return False
+    if len(left) == len(right):
+        return sum(first != second for first, second in zip(left, right)) == 1
+
+    shorter, longer = (left, right) if len(left) < len(right) else (right, left)
+    short_index = 0
+    long_index = 0
+    differences = 0
+    while short_index < len(shorter) and long_index < len(longer):
+        if shorter[short_index] == longer[long_index]:
+            short_index += 1
+            long_index += 1
+            continue
+        differences += 1
+        if differences > 1:
+            return False
+        long_index += 1
+    return True
+
+
+def normalized_country_code(value):
+    normalized = normalized_address_component(value)
+    if normalized in {"sk", "svk"} or "slovensko" in normalized or "slovakia" in normalized:
+        return "SK"
+    if normalized in {"cz", "cze"} or "ceska republika" in normalized or "czech republic" in normalized:
+        return "CZ"
+    return ""
+
+
+def mapy_item_country_code(item):
+    normalized = normalized_address_component(
+        " ".join(
+            [
+                clean_text(item.get("location")),
+                " ".join(clean_text(part.get("name")) for part in item.get("regionalStructure") or []),
+            ]
+        )
+    )
+    if "slovensko" in normalized or "slovakia" in normalized:
+        return "SK"
+    if "cesko" in normalized or "czechia" in normalized or "czech republic" in normalized:
+        return "CZ"
+    return ""
+
+
+def address_matches_single_character_correction(data, item):
+    candidate = mapy_address_from_item(item)
+    if not candidate:
+        return False
+
+    parts = address_input_parts(data)
+    input_street, parsed_house_number = mapy_split_street_house(parts["combinedStreet"])
+    input_house_number = parts["houseNumber"] or parsed_house_number
+    input_zip = "".join(char for char in parts["zipCode"] if char.isdigit())
+    candidate_zip = "".join(char for char in clean_text(candidate.get("zipCode")) if char.isdigit())
+    input_country = normalized_country_code(mapy_country(data))
+    candidate_country = mapy_item_country_code(item)
+
+    if len(normalized_address_component(input_street)) < 4:
+        return False
+    if not differs_by_one_character(input_street, candidate.get("street")):
+        return False
+    if not input_house_number or normalized_address_component(input_house_number) != normalized_address_component(
+        candidate.get("houseNumber")
+    ):
+        return False
+    if not input_zip or not candidate_zip or input_zip != candidate_zip:
+        return False
+    if not parts["city"] or normalized_address_component(parts["city"]) != normalized_address_component(
+        candidate.get("city")
+    ):
+        return False
+    if not input_country or not candidate_country or input_country != candidate_country:
+        return False
+    return True
+
+
+def safe_mapy_address_match(data, items):
+    exact_items = [item for item in items if address_matches_mapy_result(data, item)[0]]
+    if len(exact_items) == 1:
+        return exact_items[0], "exact"
+    if exact_items:
+        return None, ""
+
+    corrected_items = [item for item in items if address_matches_single_character_correction(data, item)]
+    if len(corrected_items) == 1:
+        return corrected_items[0], "single_character"
+    return None, ""
 
 
 def mapy_address_label(address):
@@ -7130,30 +7231,40 @@ def classify_post_upload_address(api_key, data, timeout=15):
         }
 
     items = mapy_lookup_with_retries(api_key, data, query, timeout)
-    exact_items = [item for item in items if address_matches_mapy_result(data, item)[0]]
-    if len(exact_items) == 1:
-        safe_address = mapy_address_from_item(exact_items[0])
+    matched_item, match_kind = safe_mapy_address_match(data, items)
+    if matched_item:
+        safe_address = mapy_address_from_item(matched_item)
+        corrected_typo = match_kind == "single_character"
         return {
             "valid": True,
             "status": "verified",
-            "message": f"Adresa ověřena přes Mapy.com: {mapy_address_label(safe_address)}",
+            "message": (
+                f"Jednopísmenný překlep bezpečně opraven podle Mapy.com: {mapy_address_label(safe_address)}"
+                if corrected_typo
+                else f"Adresa ověřena přes Mapy.com: {mapy_address_label(safe_address)}"
+            ),
             "query": query,
             "items": items,
             "safeAddress": safe_address,
             "cleanup": None,
+            "appliedSingleCharacterCorrection": corrected_typo,
         }
 
     for candidate in address_cleanup_candidates(data):
         cleanup_query = mapy_address_query(candidate["data"])
         cleanup_items = mapy_lookup_with_retries(api_key, candidate["data"], cleanup_query, timeout)
-        cleanup_matches = [item for item in cleanup_items if address_matches_mapy_result(candidate["data"], item)[0]]
-        if len(cleanup_matches) != 1:
+        cleanup_match, cleanup_match_kind = safe_mapy_address_match(candidate["data"], cleanup_items)
+        if not cleanup_match:
             continue
-        safe_address = mapy_address_from_item(cleanup_matches[0])
+        safe_address = mapy_address_from_item(cleanup_match)
         return {
             "valid": True,
             "status": "verified",
-            "message": f"Adresa bezpečně očištěna a ověřena: {mapy_address_label(safe_address)}",
+            "message": (
+                f"Adresa bezpečně očištěna, jednopísmenný překlep opraven a ověřen: {mapy_address_label(safe_address)}"
+                if cleanup_match_kind == "single_character"
+                else f"Adresa bezpečně očištěna a ověřena: {mapy_address_label(safe_address)}"
+            ),
             "query": cleanup_query,
             "originalQuery": query,
             "items": cleanup_items,
@@ -7161,6 +7272,7 @@ def classify_post_upload_address(api_key, data, timeout=15):
             "cleanup": candidate,
             "appliedAddressCleanup": True,
             "appliedCarrierNote": bool(candidate.get("carrierNoteAddition")),
+            "appliedSingleCharacterCorrection": cleanup_match_kind == "single_character",
         }
 
     suggestion = mapy_address_from_item(items[0]) if items else None
@@ -8133,13 +8245,20 @@ def validate_address():
             payload = json.loads(response_text)
             items = mapy_normalize_items(payload)
             first = items[0] if items else {}
-            valid, match_message = address_matches_mapy_result(data, first)
+            matched_item, match_kind = safe_mapy_address_match(data, items)
+            valid = bool(matched_item)
+            match_message = address_matches_mapy_result(data, first)[1] if first else "Adresa nebyla nalezena."
+            if matched_item:
+                first = matched_item
+                match_message = ""
             status = "verified" if valid else "suggestion" if items else "not_found"
             message = ", ".join(
                 part for part in [clean_text(first.get("name")), clean_text(first.get("location"))] if part
             )
             if not message:
                 message = "Adresa nebyla nalezena"
+            if match_kind == "single_character":
+                message = "Jednopísmenný překlep byl bezpečně opraven podle Mapy.com: " + message
             if match_message:
                 message = f"{match_message} Návrh Mapy.com: {message}" if items else match_message
             result_payload = {
@@ -8150,6 +8269,8 @@ def validate_address():
                 "country": mapy_country(data),
                 "items": items,
                 "rawCount": len(items),
+                "matchKind": match_kind,
+                "appliedSingleCharacterCorrection": match_kind == "single_character",
             }
             validation_data = data
             cleanup_candidate = None
@@ -8159,9 +8280,13 @@ def validate_address():
                     if not cleanup_query or cleanup_query == query:
                         continue
                     cleanup_items = mapy_geocode_items(api_key, candidate["data"], cleanup_query, timeout)
-                    cleanup_first = cleanup_items[0] if cleanup_items else {}
-                    cleanup_valid, cleanup_message = address_matches_mapy_result(candidate["data"], cleanup_first)
-                    if not cleanup_valid:
+                    cleanup_first, cleanup_match_kind = safe_mapy_address_match(candidate["data"], cleanup_items)
+                    cleanup_message = (
+                        address_matches_mapy_result(candidate["data"], cleanup_items[0])[1]
+                        if cleanup_items
+                        else "Adresa nebyla nalezena."
+                    )
+                    if not cleanup_first:
                         continue
                     validation_data = candidate["data"]
                     cleanup_candidate = candidate
@@ -8192,21 +8317,27 @@ def validate_address():
                             "originalStatus": result_payload.get("status"),
                             "originalMessage": cleanup_message or match_message,
                             "appliedAddress": cleaned_address,
+                            "matchKind": cleanup_match_kind,
+                            "appliedSingleCharacterCorrection": cleanup_match_kind == "single_character",
                         }
                     )
                     break
             mapy_address = mapy_address_from_item(first)
             original_status = status
-            suggested_address = mapy_address if status == "suggestion" else None
-            if status == "verified" and (cleanup_candidate or mapy_address_fills_missing_input(validation_data, mapy_address)):
+            suggested_address = None
+            if status == "verified" and (
+                cleanup_candidate
+                or result_payload.get("appliedSingleCharacterCorrection")
+                or mapy_address_fills_missing_input(validation_data, mapy_address)
+            ):
                 suggested_address = mapy_address
             if suggested_address:
                 valid = True
                 status = "verified"
                 if cleanup_candidate:
                     message = result_payload.get("message") or "Adresa byla ocistena podle Mapy.com: " + mapy_address_label(suggested_address)
-                elif original_status == "suggestion":
-                    message = "Adresa byla upravena podle návrhu Mapy.com: " + mapy_address_label(suggested_address)
+                elif result_payload.get("appliedSingleCharacterCorrection"):
+                    message = "Jednopísmenný překlep byl opraven podle Mapy.com: " + mapy_address_label(suggested_address)
                 else:
                     message = "Adresa byla doplněna podle přesné shody Mapy.com: " + mapy_address_label(suggested_address)
                 result_payload.update(
@@ -8214,7 +8345,7 @@ def validate_address():
                         "valid": valid,
                         "status": status,
                         "message": message,
-                        "appliedSuggestion": original_status == "suggestion" and not cleanup_candidate,
+                        "appliedSuggestion": bool(result_payload.get("appliedSingleCharacterCorrection")) and not cleanup_candidate,
                         "appliedAddressCompletion": original_status == "verified" and not cleanup_candidate,
                         "appliedAddress": suggested_address,
                         "originalStatus": result_payload.get("originalStatus") or original_status,
@@ -9023,20 +9154,29 @@ def validate_expedition_details(details, cur=None, accept_existing_shipment_pick
             else:
                 try:
                     items = mapy_geocode_items(api_key, prepared, query, 15)
-                    exact_item = None
-                    match_message = "Mapy.com nenašly přesnou adresu."
-                    for item in items:
-                        matches, candidate_message = address_matches_mapy_result(prepared, item)
-                        if matches:
-                            exact_item = item
-                            break
-                        match_message = candidate_message or match_message
-                    address_result = {"query": query, "items": items, "suggestedAddress": mapy_address_from_item(items[0]) if items else None}
-                    if exact_item:
-                        normalized = mapy_address_from_item(exact_item)
+                    matched_item, match_kind = safe_mapy_address_match(prepared, items)
+                    match_message = (
+                        address_matches_mapy_result(prepared, items[0])[1]
+                        if items
+                        else "Mapy.com nenašly přesnou adresu."
+                    )
+                    address_result = {
+                        "query": query,
+                        "items": items,
+                        "suggestedAddress": mapy_address_from_item(items[0]) if items and not matched_item else None,
+                        "matchKind": match_kind,
+                        "appliedSingleCharacterCorrection": match_kind == "single_character",
+                    }
+                    if matched_item:
+                        normalized = mapy_address_from_item(matched_item)
                         if normalized:
                             prepared.update(normalized)
                         address_result["matchedAddress"] = normalized
+                        if match_kind == "single_character":
+                            address_result["message"] = (
+                                "Jednopísmenný překlep byl bezpečně opraven podle Mapy.com: "
+                                + mapy_address_label(normalized)
+                            )
                     else:
                         issues.append(expedition_problem("address", match_message, "streetWithNumber"))
                 except Exception as exc:
@@ -9047,7 +9187,10 @@ def validate_expedition_details(details, cur=None, accept_existing_shipment_pick
     errors = [item for item in issues if item.get("severity") == "error"]
     warnings = [item for item in issues if item.get("severity") == "warning"]
     status = "verified" if not errors and not warnings else ("unverified" if not errors else "error")
-    message = "Údaje jsou připravené pro vytvoření zásilky." if status == "verified" else issues[0]["message"]
+    if status == "verified" and address_result.get("appliedSingleCharacterCorrection"):
+        message = address_result.get("message") or "Jednopísmenný překlep v adrese byl opraven podle Mapy.com."
+    else:
+        message = "Údaje jsou připravené pro vytvoření zásilky." if status == "verified" else issues[0]["message"]
     return {
         "status": status,
         "readyForShipment": status == "verified",

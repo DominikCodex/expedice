@@ -56,6 +56,36 @@ def test_verified_address_delivery_is_ready_for_shipment():
     assert result["details"]["city"] == "Praha"
 
 
+def test_editor_applies_safe_single_character_street_correction():
+    details = base_details("dpd_courier")
+    details.update(
+        {
+            "streetWithNumber": "Zákuští 420",
+            "street": "Zákuští 420",
+            "houseNumber": "",
+            "city": "Zlín-Louky",
+            "zipCode": "76302",
+        }
+    )
+    mapy_item = {
+        "type": "regional.address",
+        "name": "Záluští 420",
+        "location": "763 02 Zlín - Louky, Česko",
+        "zip": "763 02",
+        "regionalStructure": [{"name": "Zlín"}],
+    }
+    with patch.object(app, "mapy_api_key", return_value="test"), patch.object(
+        app, "mapy_geocode_items", return_value=[mapy_item]
+    ):
+        result = app.validate_expedition_details(details, PickupCursor())
+
+    assert result["status"] == "verified"
+    assert result["readyForShipment"] is True
+    assert result["details"]["streetWithNumber"] == "Záluští 420"
+    assert result["address"]["appliedSingleCharacterCorrection"] is True
+    assert "Jednopísmenný překlep" in result["message"]
+
+
 def test_pickup_delivery_requires_catalog_match():
     details = base_details("packeta_pickup")
     details["pickupPointId"] = "nenalezeno"
