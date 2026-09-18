@@ -3,6 +3,8 @@
 (() => {
   const els = Object.fromEntries(["sort", "print", "reload", "status", "login", "sheet", "batch", "pieces", "summary", "rows"].map((id) => [id, document.getElementById(id)]));
   const datasetId = new URLSearchParams(location.search).get("dataset");
+  const embeddedData = document.getElementById("warehouse-print-data");
+  const standalone = embeddedData ? JSON.parse(embeddedData.textContent) : null;
   const state = { rows: [], images: {}, ready: false, busy: false };
   const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const key = (value) => String(value || "").trim().toUpperCase();
@@ -80,14 +82,16 @@
     els.sheet.hidden = true;
     els.status.textContent = "Načítám sestavu a fotografie…";
     try {
-      if (!/^\d+$/.test(datasetId || "")) throw new Error("Chybí číslo tiskové sestavy v odkazu z Excelu.");
-      const data = await json(`/api/datasets/${datasetId}`);
+      if (!standalone && !/^\d+$/.test(datasetId || "")) throw new Error("Chybí číslo tiskové sestavy v odkazu z Excelu.");
+      const data = standalone || await json(`/api/datasets/${datasetId}`);
       if (!["warehouse", "warehouse_print"].includes(data.dataset?.datasetKind)) throw new Error("Tato dávka není vyskladnění.");
       state.rows = data.rows || [];
       if (!state.rows.length) throw new Error("Tato sestava neobsahuje žádné položky.");
       state.images = {};
-      let imageWarning = "";
-      try {
+      let imageWarning = standalone?.imageWarning || "";
+      if (standalone) {
+        state.images = Object.fromEntries(Object.entries(standalone.images || {}).map(([code, url]) => [key(code), url]));
+      } else try {
         const codes = [...new Set(state.rows.flatMap((row) => [row.variantCode, row.productCode]).filter(Boolean))];
         const images = await json("/api/product-images", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ codes }) });
         state.images = Object.fromEntries(Object.entries(images.images || {}).map(([code, url]) => [key(code), url]));

@@ -1354,7 +1354,7 @@ def enforce_api_auth():
     if not path.startswith("/api/"):
         return None
 
-    public_paths = {"/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/me"}
+    public_paths = {"/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/me", "/api/warehouse/render-print"}
     if path in public_paths:
         return None
 
@@ -4471,6 +4471,62 @@ def upload_dataset():
     )
     if print_upload:
         response.headers["X-Warehouse-Print-Path"] = f"/warehouse-print.html?dataset={dataset['id']}"
+    return response
+
+
+@app.route("/api/warehouse/render-print", methods=["POST"])
+def render_warehouse_print():
+    # A stateless document generator: accepts only caller-supplied rows, never a dataset ID.
+    content = request.stream.read(2 * 1024 * 1024 + 1)
+    if len(content) > 2 * 1024 * 1024:
+        return Response("Tabulka je příliš velká (maximum 2 MB).", status=413, mimetype="text/plain")
+    try:
+        payload = json.loads(content)
+        if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
+            raise WarehouseWorkbookError("Chybí řádky vyskladnění.")
+        if len(payload["rows"]) > 1000:
+            raise WarehouseWorkbookError("Najednou lze vytisknout nejvýše 1000 řádků.")
+        rows = normalize_warehouse_print_rows(payload["rows"])
+    except (ValueError, TypeError, OverflowError, RecursionError, WarehouseWorkbookError) as exc:
+        message = str(exc) if isinstance(exc, WarehouseWorkbookError) else "Neplatná data vyskladnění."
+        return Response(message, status=400, mimetype="text/plain")
+
+    codes = {product_image_code_key(row[field]) for row in rows for field in ("productCode", "variantCode")}
+    images = {}
+    warning = ""
+    try:
+        cache = product_image_cache()
+        images = {code: url for code, url in (cache.get("images") or {}).items()
+                  if code in codes and isinstance(url, str) and url.startswith(("https://", "http://"))}
+        if not cache.get("configured"):
+            warning = "Produktové fotografie nejsou nastavené. "
+    except Exception:
+        app.logger.warning("Warehouse print image lookup failed", exc_info=True)
+        warning = "Produktové fotografie se nepodařilo načíst. "
+
+    document = {
+        "dataset": {"datasetKind": "warehouse_print", **{
+            field: warehouse_cell_text(payload.get(field))[:200]
+            for field in ("datasetDate", "datasetTime", "worksheetName")
+        }},
+        "rows": rows,
+        "images": images,
+        "imageWarning": warning,
+    }
+    # Escaping '<' prevents spreadsheet text from ending the JSON script element.
+    serialized = json.dumps(document, ensure_ascii=True).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")
+    with open(os.path.join(APP_DIR, "warehouse-print.html"), encoding="utf-8") as file:
+        html = file.read()
+    with open(os.path.join(APP_DIR, "warehouse-print.css"), encoding="utf-8") as file:
+        css = file.read()
+    with open(os.path.join(APP_DIR, "warehouse-print.js"), encoding="utf-8") as file:
+        script = file.read()
+    html = re.sub(r'<link rel="stylesheet" href="warehouse-print\.css\?v=[^"]+" />', lambda _: f"<style>{css}</style>", html)
+    html = re.sub(r'<script defer src="warehouse-print\.js\?v=[^"]+"></script>', "", html)
+    html = html.replace("</body>", f'<script id="warehouse-print-data" type="application/json">{serialized}</script><script>{script}</script></body>')
+    response = Response(html, mimetype="text/html")
+    response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
     return response
 
 

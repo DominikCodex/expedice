@@ -1,5 +1,8 @@
 const { test, expect } = require("@playwright/test");
 const fs = require("fs");
+const path = require("path");
+const { pathToFileURL } = require("url");
+const { execFileSync } = require("child_process");
 
 const fixture = () => process.env.WAREHOUSE_PRINT_FIXTURE
   ? JSON.parse(fs.readFileSync(process.env.WAREHOUSE_PRINT_FIXTURE, "utf8").replace(/^\uFEFF/, ""))
@@ -64,4 +67,37 @@ test("odkaz z Excelu po přihlášení otevře stejnou sestavu", async ({ page }
   await expect(page.locator("#print")).toBeEnabled();
   await expect(page.locator("#login")).toBeHidden();
   expect(page.url()).toContain("dataset=71");
+});
+
+test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", async ({ page }, testInfo) => {
+  const output = testInfo.outputPath("vyskladneni.html");
+  const localPython = path.resolve(process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python");
+  execFileSync(process.env.TEST_PYTHON || (fs.existsSync(localPython) ? localPython : "python"), [
+    "tests/e2e/render-print-fixture.py", output,
+  ]);
+  const apiRequests = [];
+  const errors = [];
+  page.on("request", (request) => { if (request.url().includes("/api/")) apiRequests.push(request.url()); });
+  page.on("pageerror", (error) => errors.push(error.message));
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto(pathToFileURL(output).href);
+  await expect(page.locator("#print")).toBeEnabled();
+  await expect(page.locator("#login")).toBeHidden();
+  await expect(page.locator("#rows tr")).toHaveCount(45);
+  await expect(page.locator("#batch")).toContainText("Vyskladnění");
+  const expectedTotal = process.env.WAREHOUSE_PRINT_FIXTURE
+    ? fixture().reduce((sum, row) => sum + Number(row.quantity), 0) : 135;
+  await expect(page.locator("#pieces")).toHaveText(`${expectedTotal} ks`);
+  await page.locator("#sort").selectOption("excel");
+  await expect(page.locator("#print")).toBeEnabled();
+  await page.locator("#reload").click();
+  await expect(page.locator("#print")).toBeEnabled();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+  await page.evaluate(() => { window.print = () => { window.didPrint = true; }; });
+  await page.locator("#print").click();
+  await expect.poll(() => page.evaluate(() => window.didPrint)).toBe(true);
+  expect(apiRequests).toEqual([]);
+  expect(errors).toEqual([]);
+  await page.screenshot({ path: "test-results/warehouse-anonymous-preview.png" });
+  await page.pdf({ path: "test-results/warehouse-anonymous-a4.pdf", preferCSSPageSize: true, printBackground: true });
 });

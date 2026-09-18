@@ -1,7 +1,10 @@
 from contextlib import contextmanager
+import json
+import re
 from unittest.mock import MagicMock
 
 import app
+import pytest
 
 
 def print_row(quantity="3"):
@@ -63,3 +66,63 @@ def test_invalid_print_quantity_never_reaches_database(monkeypatch):
     response = app.app.test_client().post("/api/warehouse/upload-print", json={"datasetKind": "warehouse", "rows": [print_row("4")]}, headers={"X-Upload-Token": "test-only-upload-token"})
     assert response.status_code == 400
     connection.assert_not_called()
+
+
+def rendered_data(response):
+    return json.loads(re.search(r'<script id="warehouse-print-data" type="application/json">(.*?)</script>', response.text, re.S).group(1))
+
+
+def test_anonymous_render_is_self_contained_and_does_not_access_datasets(monkeypatch):
+    monkeypatch.setenv("UPLOAD_TOKEN", "private-token")
+    database = MagicMock(side_effect=AssertionError("Dataset access is forbidden"))
+    monkeypatch.setattr(app, "db_conn", database)
+    monkeypatch.setattr(app, "current_user", lambda: None)
+    monkeypatch.setattr(app, "product_image_cache", lambda: {"configured": True, "images": {
+        "SKU-ČERNÁ": "https://example.invalid/product.jpg",
+        "OTHER": "https://example.invalid/private-other.jpg",
+        "6002P": "javascript:alert(1)",
+    }})
+    row = print_row()
+    row["info"] = '</script><img src=x onerror=alert(1)> České a slovenské: čřž ľô'
+    response = app.app.test_client().post("/api/warehouse/render-print", json={
+        "rows": [row], "worksheetName": "Vyskladnění", "datasetId": 123,
+    })
+    assert response.status_code == 200
+    assert response.mimetype == "text/html"
+    assert response.headers["Cache-Control"] == "no-store"
+    data = rendered_data(response)
+    assert data["rows"][0]["info"] == row["info"]
+    assert data["dataset"]["worksheetName"] == "Vyskladnění"
+    assert data["images"] == {"SKU-ČERNÁ": "https://example.invalid/product.jpg"}
+    assert '<script defer src=' not in response.text
+    assert '<link rel="stylesheet"' not in response.text
+    assert '</script><img src=x' not in response.text
+    assert 'size: A4 landscape' in response.text
+    database.assert_not_called()
+
+
+@pytest.mark.parametrize("payload", [None, {}, {"rows": []}, {"rows": [print_row("4")]}, {"rows": [print_row("9" * 400)]}, {"rows": [print_row()] * 1001}])
+def test_anonymous_render_rejects_invalid_table_before_image_lookup(monkeypatch, payload):
+    cache = MagicMock()
+    monkeypatch.setattr(app, "product_image_cache", cache)
+    response = app.app.test_client().post("/api/warehouse/render-print", data=json.dumps(payload), content_type="application/json")
+    assert response.status_code == 400
+    cache.assert_not_called()
+
+
+def test_anonymous_render_limits_request_size(monkeypatch):
+    cache = MagicMock()
+    monkeypatch.setattr(app, "product_image_cache", cache)
+    response = app.app.test_client().post("/api/warehouse/render-print", data=b" " * (2 * 1024 * 1024 + 1))
+    assert response.status_code == 413
+    cache.assert_not_called()
+
+
+def test_anonymous_render_survives_image_service_failure(monkeypatch):
+    monkeypatch.setattr(app, "product_image_cache", MagicMock(side_effect=RuntimeError("private-details")))
+    response = app.app.test_client().post("/api/warehouse/render-print", json={"rows": [print_row()]})
+    assert response.status_code == 200
+    data = rendered_data(response)
+    assert data["images"] == {}
+    assert data["imageWarning"]
+    assert "private-details" not in response.text

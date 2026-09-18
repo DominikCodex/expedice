@@ -25,7 +25,7 @@ Soubor `seed-data.js` je vygenerovaný z aktuálních ukázkových Excelů. Dal�
 
 ## Vyskladnění ze skladu
 
-Pro samostatné tlačítko **Vyskladnění k tisku** v Excelu použij nový modul `vba/VyskladneniTisk.bas`. Odesílá tabulku z aktivního listu a otevírá vlastní tiskovou sestavu A4 na šířku. Stávající VBA tlačítka se nemění. Postup instalace je v `vba/VyskladneniTisk.md`.
+Pro samostatné tlačítko **Vyskladnění k tisku** v Excelu použij nový modul `vba/VyskladneniTisk.bas`. Odesílá tabulku z aktivního listu a otevírá vlastní tiskovou sestavu A4 na šířku **bez přihlášení a bez tokenu**. Server vrátí hotové HTML, Excel ho otevře z dočasné složky; žádná expediční dávka se nevytváří ani nemění. Stávající VBA tlačítka se nemění. Postup instalace i aktualizace staršího modulu je v `vba/VyskladneniTisk.md`.
 
 Záložka `Vyskladnění` umí k vybranému expedičnímu dni nahrát samostatný `.xlsx` soubor. Upload je dostupný pouze administrátorovi, zpracování řádků mohou provádět přihlášení uživatelé.
 

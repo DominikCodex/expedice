@@ -1,5 +1,4 @@
 Private Const WHPRINT_BASE_URL As String = "https://expedice-production.up.railway.app"
-Private Const WHPRINT_UPLOAD_TOKEN As String = ""
 
 Public Sub VyskladneniNahratATisk()
     On Error GoTo Failed
@@ -42,21 +41,29 @@ Public Sub VyskladneniNahratATisk()
     Dim http As Object
     Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
     http.setTimeouts 10000, 10000, 30000, 60000
-    http.Open "POST", WHPRINT_BASE_URL & "/api/warehouse/upload-print", False
+    http.Open "POST", WHPRINT_BASE_URL & "/api/warehouse/render-print", False
     http.setRequestHeader "Content-Type", "application/json; charset=utf-8"
-    If Len(WHPRINT_UPLOAD_TOKEN) > 0 Then http.setRequestHeader "X-Upload-Token", WHPRINT_UPLOAD_TOKEN
     http.send payload
     If http.Status < 200 Or http.Status >= 300 Then
         Err.Raise vbObjectError + 805, , "HTTP " & http.Status & ": " & http.responseText
     End If
 
-    Dim printPath As String
-    printPath = http.getResponseHeader("X-Warehouse-Print-Path")
-    If Left$(printPath, Len("/warehouse-print.html?dataset=")) <> "/warehouse-print.html?dataset=" Then
-        Err.Raise vbObjectError + 806, , "Server nevratil odkaz na tiskovou sestavu."
+    If InStr(1, http.getResponseHeader("Content-Type"), "text/html", vbTextCompare) = 0 Then
+        Err.Raise vbObjectError + 806, , "Server nevratil tiskovou sestavu."
     End If
+    Dim files As Object, outputFolder As String, printPath As String, stream As Object
+    Set files = CreateObject("Scripting.FileSystemObject")
+    outputFolder = files.BuildPath(files.GetSpecialFolder(2), "ExpediceVyskladneni")
+    If Not files.FolderExists(outputFolder) Then files.CreateFolder outputFolder
+    printPath = files.BuildPath(outputFolder, files.GetBaseName(files.GetTempName) & ".html")
+    Set stream = CreateObject("ADODB.Stream")
+    stream.Type = 1
+    stream.Open
+    stream.Write http.responseBody
+    stream.SaveToFile printPath, 2
+    stream.Close
     Application.StatusBar = False
-    ws.Parent.FollowHyperlink Address:=WHPRINT_BASE_URL & printPath, NewWindow:=True
+    ws.Parent.FollowHyperlink Address:=printPath, NewWindow:=True
     Exit Sub
 Failed:
     Application.StatusBar = False
