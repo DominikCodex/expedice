@@ -28,6 +28,10 @@
   const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const key = (value) => String(value || "").trim().toUpperCase();
   const quantity = (row) => Number(row.initialQuantity || row.quantity || 0);
+  const secondQuality = (row) => [row.variantCode, row.productCode, row.raw?.productName, row.info].some((value) =>
+    /(?:^|[^a-z0-9])(?:ii|2)[.\s_-]+(?:jakost|akost)(?:$|[^a-z0-9])/i.test(
+      String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    ));
   function displayVariant(value) {
     const text = String(value ?? "").replace(/\s+/g, " ").trim();
     const labels = [...text.matchAll(/(?:^|[\s,;|])(velikost|veľkosť|veľkost|velkost|barva|farba)\s*:\s*/giu)];
@@ -78,14 +82,19 @@
         const difference = Math.min(...allocations(a).map((item) => item.destination)) - Math.min(...allocations(b).map((item) => item.destination));
         if (difference) return difference;
       }
-      return collator.compare(a.productCode || "", b.productCode || "") || collator.compare(a.variantCode || "", b.variantCode || "");
+      return (els.sort.value === "product" ? Number(secondQuality(a)) - Number(secondQuality(b)) : 0)
+        || collator.compare(a.productCode || "", b.productCode || "")
+        || collator.compare(a.variantCode || "", b.variantCode || "");
     });
     let lastProduct = null;
+    let lastQuality = null;
     els.rows.innerHTML = rows.map((row) => {
       const name = row.raw?.productName || row.info || row.productCode;
       const image = state.images[key(row.variantCode)] || state.images[key(row.productCode)];
-      const groupStart = lastProduct !== row.productCode;
+      const quality = secondQuality(row);
+      const groupStart = lastProduct !== row.productCode || (els.sort.value === "product" && lastQuality !== quality);
       lastProduct = row.productCode;
+      lastQuality = quality;
       return `<tr class="${groupStart ? "group-start" : ""}">
         <td>${image ? `<img src="${escape(image)}" alt="${escape(name)}" />` : '<span class="no-photo">Bez fotky</span>'}</td>
         <td><span class="product-name">${escape(name)}</span><span class="sku">${escape(row.variantCode)}</span></td>

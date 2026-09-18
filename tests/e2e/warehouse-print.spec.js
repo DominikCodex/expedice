@@ -90,6 +90,44 @@ test("varianty nemají popisky a hodnoty jsou výrazné v obou orientacích", as
   }
 });
 
+test("II. jakost je až na konci celé sestavy za všemi běžnými produkty", async ({ page }) => {
+  const items = [
+    ["6009P", "6009-ML-BILA-II-JAKOST", "Kalhotky 6009", 8],
+    ["6002P", "6002-SM-TELOVA", "Kalhotky 6002", 7],
+    ["6009P", "6009-SM-CERNA", "Kalhotky 6009", 6],
+    ["6002P", "6002-LXL-BILA", "Nohavičky 6002 II. akosť - Farba", 5],
+    ["6009P", "6009-LXL-BILA", "Kalhotky 6009 II. jakost - Barva", 4],
+    ["6009P", "6009-XLXL-TELOVA", "Kalhotky 6009", 3],
+    ["6010P", "6010-BILA", "Kalhotky 6010 2. jakost", 2],
+    ["6009P", "6009-SM-MODRA", "Kalhotky 6009 III. jakost", 1],
+  ];
+  const rows = items.map(([productCode, variantCode, productName, box], index) => ({
+    rowNumber: index + 2, productCode, variantCode, info: productName,
+    raw: index === 3 ? { productName } : null,
+    variant: "M/L, bílá", quantity: 2, initialQuantity: 2, sequence: `2x${box}`,
+  }));
+  await page.route("**/api/datasets/71", (route) => route.fulfill({ json: { dataset: { datasetKind: "warehouse_print" }, rows } }));
+  await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
+  await page.goto("/warehouse-print.html?dataset=71");
+  await expect(page.locator("#print")).toBeEnabled();
+  const expected = [1, 2, 7, 5, 3, 4, 0, 6];
+  await expect(page.locator(".sku")).toHaveText(expected.map((index) => items[index][1]));
+  await expect(page.locator(".allocation")).toHaveText(expected.map((index) => `2 ks → box ${items[index][3]}`));
+  await expect(page.locator("#pieces")).toHaveText("16 ks");
+  await expect(page.locator("#rows tr.group-start .sku")).toHaveText([1, 2, 3, 4, 6].map((index) => items[index][1]));
+  for (const label of ["Na šířku", "Na výšku"]) {
+    await page.getByText(label, { exact: true }).click();
+    expect(await page.locator("#sheet").evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  }
+  await page.screenshot({ path: "test-results/warehouse-quality-groups.png", fullPage: true });
+  await page.locator("#sort").selectOption("excel");
+  await expect(page.locator(".sku")).toHaveText(items.map((item) => item[1]));
+  await page.locator("#sort").selectOption("box");
+  await expect(page.locator(".sku")).toHaveText([...items].sort((a, b) => a[3] - b[3]).map((item) => item[1]));
+  await page.locator("#sort").selectOption("product");
+  await expect(page.locator(".sku")).toHaveText(expected.map((index) => items[index][1]));
+});
+
 test("odkaz z Excelu po přihlášení otevře stejnou sestavu", async ({ page }) => {
   let authenticated = false;
   await page.route("**/api/datasets/71", (route) => authenticated
