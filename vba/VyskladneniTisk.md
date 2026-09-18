@@ -12,7 +12,7 @@ Modul `VyskladneniTisk.bas` je samostatný. Existující makra pro roztříděn�
 
 ### Aktualizace dříve přidaného tlačítka
 
-Pokud už tlačítko existuje a hlásí HTTP 401, přes `Alt+F11` otevři jeho samostatný modul a nahraď jeho obsah aktuálním `VyskladneniTisk.bas`. Nevytvářej druhý modul se stejně pojmenovanými makry. Název `VyskladneniNahratATisk` zůstává stejný, takže přiřazení tlačítka není potřeba měnit. Ostatní moduly pro kompletaci a roztřídění ponech beze změny. Sešit ulož.
+Pokud už tlačítko existuje a hlásí HTTP 401 nebo po kliknutí neotevře prohlížeč, přes `Alt+F11` otevři jeho samostatný modul a nahraď jeho obsah aktuálním `VyskladneniTisk.bas`. Nevytvářej druhý modul se stejně pojmenovanými makry. Název `VyskladneniNahratATisk` zůstává stejný, takže přiřazení tlačítka není potřeba měnit. Ostatní moduly pro kompletaci a roztřídění ponech beze změny. Sešit ulož.
 
 ## Každodenní použití
 
@@ -33,6 +33,8 @@ Sestava nabízí řazení podle produktu a varianty, původní pořadí Excelu n
 
 Fotografie se dohledávají z nakonfigurovaného produktového feedu podle kódu varianty nebo produktu. Tiskové tlačítko čeká na načtení obrázků. Chybějící fotografie jsou viditelně označené.
 
+Makro spouští webový prohlížeč podle nastavení odkazů HTTPS, nikoli aplikaci přiřazenou souborům `.html` (například PSPad). Pokud ho nelze dohledat, zkusí nainstalovaný Chrome, Edge nebo Firefox. Nastavení Windows se nemění. Při chybě otevření ukáže cestu k hotovému souboru. Již vytvořenou sestavu lze také otevřít v prohlížeči přes `Ctrl+O` ze složky `%TEMP%\ExpediceVyskladneni`.
+
 Generování tiskové sestavy nevytváří žádnou databázovou dávku. Nemění ani nenahrazuje dávky roztřídění, kompletace nebo interaktivního vyskladnění, neovlivňuje report dne a nespouští jejich automatické kontroly. Tisk zahrnuje všechny původní kusy z Excelu.
 
 ## Technické rozhraní
@@ -42,3 +44,7 @@ Generování tiskové sestavy nevytváří žádnou databázovou dávku. Neměn�
 - VBA zapíše odpověď binárně přes `ADODB.Stream`, aby zachovalo UTF-8.
 - Starší `POST /api/warehouse/upload-print` a `warehouse-print.html?dataset=<id>` zůstávají chráněné a podporované, nové samostatné tlačítko je nepoužívá.
 - Česko-slovenské znaky odesílá VBA jako JSON Unicode escape sekvence, takže nezávisí na kódové stránce editoru VBA.
+
+## Vývojářská kontrola otevření prohlížeče
+
+`tests/vba/warehouse-print-browser.ps1` kompiluje skutečný VBA modul v nové instanci Excelu a prázdném neukládaném sešitu. Ověří čtení příkazu prohlížeče, nalezení prohlížeče a chybu při neexistujícím souboru. Volitelný parametr `-ReportPath` otevře již existující sestavu. Test nenahrává žádná data. Vyžaduje Excel a již povolený přístup k VBA projektu; nastavení zabezpečení test sám nemění.

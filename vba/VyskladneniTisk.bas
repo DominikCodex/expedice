@@ -1,5 +1,15 @@
 Private Const WHPRINT_BASE_URL As String = "https://expedice-production.up.railway.app"
 
+#If VBA7 Then
+Private Declare PtrSafe Function WhPrintShellExecute Lib "shell32.dll" Alias "ShellExecuteW" ( _
+    ByVal hwnd As LongPtr, ByVal operation As LongPtr, ByVal file As LongPtr, _
+    ByVal parameters As LongPtr, ByVal directory As LongPtr, ByVal show As Long) As LongPtr
+#Else
+Private Declare Function WhPrintShellExecute Lib "shell32.dll" Alias "ShellExecuteW" ( _
+    ByVal hwnd As Long, ByVal operation As Long, ByVal file As Long, _
+    ByVal parameters As Long, ByVal directory As Long, ByVal show As Long) As Long
+#End If
+
 Public Sub VyskladneniNahratATisk()
     On Error GoTo Failed
     Dim ws As Worksheet
@@ -63,12 +73,78 @@ Public Sub VyskladneniNahratATisk()
     stream.SaveToFile printPath, 2
     stream.Close
     Application.StatusBar = False
-    ws.Parent.FollowHyperlink Address:=printPath, NewWindow:=True
+    WhPrintOpenBrowser printPath
     Exit Sub
 Failed:
     Application.StatusBar = False
-    MsgBox "Vyskladneni k tisku se nepodarilo:" & vbCrLf & Err.Description, vbExclamation
+    Dim failure As String
+    failure = "Vyskladneni k tisku se nepodarilo:" & vbCrLf & Err.Description
+    If Len(printPath) > 0 Then failure = failure & vbCrLf & vbCrLf & "Soubor sestavy: " & printPath
+    MsgBox failure, vbExclamation
 End Sub
+
+Private Sub WhPrintOpenBrowser(ByVal printPath As String)
+    Dim files As Object, browser As String, operation As String, arguments As String
+    Set files = CreateObject("Scripting.FileSystemObject")
+    If Not files.FileExists(printPath) Then Err.Raise vbObjectError + 808, , "Tiskovy soubor nebyl ulozen."
+    browser = WhPrintBrowserPath()
+    If Len(browser) = 0 Then Err.Raise vbObjectError + 809, , "Webovy prohlizec nebyl nalezen. Otevri soubor sestavy rucne v prohlizeci."
+    operation = "open"
+    arguments = Chr$(34) & printPath & Chr$(34)
+#If VBA7 Then
+    Dim result As LongPtr
+#Else
+    Dim result As Long
+#End If
+    result = WhPrintShellExecute(0, StrPtr(operation), StrPtr(browser), StrPtr(arguments), 0, 1)
+    If result <= 32 Then Err.Raise vbObjectError + 810, , "Prohlizec se nepodarilo otevrit (kod Windows " & CStr(result) & ")."
+End Sub
+
+Private Function WhPrintBrowserPath() As String
+    Dim shell As Object, files As Object, progId As String, candidate As String
+    Dim appName As Variant, root As Variant
+    Set shell = CreateObject("WScript.Shell")
+    Set files = CreateObject("Scripting.FileSystemObject")
+    ' Use the web browser association, never .html (which may open a text editor).
+    progId = WhPrintRegRead(shell, "HKCU\Software\Microsoft\Windows\Shell\Associations\UrlAssociations\https\UserChoice\ProgId")
+    If Len(progId) > 0 Then
+        candidate = WhPrintExecutable(WhPrintRegRead(shell, "HKCR\" & progId & "\shell\open\command\"))
+        candidate = shell.ExpandEnvironmentStrings(candidate)
+        If files.FileExists(candidate) Then
+            WhPrintBrowserPath = candidate
+            Exit Function
+        End If
+    End If
+    For Each appName In Array("chrome.exe", "msedge.exe", "firefox.exe")
+        For Each root In Array("HKCU", "HKLM")
+            candidate = WhPrintRegRead(shell, CStr(root) & "\Software\Microsoft\Windows\CurrentVersion\App Paths\" & CStr(appName) & "\")
+            candidate = shell.ExpandEnvironmentStrings(candidate)
+            If files.FileExists(candidate) Then
+                WhPrintBrowserPath = candidate
+                Exit Function
+            End If
+        Next root
+    Next appName
+End Function
+
+Private Function WhPrintRegRead(ByVal shell As Object, ByVal key As String) As String
+    On Error Resume Next
+    WhPrintRegRead = CStr(shell.RegRead(key))
+    On Error GoTo 0
+End Function
+
+Private Function WhPrintExecutable(ByVal command As String) As String
+    Dim ending As Long
+    command = Trim$(command)
+    If Left$(command, 1) = Chr$(34) Then
+        ending = InStr(2, command, Chr$(34))
+        If ending > 2 Then WhPrintExecutable = Mid$(command, 2, ending - 2)
+    Else
+        ending = InStr(1, command, ".exe", vbTextCompare)
+        If ending > 0 Then WhPrintExecutable = Left$(command, ending + 3)
+    End If
+    If LCase$(Right$(WhPrintExecutable, 4)) <> ".exe" Then WhPrintExecutable = ""
+End Function
 
 Public Sub VlozitTlacitkoVyskladneniTisk()
     Dim ws As Worksheet, button As Shape
