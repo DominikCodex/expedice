@@ -6,6 +6,18 @@
   const embeddedData = document.getElementById("warehouse-print-data");
   const standalone = embeddedData ? JSON.parse(embeddedData.textContent) : null;
   const state = { rows: [], images: {}, ready: false, busy: false };
+  const pageStyle = document.createElement("style");
+  document.head.append(pageStyle);
+  function setOrientation(value) {
+    const orientation = value === "portrait" ? "portrait" : "landscape";
+    document.documentElement.dataset.orientation = orientation;
+    pageStyle.textContent = `@page { size: A4 ${orientation}; }`;
+    els.print.textContent = orientation === "portrait" ? "Tisk A4 na výšku" : "Tisk A4 na šířku";
+  }
+  document.querySelectorAll('input[name="orientation"]').forEach((input) => {
+    input.addEventListener("change", () => { if (input.checked) setOrientation(input.value); });
+  });
+  setOrientation(document.querySelector('input[name="orientation"]:checked')?.value);
   const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const key = (value) => String(value || "").trim().toUpperCase();
   const quantity = (row) => Number(row.initialQuantity || row.quantity || 0);

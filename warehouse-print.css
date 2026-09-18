@@ -1,4 +1,6 @@
 * { box-sizing: border-box; }
+:root { --paper-width: 297mm; }
+:root[data-orientation="portrait"] { --paper-width: 210mm; }
 body { margin: 0; background: #e9eeee; color: #182b27; font: 14px/1.35 Arial, sans-serif; letter-spacing: 0; }
 [hidden] { display: none !important; }
 .toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; padding: 12px 20px; background: white; border-bottom: 1px solid #becdc7; }
@@ -7,11 +9,18 @@ label { display: flex; align-items: center; gap: 8px; }
 button, select, input { font: inherit; padding: 9px 12px; border: 1px solid #aabcb5; border-radius: 4px; background: white; color: inherit; }
 button { cursor: pointer; }
 button:disabled { opacity: .5; cursor: wait; }
+.visually-hidden, .orientation input { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.orientation { display: flex; flex-shrink: 0; margin: 0; padding: 0; border: 1px solid #aabcb5; border-radius: 4px; }
+.orientation label { position: relative; cursor: pointer; }
+.orientation label + label { border-left: 1px solid #aabcb5; }
+.orientation span { display: block; padding: 9px 12px; }
+.orientation input:checked + span { background: #e5eee9; color: #145e49; box-shadow: inset 0 -3px #176c52; }
+.orientation input:focus-visible + span { outline: 2px solid #176c52; outline-offset: 2px; }
 #print, #login button { background: #176c52; color: white; font-weight: 700; }
-#status { max-width: 297mm; margin: 12px auto; padding: 0 16px; }
+#status { max-width: var(--paper-width); margin: 12px auto; padding: 0 16px; }
 #login { max-width: 430px; margin: 30px auto; padding: 24px; background: white; }
 #login label { display: grid; margin-bottom: 14px; }
-#sheet { width: 297mm; max-width: calc(100% - 24px); margin: 16px auto; padding: 10mm; background: white; }
+#sheet { width: var(--paper-width); max-width: calc(100% - 24px); margin: 16px auto; padding: 10mm; background: white; }
 .sheet-heading { display: flex; justify-content: space-between; align-items: end; gap: 12px; margin-bottom: 5mm; }
 .sheet-heading p { margin: 0 0 4px; font-size: 10px; font-weight: 700; color: #426557; }
 h1 { margin: 0 0 5px; font-size: 24px; }
@@ -33,6 +42,16 @@ td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin:
 .allocation { display: inline-block; padding: 3px 6px; border: 1px solid #aabdb3; border-radius: 3px; white-space: nowrap; font-size: 12px; }
 .allocation b { font-size: 14px; }
 .check { display: block; width: 5mm; height: 5mm; margin: auto; border: 1px solid #53685d; }
+[data-orientation="portrait"] .photo-col { width: 10%; }
+[data-orientation="portrait"] .product-col { width: 28%; }
+[data-orientation="portrait"] .boxes-col { width: 29%; }
+[data-orientation="portrait"] .check-col { width: 8%; }
+[data-orientation="portrait"] th { padding: 6px 4px; font-size: 10px; }
+[data-orientation="portrait"] td { padding: 4px; font-size: 11px; }
+[data-orientation="portrait"] .quantity { font-size: 19px; }
+[data-orientation="portrait"] td img, [data-orientation="portrait"] .no-photo { width: 12mm; height: 12mm; max-width: 100%; }
+[data-orientation="portrait"] .allocation { padding: 3px 4px; font-size: 11px; }
+[data-orientation="portrait"] .allocation b { font-size: 13px; }
 @page {
   size: A4 landscape;
   margin: 10mm;
@@ -49,4 +68,5 @@ td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin:
 @media screen and (max-width: 760px) {
   #sheet { padding: 12px; overflow-x: auto; }
   table { min-width: 850px; }
+  [data-orientation="portrait"] table { min-width: 0; }
 }

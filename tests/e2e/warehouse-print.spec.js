@@ -100,4 +100,25 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
   expect(errors).toEqual([]);
   await page.screenshot({ path: "test-results/warehouse-anonymous-preview.png" });
   await page.pdf({ path: "test-results/warehouse-anonymous-a4.pdf", preferCSSPageSize: true, printBackground: true });
+
+  for (const [orientation, label] of [["portrait", "Na výšku"], ["landscape", "Na šířku"]]) {
+    await page.getByText(label, { exact: true }).click();
+    await expect(page.getByRole("radio", { name: label, exact: true })).toBeChecked();
+    await expect(page.locator("#print")).toHaveText(`Tisk A4 ${label.toLowerCase()}`);
+    await expect(page.locator("html")).toHaveAttribute("data-orientation", orientation);
+    const pageSize = await page.evaluate(() => [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules])
+      .filter((rule) => rule.type === CSSRule.PAGE_RULE).at(-1).style.getPropertyValue("size"));
+    expect(orientation === "portrait" ? ["a4", "a4 portrait"] : ["a4 landscape"]).toContain(pageSize.toLowerCase());
+    await expect(page.locator("#pieces")).toHaveText(`${expectedTotal} ks`);
+    for (const [width, height] of [[1280, 720], [1366, 768], [1024, 576]]) {
+      await page.setViewportSize({ width, height });
+      expect(await page.locator("#sheet").evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.screenshot({ path: `test-results/warehouse-${orientation}-preview.png` });
+    await page.pdf({ path: `test-results/warehouse-${orientation}-a4.pdf`, preferCSSPageSize: true, printBackground: true });
+  }
+  expect(apiRequests).toEqual([]);
+  expect(errors).toEqual([]);
 });
