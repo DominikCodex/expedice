@@ -23,6 +23,20 @@ Data se ukládají lokálně v prohlížeči. Pro přenos nebo zálohu použij t
 
 Soubor `seed-data.js` je vygenerovaný z aktuálních ukázkových Excelů. Další krok bude udělat přímý import `.xlsx`, aby nebylo nutné seed generovat ručně.
 
+## Vyskladnění ze skladu
+
+Záložka `Vyskladnění` umí k vybranému expedičnímu dni nahrát samostatný `.xlsx` soubor. Upload je dostupný pouze administrátorovi, zpracování řádků mohou provádět přihlášení uživatelé.
+
+První viditelný list musí mít ve sloupcích B-E hlavičky `Kód varianty:`, `Varianta:`, `Kolik a kam s tím:` a `Celk.:`. Rozdělení ve tvaru `1x3, 2x14` znamená jeden kus do boxu 3 a dva kusy do boxu 14. Server před uložením ověří, že rozepsané množství odpovídá celkovému počtu.
+
+Rozhraní nabízí pohled podle produktů i podle boxů, produktové fotografie ze stávajícího feedu, hledání, řazení a průběžně ukládaný počet zbývajících kusů.
+
+API:
+
+- `POST /api/warehouse/upload-xlsx` - admin upload souboru jako `multipart/form-data`
+- `PATCH /api/warehouse/rows/:id` - odpis, vrácení nebo dokončení variantního řádku
+- `GET /api/datasets?kind=warehouse` - seznam dávek vyskladnění
+
 ## Railway API
 
 Backend je ve `app.py` a Railway ho spouští přes `Procfile`.
@@ -41,6 +55,7 @@ Endpointy:
 - `GET /api/datasets` - seznam aktivních dávek
 - `GET /api/datasets?kind=sorting` - seznam dávek roztřídění
 - `GET /api/datasets?kind=completion` - seznam dávek kompletace/expedice
+- `GET /api/datasets?kind=warehouse` - seznam dávek vyskladnění
 - `GET /api/datasets?includeDeleted=1` - seznam včetně smazaných
 - `GET /api/datasets/latest` - poslední aktivní dávka
 - `GET /api/datasets/:id` - konkrétní dávka

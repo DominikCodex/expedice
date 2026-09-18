@@ -1025,6 +1025,10 @@ select:focus {
   display: none;
 }
 
+#warehouse-upload {
+  display: none;
+}
+
 .view-tabs {
   display: flex;
   flex-wrap: wrap;
@@ -6068,5 +6072,432 @@ tbody tr.done {
 @media (max-width: 620px) {
   #completion-view .completion-filter-panel {
     grid-template-columns: 1fr;
+  }
+}
+
+/* Vyskladnění */
+#warehouse-view {
+  container-type: inline-size;
+  min-width: 0;
+}
+
+.warehouse-toolbar {
+  grid-template-columns: minmax(240px, 420px) auto auto minmax(240px, 1fr);
+}
+
+.warehouse-summary {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+
+.warehouse-summary > div {
+  display: grid;
+  min-width: 0;
+  min-height: 74px;
+  align-content: center;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid #cfdcd6;
+  border-radius: 7px;
+  background: #fff;
+}
+
+.warehouse-summary strong {
+  color: #155943;
+  font-size: clamp(22px, 2.2cqw, 34px);
+  line-height: 1;
+}
+
+.warehouse-summary span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.warehouse-progress-metric {
+  grid-template-columns: auto 1fr;
+  column-gap: 8px;
+}
+
+.warehouse-progress-track {
+  grid-column: 1 / -1;
+  display: block;
+  width: 100%;
+  height: 7px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e1e9e5;
+}
+
+.warehouse-progress-track i {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 180ms ease;
+}
+
+.warehouse-controls {
+  display: grid;
+  grid-template-columns: auto minmax(220px, 1fr) minmax(170px, 240px) auto;
+  gap: 8px;
+  align-items: end;
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #f8faf8;
+}
+
+.warehouse-view-switch {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(120px, 1fr));
+  gap: 4px;
+}
+
+.warehouse-view-switch button {
+  min-height: 40px;
+  white-space: nowrap;
+}
+
+.warehouse-view-switch button.active {
+  color: #fff;
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
+.warehouse-completed-toggle {
+  white-space: nowrap;
+}
+
+.warehouse-panel .table-wrap {
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.warehouse-table {
+  width: 100%;
+  min-width: 0;
+  table-layout: fixed;
+}
+
+.warehouse-table th:nth-child(1) { width: 28%; }
+.warehouse-table th:nth-child(2) { width: 15%; }
+.warehouse-table th:nth-child(3) { width: 23%; }
+.warehouse-table th:nth-child(4) { width: 7%; }
+.warehouse-table th:nth-child(5) { width: 8%; }
+.warehouse-table th:nth-child(6) { width: 19%; }
+
+.warehouse-table td {
+  min-width: 0;
+  padding: clamp(6px, 0.8cqw, 10px);
+}
+
+.warehouse-row.completed {
+  color: #6a746f;
+  background: #f1f4f2;
+}
+
+.warehouse-row.completed .warehouse-product-cell,
+.warehouse-box-item.completed {
+  opacity: 0.68;
+}
+
+.warehouse-product-cell {
+  display: grid;
+  grid-template-columns: clamp(48px, 5cqw, 66px) minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  min-width: 0;
+}
+
+.warehouse-product-cell > div,
+.warehouse-box-item > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.warehouse-product-cell strong,
+.warehouse-box-item strong {
+  overflow: hidden;
+  font-family: var(--app-mono-font-family);
+  font-size: clamp(12px, 1.15cqw, 15px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.warehouse-product-cell span:not(.product-image-frame),
+.warehouse-box-item span {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: clamp(12px, 1.05cqw, 14px);
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.warehouse-product-cell small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.warehouse-product-image,
+.warehouse-photo-placeholder {
+  width: 100%;
+  height: auto;
+  aspect-ratio: 1;
+}
+
+.warehouse-photo-placeholder {
+  display: grid;
+  place-items: center;
+  border: 1px dashed #b9c7c0;
+  border-radius: 7px;
+  color: #78847f;
+  background: #f3f6f4;
+  font-size: 10px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.warehouse-variant {
+  display: -webkit-box;
+  overflow: hidden;
+  line-height: 1.25;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.warehouse-allocation-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.warehouse-allocation-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+  padding: 4px 6px;
+  border: 1px solid #bfd8cd;
+  border-radius: 6px;
+  color: #174f3d;
+  background: #edf7f2;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.warehouse-allocation-chip b {
+  color: #0f362a;
+}
+
+.warehouse-quantity {
+  display: inline-flex;
+  min-width: 52px;
+  justify-content: center;
+  padding: 6px 8px;
+  border-radius: 999px;
+  font-weight: 900;
+  white-space: nowrap;
+}
+
+.warehouse-quantity.total {
+  color: #29423a;
+  background: #edf1ef;
+}
+
+.warehouse-quantity.remaining {
+  color: #7b4d00;
+  background: #fff0ce;
+}
+
+.warehouse-quantity.done {
+  color: #116044;
+  background: #ddf4e8;
+}
+
+.warehouse-row-actions {
+  display: grid;
+  grid-template-columns: repeat(2, 38px) minmax(72px, 1fr);
+  gap: 4px;
+  align-items: stretch;
+}
+
+.warehouse-row-actions .icon-button {
+  width: 38px;
+  min-width: 38px;
+  min-height: 38px;
+  padding: 0;
+  font-size: 20px;
+}
+
+.warehouse-complete-action {
+  min-width: 0;
+  min-height: 38px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.warehouse-empty {
+  padding: 28px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.warehouse-boxes-panel {
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: #fff;
+}
+
+.warehouse-boxes {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr));
+  gap: 10px;
+}
+
+.warehouse-box-group {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #cedbd5;
+  border-radius: 7px;
+  background: #f9fbfa;
+}
+
+.warehouse-box-group > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 8px 10px;
+  color: #fff;
+  background: #1d6d53;
+}
+
+.warehouse-box-group > header div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.warehouse-box-group > header span {
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.warehouse-box-group > header strong {
+  font-size: 24px;
+  line-height: 1;
+}
+
+.warehouse-box-items {
+  display: grid;
+}
+
+.warehouse-box-item {
+  display: grid;
+  grid-template-columns: 46px minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  padding: 7px 9px;
+  border-bottom: 1px solid #dfe7e3;
+}
+
+.warehouse-box-item:last-child {
+  border-bottom: 0;
+}
+
+.warehouse-box-item .warehouse-product-image,
+.warehouse-box-item .warehouse-photo-placeholder {
+  width: 46px;
+  height: 46px;
+}
+
+.warehouse-box-item > b {
+  white-space: nowrap;
+}
+
+@container (max-width: 980px) {
+  .warehouse-controls {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .warehouse-search-field {
+    grid-column: 1 / -1;
+    grid-row: 1;
+  }
+
+  .warehouse-table thead {
+    display: none;
+  }
+
+  .warehouse-table,
+  .warehouse-table tbody,
+  .warehouse-table tr,
+  .warehouse-table td {
+    display: block;
+    width: 100%;
+  }
+
+  .warehouse-table tr {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto auto;
+    gap: 0 8px;
+    margin-bottom: 8px;
+    border: 1px solid var(--line);
+    border-left: 4px solid var(--accent);
+    border-radius: 7px;
+  }
+
+  .warehouse-table td {
+    border-bottom: 0;
+  }
+
+  .warehouse-table td:nth-child(1),
+  .warehouse-table td:nth-child(3) {
+    grid-column: span 2;
+  }
+
+  .warehouse-table td:nth-child(6) {
+    grid-column: 1 / -1;
+  }
+
+  .warehouse-row-actions {
+    grid-template-columns: 40px 40px minmax(100px, 180px);
+    justify-content: end;
+  }
+}
+
+@container (max-width: 620px) {
+  .warehouse-controls,
+  .warehouse-view-switch {
+    grid-template-columns: 1fr;
+  }
+
+  .warehouse-search-field {
+    grid-column: auto;
+    grid-row: auto;
+  }
+
+  .warehouse-table tr {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .warehouse-table td:nth-child(1),
+  .warehouse-table td:nth-child(3),
+  .warehouse-table td:nth-child(6) {
+    grid-column: 1 / -1;
   }
 }

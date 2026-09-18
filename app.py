@@ -19,12 +19,16 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta
 from xml.sax.saxutils import escape as xml_escape
 from zoneinfo import ZoneInfo
+from zipfile import BadZipFile
 
 import psycopg2
 from psycopg2 import pool
 from psycopg2.extras import Json, RealDictCursor
 from flask import Flask, Response, g, jsonify, request, send_from_directory
+from openpyxl import load_workbook
+from openpyxl.utils.exceptions import InvalidFileException
 from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.utils import secure_filename
 
 from expedition_integrity import assess_integrity, build_batch_snapshot, compare_order_variants
 
@@ -121,6 +125,7 @@ EXPEDITION_ORDER_CODE_LABELS_DEFAULT = {
 }
 PRODUCT_IMAGE_CACHE_SECONDS = 12 * 60 * 60
 PRODUCT_IMAGE_REQUEST_CODE_LIMIT = 10000
+WAREHOUSE_XLSX_MAX_BYTES = env_int("WAREHOUSE_XLSX_MAX_BYTES", 10 * 1024 * 1024, 1024, 50 * 1024 * 1024)
 PRODUCT_IMAGE_CACHE_LOCK = threading.Lock()
 PRODUCT_IMAGE_CACHE = {
     "signature": "",
@@ -1327,6 +1332,8 @@ def create_user_session(cur, user_id):
 
 def api_path_requires_admin(path):
     if path == "/api/settings" or path.startswith("/api/users"):
+        return True
+    if path == "/api/warehouse/upload-xlsx":
         return True
     if path.startswith("/api/product-feed"):
         return True
@@ -3199,6 +3206,154 @@ def sorting_initial_quantity_from_item(item):
     return sorting_initial_quantity_from_cells(item.get("cells"), item.get("variantCode"))
 
 
+class WarehouseWorkbookError(Exception):
+    pass
+
+
+def warehouse_cell_text(value):
+    if value is None:
+        return ""
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return clean_text(value).strip()
+
+
+def normalize_warehouse_header(value):
+    normalized = unicodedata.normalize("NFKD", warehouse_cell_text(value).lower())
+    return "".join(char for char in normalized if char.isalnum() and not unicodedata.combining(char))
+
+
+def warehouse_positive_integer(value, label, row_number):
+    text = warehouse_cell_text(value).replace(" ", "").replace(",", ".")
+    if not re.fullmatch(r"\d+(?:\.0+)?", text):
+        raise WarehouseWorkbookError(f"Řádek {row_number}: {label} musí být celé kladné číslo.")
+    number = int(float(text))
+    if number <= 0:
+        raise WarehouseWorkbookError(f"Řádek {row_number}: {label} musí být větší než nula.")
+    return number
+
+
+def parse_warehouse_allocations(value, row_number):
+    text = warehouse_cell_text(value)
+    if not text:
+        raise WarehouseWorkbookError(f"Řádek {row_number}: chybí rozdělení ve sloupci Kolik a kam s tím.")
+
+    allocations = []
+    for token in re.split(r"[,;]+", text):
+        part = token.strip()
+        if not part:
+            continue
+        match = re.fullmatch(r"(\d+)\s*[x×]\s*(\d+)", part, flags=re.IGNORECASE)
+        if not match:
+            raise WarehouseWorkbookError(
+                f"Řádek {row_number}: hodnotu „{part}“ nelze přečíst. Použij formát například 1x3, 2x14."
+            )
+        quantity, destination = (int(match.group(1)), int(match.group(2)))
+        if quantity <= 0 or destination <= 0:
+            raise WarehouseWorkbookError(f"Řádek {row_number}: množství i číslo boxu musí být větší než nula.")
+        allocations.append({"quantity": quantity, "destination": destination})
+
+    if not allocations:
+        raise WarehouseWorkbookError(f"Řádek {row_number}: rozdělení do boxů je prázdné.")
+    return allocations
+
+
+def parse_warehouse_workbook(content):
+    if not content:
+        raise WarehouseWorkbookError("Nahraný Excel je prázdný.")
+    if len(content) > WAREHOUSE_XLSX_MAX_BYTES:
+        raise WarehouseWorkbookError(
+            f"Excel je větší než povolený limit {round(WAREHOUSE_XLSX_MAX_BYTES / 1024 / 1024)} MB."
+        )
+
+    try:
+        workbook = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
+    except (InvalidFileException, BadZipFile, OSError, ValueError, KeyError) as exc:
+        raise WarehouseWorkbookError("Soubor není platný Excel ve formátu .xlsx.") from exc
+
+    try:
+        worksheet = next((sheet for sheet in workbook.worksheets if sheet.sheet_state == "visible"), None)
+        if worksheet is None:
+            raise WarehouseWorkbookError("Excel neobsahuje žádný viditelný list.")
+
+        rows_iterator = worksheet.iter_rows(values_only=True)
+        header = next(rows_iterator, None)
+        if not header:
+            raise WarehouseWorkbookError("Excel neobsahuje hlavičku.")
+        header_values = list(header)
+        normalized = [normalize_warehouse_header(value) for value in header_values]
+        required_headers = {
+            1: "kodvarianty",
+            2: "varianta",
+            3: "kolikakamstim",
+            4: "celk",
+        }
+        missing = [expected for index, expected in required_headers.items() if index >= len(normalized) or normalized[index] != expected]
+        if missing:
+            raise WarehouseWorkbookError(
+                "Excel nemá očekávané sloupce: Kód varianty, Varianta, Kolik a kam s tím a Celk."
+            )
+
+        parsed_rows = []
+        errors = []
+        for row_number, values in enumerate(rows_iterator, start=2):
+            cells = list(values)
+            if not any(warehouse_cell_text(value) for value in cells):
+                continue
+            cells.extend([None] * max(0, 6 - len(cells)))
+            product_code = warehouse_cell_text(cells[0])
+            variant_code = warehouse_cell_text(cells[1])
+            variant = warehouse_cell_text(cells[2])
+            allocation_text = warehouse_cell_text(cells[3])
+            product_name = warehouse_cell_text(cells[5])
+            try:
+                if not variant_code:
+                    raise WarehouseWorkbookError(f"Řádek {row_number}: chybí kód varianty.")
+                quantity = warehouse_positive_integer(cells[4], "Celk.", row_number)
+                allocations = parse_warehouse_allocations(allocation_text, row_number)
+                allocated_quantity = sum(item["quantity"] for item in allocations)
+                if allocated_quantity != quantity:
+                    raise WarehouseWorkbookError(
+                        f"Řádek {row_number}: rozdělení dává {allocated_quantity} ks, ale Celk. obsahuje {quantity} ks."
+                    )
+            except WarehouseWorkbookError as exc:
+                errors.append(clean_text(exc))
+                continue
+
+            parsed_rows.append(
+                {
+                    "rowNumber": row_number,
+                    "productCode": product_code,
+                    "variantCode": variant_code,
+                    "variant": variant,
+                    "allocationText": allocation_text,
+                    "quantity": quantity,
+                    "productName": product_name,
+                    "allocations": allocations,
+                    "cells": [warehouse_cell_text(value) for value in cells[:6]],
+                }
+            )
+
+        if errors:
+            visible_errors = errors[:8]
+            suffix = f" Dalších chyb: {len(errors) - len(visible_errors)}." if len(errors) > len(visible_errors) else ""
+            raise WarehouseWorkbookError(" ".join(visible_errors) + suffix)
+        if not parsed_rows:
+            raise WarehouseWorkbookError("Excel neobsahuje žádné platné řádky vyskladnění.")
+
+        return {
+            "worksheetName": worksheet.title,
+            "headers": [warehouse_cell_text(value) for value in header_values],
+            "rows": parsed_rows,
+            "pieces": sum(row["quantity"] for row in parsed_rows),
+            "destinations": sorted(
+                {allocation["destination"] for row in parsed_rows for allocation in row["allocations"]}
+            ),
+        }
+    finally:
+        workbook.close()
+
+
 def row_to_api(row):
     return {
         "id": row["id"],
@@ -3810,9 +3965,14 @@ def full_expedition_day_payload(cur, day_date, include_deleted=False):
         (row for row in datasets_raw if row["dataset_kind"] == "completion" and row["status"] == "active"),
         next((row for row in datasets_raw if row["dataset_kind"] == "completion"), None),
     )
+    active_warehouse = next(
+        (row for row in datasets_raw if row["dataset_kind"] == "warehouse" and row["status"] == "active"),
+        next((row for row in datasets_raw if row["dataset_kind"] == "warehouse"), None),
+    )
 
     sorting_rows = []
     completion_rows = []
+    warehouse_rows = []
     if active_sorting:
         cur.execute(
             "SELECT * FROM dataset_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
@@ -3825,12 +3985,19 @@ def full_expedition_day_payload(cur, day_date, include_deleted=False):
             (active_completion["id"],),
         )
         completion_rows = [completion_row_to_api(row) for row in cur.fetchall()]
+    if active_warehouse:
+        cur.execute(
+            "SELECT * FROM dataset_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
+            (active_warehouse["id"],),
+        )
+        warehouse_rows = [row_to_api(row) for row in cur.fetchall()]
 
     return {
         "day": expedition_day_summary(day),
         "datasets": datasets,
         "sorting": [item for item in datasets if item["datasetKind"] == "sorting"],
         "completion": [item for item in datasets if item["datasetKind"] == "completion"],
+        "warehouse": [item for item in datasets if item["datasetKind"] == "warehouse"],
         "activeSorting": {
             "dataset": dataset_summary(active_sorting) if active_sorting else None,
             "rows": sorting_rows,
@@ -3838,6 +4005,10 @@ def full_expedition_day_payload(cur, day_date, include_deleted=False):
         "activeCompletion": {
             "dataset": dataset_summary(active_completion) if active_completion else None,
             "rows": completion_rows,
+        },
+        "activeWarehouse": {
+            "dataset": dataset_summary(active_warehouse) if active_warehouse else None,
+            "rows": warehouse_rows,
         },
     }
 
@@ -4075,6 +4246,7 @@ def get_expedition_day(day_date):
             "datasets": datasets,
             "sorting": [item for item in datasets if item["datasetKind"] == "sorting"],
             "completion": [item for item in datasets if item["datasetKind"] == "completion"],
+            "warehouse": [item for item in datasets if item["datasetKind"] == "warehouse"],
         }
     )
 
@@ -4089,84 +4261,10 @@ def get_full_expedition_day(day_date):
     include_deleted = include_deleted_for_admin()
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            cur.execute(
-                """
-                SELECT
-                    ed.*,
-                    COUNT(d.id) FILTER (WHERE d.status = 'active') AS active_batches,
-                    COUNT(d.id) AS all_batches,
-                    COALESCE(SUM(d.rows_count) FILTER (WHERE d.status = 'active'), 0) AS rows_count,
-                    COALESCE(SUM(d.rows_count), 0) AS all_rows_count,
-                    MAX(d.uploaded_at) AS latest_upload
-                FROM expedition_days ed
-                LEFT JOIN datasets d ON d.expedition_day_id = ed.id
-                WHERE ed.day_date = %s
-                GROUP BY ed.id
-                """,
-                (day_date,),
-            )
-            day = cur.fetchone()
-            if not day:
-                return jsonify({"error": "Expedition day not found"}), 404
-            if day["status"] != "active" and not include_deleted:
-                return jsonify({"error": "Expedition day not found"}), 404
-
-            filters = ["expedition_day_id = %s"]
-            params = [day["id"]]
-            if not include_deleted:
-                filters.append("status = 'active'")
-            where = " AND ".join(filters)
-            cur.execute(
-                f"""
-                SELECT * FROM datasets
-                WHERE {where}
-                ORDER BY dataset_kind, shop_code, uploaded_at DESC, id DESC
-                """,
-                params,
-            )
-            datasets_raw = cur.fetchall()
-            datasets = [dataset_summary(row) for row in datasets_raw]
-
-            active_sorting = next(
-                (row for row in datasets_raw if row["dataset_kind"] == "sorting" and row["status"] == "active"),
-                next((row for row in datasets_raw if row["dataset_kind"] == "sorting"), None),
-            )
-            active_completion = next(
-                (row for row in datasets_raw if row["dataset_kind"] == "completion" and row["status"] == "active"),
-                next((row for row in datasets_raw if row["dataset_kind"] == "completion"), None),
-            )
-
-            sorting_rows = []
-            completion_rows = []
-            if active_sorting:
-                cur.execute(
-                    "SELECT * FROM dataset_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
-                    (active_sorting["id"],),
-                )
-                sorting_rows = [row_to_api(row) for row in cur.fetchall()]
-            if active_completion:
-                cur.execute(
-                    "SELECT * FROM completion_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
-                    (active_completion["id"],),
-                )
-                completion_rows = [completion_row_to_api(row) for row in cur.fetchall()]
-
-    return jsonify(
-        {
-            "day": expedition_day_summary(day),
-            "datasets": datasets,
-            "sorting": [item for item in datasets if item["datasetKind"] == "sorting"],
-            "completion": [item for item in datasets if item["datasetKind"] == "completion"],
-            "activeSorting": {
-                "dataset": dataset_summary(active_sorting) if active_sorting else None,
-                "rows": sorting_rows,
-            },
-            "activeCompletion": {
-                "dataset": dataset_summary(active_completion) if active_completion else None,
-                "rows": completion_rows,
-            },
-        }
-    )
+            payload = full_expedition_day_payload(cur, day_date, include_deleted)
+    if not payload:
+        return jsonify({"error": "Expedition day not found"}), 404
+    return jsonify(payload)
 
 
 @app.route("/api/datasets/upload", methods=["POST"])
@@ -4187,8 +4285,8 @@ def upload_dataset():
     dataset_date, dataset_time, label = payload_date_time(payload)
     headers = payload.get("headers") if isinstance(payload.get("headers"), list) else []
     dataset_kind = clean_text(payload.get("datasetKind")) or "sorting"
-    if dataset_kind not in ("sorting", "completion"):
-        return jsonify({"error": "datasetKind must be sorting or completion"}), 400
+    if dataset_kind not in ("sorting", "completion", "warehouse"):
+        return jsonify({"error": "datasetKind must be sorting, completion or warehouse"}), 400
     shop_code = infer_dataset_shop_code(payload, rows)
     shop_name = clean_text(payload.get("shopName")) or shop_name_from_code(shop_code)
     source_system = clean_text(payload.get("sourceSystem")) or "excel"
@@ -4319,6 +4417,250 @@ def upload_dataset():
             "checkJob": check_job,
         }
     )
+
+
+@app.route("/api/warehouse/upload-xlsx", methods=["POST"])
+def upload_warehouse_xlsx():
+    auth_error = require_admin()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    uploaded = request.files.get("file")
+    if not uploaded or not uploaded.filename:
+        return jsonify({"error": "Vyber Excel vyskladnění ve formátu .xlsx."}), 400
+    if not uploaded.filename.lower().endswith(".xlsx"):
+        return jsonify({"error": "Vyskladnění lze nahrát pouze jako soubor .xlsx."}), 400
+
+    try:
+        expedition_day_id = int(request.form.get("expeditionDayId") or 0)
+    except (TypeError, ValueError):
+        expedition_day_id = 0
+    if expedition_day_id <= 0:
+        return jsonify({"error": "Nejdřív vyber expediční den."}), 400
+
+    content = uploaded.stream.read(WAREHOUSE_XLSX_MAX_BYTES + 1)
+    try:
+        parsed = parse_warehouse_workbook(content)
+    except WarehouseWorkbookError as exc:
+        return jsonify({"error": clean_text(exc)}), 400
+
+    now = local_now()
+    source_filename = secure_filename(uploaded.filename) or "vyskladneni.xlsx"
+    file_hash = hashlib.sha256(content).hexdigest()
+    actor = current_user()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute("SELECT * FROM expedition_days WHERE id = %s AND status = 'active'", (expedition_day_id,))
+            expedition_day = cur.fetchone()
+            if not expedition_day:
+                return jsonify({"error": "Vybraný expediční den už není aktivní."}), 404
+
+            label = f"{expedition_day['label']} | vyskladnění | {now.strftime('%H:%M:%S')}"
+            cur.execute(
+                """
+                INSERT INTO datasets (
+                    expedition_day_id, dataset_kind, batch_name,
+                    shop_code, shop_name, source_system, external_batch_id,
+                    dataset_date, dataset_time, uploaded_at_local, label, source,
+                    workbook_name, worksheet_name, source_filename, rows_count,
+                    headers, raw_payload
+                )
+                VALUES (%s, 'warehouse', %s, '', 'Sklad', 'xlsx', %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING *
+                """,
+                (
+                    expedition_day_id,
+                    expedition_day["label"],
+                    file_hash,
+                    expedition_day["day_date"],
+                    now.time().replace(tzinfo=None),
+                    now.isoformat(),
+                    label,
+                    "web-xlsx-vyskladneni",
+                    source_filename,
+                    parsed["worksheetName"],
+                    source_filename,
+                    len(parsed["rows"]),
+                    Json(parsed["headers"]),
+                    Json(
+                        {
+                            "sourceFilename": source_filename,
+                            "worksheetName": parsed["worksheetName"],
+                            "fileSha256": file_hash,
+                            "pieces": parsed["pieces"],
+                            "destinations": parsed["destinations"],
+                        }
+                    ),
+                ),
+            )
+            dataset = cur.fetchone()
+
+            cur.execute(
+                """
+                UPDATE datasets
+                SET status = 'replaced',
+                    replaced_at = NOW(),
+                    replaced_by_dataset_id = %s,
+                    replace_reason = %s
+                WHERE id <> %s
+                  AND status = 'active'
+                  AND expedition_day_id = %s
+                  AND dataset_kind = 'warehouse'
+                RETURNING id
+                """,
+                (
+                    dataset["id"],
+                    "Nahrazeno novým Excelem vyskladnění stejného expedičního dne",
+                    dataset["id"],
+                    expedition_day_id,
+                ),
+            )
+            replaced_ids = [row["id"] for row in cur.fetchall()]
+
+            for item in parsed["rows"]:
+                quantity = item["quantity"]
+                raw_row = {
+                    "productCode": item["productCode"],
+                    "variantCode": item["variantCode"],
+                    "variant": item["variant"],
+                    "productName": item["productName"],
+                    "allocationText": item["allocationText"],
+                    "allocations": item["allocations"],
+                    "quantity": quantity,
+                }
+                cur.execute(
+                    """
+                    INSERT INTO dataset_rows (
+                        dataset_id, shop_code, row_number, product_code, variant_code, variant,
+                        quantity_text, remaining, order_number, weight, sequence, info,
+                        initial_quantity_text, paircode, history, cells, raw_row
+                    )
+                    VALUES (%s, '', %s, %s, %s, %s, %s, %s, '', '', %s, %s, %s, '', '', %s, %s)
+                    """,
+                    (
+                        dataset["id"],
+                        item["rowNumber"],
+                        item["productCode"],
+                        item["variantCode"],
+                        item["variant"],
+                        str(quantity),
+                        quantity,
+                        item["allocationText"],
+                        item["productName"],
+                        str(quantity),
+                        Json(item["cells"]),
+                        Json(raw_row),
+                    ),
+                )
+
+            audit_event = record_audit_event(
+                cur,
+                "warehouse_dataset_upload",
+                dataset_id=dataset["id"],
+                row_kind="dataset",
+                payload={
+                    "sourceFilename": source_filename,
+                    "rows": len(parsed["rows"]),
+                    "pieces": parsed["pieces"],
+                    "destinations": len(parsed["destinations"]),
+                },
+                previous_state={"replacedDatasetIds": replaced_ids},
+                next_state={"datasetId": dataset["id"], "status": "active"},
+                source="warehouse-xlsx-upload",
+                actor_user=actor,
+            )
+            cur.execute(
+                "SELECT * FROM dataset_rows WHERE dataset_id = %s ORDER BY row_number NULLS LAST, id",
+                (dataset["id"],),
+            )
+            rows = [row_to_api(row) for row in cur.fetchall()]
+
+    return jsonify(
+        {
+            "ok": True,
+            "dataset": dataset_summary(dataset),
+            "rows": rows,
+            "summary": {
+                "variants": len(parsed["rows"]),
+                "pieces": parsed["pieces"],
+                "destinations": len(parsed["destinations"]),
+            },
+            "replacedDatasetIds": replaced_ids,
+            "auditEventId": audit_event["id"],
+        }
+    )
+
+
+@app.route("/api/warehouse/rows/<int:row_id>", methods=["PATCH"])
+def update_warehouse_row(row_id):
+    auth_error = require_login()
+    if auth_error:
+        return auth_error
+
+    ensure_schema()
+    payload = request.get_json(silent=True) or {}
+    action = clean_text(payload.get("action")).strip().lower()
+    actor = current_user()
+    with db_conn() as conn:
+        with conn.cursor(cursor_factory=RealDictCursor) as cur:
+            cur.execute(
+                """
+                SELECT dr.*
+                FROM dataset_rows dr
+                JOIN datasets d ON d.id = dr.dataset_id
+                JOIN expedition_days ed ON ed.id = d.expedition_day_id
+                WHERE dr.id = %s
+                  AND d.dataset_kind = 'warehouse'
+                  AND d.status = 'active'
+                  AND ed.status = 'active'
+                FOR UPDATE
+                """,
+                (row_id,),
+            )
+            row = cur.fetchone()
+            if not row:
+                return jsonify({"error": "Řádek vyskladnění nebyl nalezen nebo už není aktivní."}), 404
+
+            initial = max(0, int_from_text(row["initial_quantity_text"] or row["quantity_text"]))
+            current = max(0, min(initial, int(row["remaining"] or 0)))
+            if action == "deduct":
+                next_remaining = max(0, current - 1)
+            elif action == "restore":
+                next_remaining = min(initial, current + 1)
+            elif action == "complete":
+                next_remaining = 0
+            elif action == "reset":
+                next_remaining = initial
+            elif "remaining" in payload:
+                try:
+                    next_remaining = int(payload.get("remaining"))
+                except (TypeError, ValueError):
+                    return jsonify({"error": "Zbývající množství musí být celé číslo."}), 400
+                if next_remaining < 0 or next_remaining > initial:
+                    return jsonify({"error": f"Zbývající množství musí být od 0 do {initial}."}), 400
+            else:
+                return jsonify({"error": "Neznámá akce vyskladnění."}), 400
+
+            cur.execute(
+                "UPDATE dataset_rows SET remaining = %s WHERE id = %s RETURNING *",
+                (next_remaining, row_id),
+            )
+            updated = cur.fetchone()
+            audit_event = record_audit_event(
+                cur,
+                "warehouse_quantity_update",
+                dataset_id=row["dataset_id"],
+                row_ref=row["variant_code"],
+                row_id=row_id,
+                row_kind="warehouse",
+                previous_state={"remaining": current},
+                next_state={"remaining": next_remaining},
+                source="warehouse-ui",
+                actor_user=actor,
+            )
+
+    return jsonify({"ok": True, "row": row_to_api(updated), "auditEventId": audit_event["id"]})
 
 
 def insert_completion_row(cur, dataset_id, item, shop_code=""):

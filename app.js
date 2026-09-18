@@ -37,6 +37,18 @@ const sortingState = {
   loaded: false,
 };
 
+const warehouseState = {
+  datasets: [],
+  dataset: null,
+  rows: [],
+  loaded: false,
+  view: "products",
+  search: "",
+  sort: "product",
+  showCompleted: false,
+  savingRows: new Set(),
+};
+
 const completionState = {
   datasets: [],
   dataset: null,
@@ -131,6 +143,7 @@ const globalProgressState = {
 
 const VIEW_ROUTES = {
   sorting: "/roztrideni",
+  warehouse: "/vyskladneni",
   completion: "/kompletace",
   eans: "/eany",
   audit: "/audit",
@@ -140,6 +153,7 @@ const VIEW_ROUTES = {
 const ROUTE_VIEWS = {
   "/": "sorting",
   "/roztrideni": "sorting",
+  "/vyskladneni": "warehouse",
   "/kompletace": "completion",
   "/eany": "eans",
   "/audit": "audit",
@@ -219,6 +233,8 @@ const els = {
   globalProgressBar: document.getElementById("global-progress-bar"),
   globalProgressPercent: document.getElementById("global-progress-percent"),
   appShell: document.getElementById("app-shell"),
+  appSectionLabel: document.getElementById("app-section-label"),
+  appPageTitle: document.getElementById("app-page-title"),
   authView: document.getElementById("auth-view"),
   loginForm: document.getElementById("login-form"),
   loginUsername: document.getElementById("login-username"),
@@ -263,6 +279,7 @@ const els = {
   expeditionDaySummary: document.getElementById("expedition-day-summary"),
   expeditionBatchReport: document.getElementById("expedition-batch-report"),
   tabSorting: document.getElementById("tab-sorting"),
+  tabWarehouse: document.getElementById("tab-warehouse"),
   tabCompletion: document.getElementById("tab-completion"),
   tabEans: document.getElementById("tab-eans"),
   tabAudit: document.getElementById("tab-audit"),
@@ -272,6 +289,28 @@ const els = {
   sortingDataset: document.getElementById("sorting-dataset"),
   sortingRefresh: document.getElementById("sorting-refresh"),
   sortingDatasetInfo: document.getElementById("sorting-dataset-info"),
+  warehouseView: document.getElementById("warehouse-view"),
+  warehouseDataset: document.getElementById("warehouse-dataset"),
+  warehouseRefresh: document.getElementById("warehouse-refresh"),
+  warehouseUploadTrigger: document.getElementById("warehouse-upload-trigger"),
+  warehouseUpload: document.getElementById("warehouse-upload"),
+  warehouseDatasetInfo: document.getElementById("warehouse-dataset-info"),
+  warehouseMessage: document.getElementById("warehouse-message"),
+  warehouseMetricVariants: document.getElementById("warehouse-metric-variants"),
+  warehouseMetricPieces: document.getElementById("warehouse-metric-pieces"),
+  warehouseMetricRemaining: document.getElementById("warehouse-metric-remaining"),
+  warehouseMetricBoxes: document.getElementById("warehouse-metric-boxes"),
+  warehouseMetricProgress: document.getElementById("warehouse-metric-progress"),
+  warehouseProgressBar: document.getElementById("warehouse-progress-bar"),
+  warehouseSearch: document.getElementById("warehouse-search"),
+  warehouseSort: document.getElementById("warehouse-sort"),
+  warehouseShowCompleted: document.getElementById("warehouse-show-completed"),
+  warehouseProductsPanel: document.getElementById("warehouse-products-panel"),
+  warehouseBoxesPanel: document.getElementById("warehouse-boxes-panel"),
+  warehouseBody: document.getElementById("warehouse-body"),
+  warehouseRowCount: document.getElementById("warehouse-row-count"),
+  warehouseBoxCount: document.getElementById("warehouse-box-count"),
+  warehouseBoxes: document.getElementById("warehouse-boxes"),
   completionView: document.getElementById("completion-view"),
   completionDataset: document.getElementById("completion-dataset"),
   completionRefresh: document.getElementById("completion-refresh"),
@@ -673,6 +712,12 @@ function setCompletionMessage(text, type = "neutral") {
   els.completionMessage.textContent = text;
 }
 
+function setWarehouseMessage(text, type = "neutral") {
+  if (!els.warehouseMessage) return;
+  els.warehouseMessage.className = `message ${type}`;
+  els.warehouseMessage.textContent = text;
+}
+
 function setWorkflowMessage(text, type = "neutral") {
   els.workflowMessage.className = `message ${type}`;
   els.workflowMessage.textContent = text;
@@ -687,6 +732,8 @@ function progressLabelForRequest(path, options = {}) {
   const method = String(options.method || "GET").toUpperCase();
   const text = String(path || "");
   if (text.includes("/api/expedition-days")) return "Načítám expediční dny...";
+  if (text.includes("/api/warehouse/upload-xlsx")) return "Nahrávám Excel vyskladnění...";
+  if (text.includes("/api/warehouse")) return method === "GET" ? "Načítám vyskladnění..." : "Ukládám vyskladnění...";
   if (text.includes("/api/datasets")) return "Načítám dávku...";
   if (text.includes("/api/settings")) return method === "GET" ? "Načítám nastavení..." : "Ukládám nastavení...";
   if (text.includes("/api/product-feed/check")) return "Ověřuji produktový feed...";
@@ -837,7 +884,8 @@ async function responseTextWithProgress(response, progressId) {
 
 async function fetchJson(path, options = {}) {
   const { progress = true, progressLabel = "", headers: customHeaders, ...fetchOptions } = options;
-  const headers = fetchOptions.body
+  const isFormData = typeof FormData !== "undefined" && fetchOptions.body instanceof FormData;
+  const headers = fetchOptions.body && !isFormData
     ? { "Content-Type": "application/json", ...(customHeaders || {}) }
     : customHeaders || {};
   const progressId = progress ? beginGlobalProgress(progressLabel || progressLabelForRequest(path, fetchOptions)) : null;
@@ -885,6 +933,7 @@ function collectCompletionProductImageCodes(rows) {
 
 function collectCurrentProductImageCodes() {
   const codes = collectProductImageCodesFromItems(state.items || []);
+  collectProductImageCodesFromItems(warehouseState.rows || []).forEach((code) => codes.add(code));
   collectCompletionProductImageCodes(completionState.rows || []).forEach((code) => codes.add(code));
   if (completionWorkflowState.row) {
     collectProductImageCodesFromItems(workflowPhysicalItems(completionWorkflowState.row)).forEach((code) => codes.add(code));
@@ -930,6 +979,7 @@ async function ensureProductImagesForCodes(codes, options = {}) {
 
   if (options.render !== false) {
     renderAll();
+    renderWarehouse();
     renderCompletion();
     renderWorkflow();
   }
@@ -1075,6 +1125,7 @@ function applyRoleVisibility() {
   els.tabSettings.classList.toggle("hidden", !admin);
   els.expeditionDeleteDay?.classList.toggle("hidden", !admin);
   els.expeditionTrashToggle?.classList.toggle("hidden", !admin);
+  els.warehouseUploadTrigger?.classList.toggle("hidden", !admin);
   updateExpeditionDeleteButton();
   if (admin) {
     els.expeditionDayLock?.classList.add("hidden");
@@ -1134,6 +1185,8 @@ function startAppForUser(user) {
     loadState();
     renderAll();
     renderSortingOptions();
+    renderWarehouseOptions();
+    renderWarehouse();
     renderCompletion();
     renderWorkflow();
     setMessage(
@@ -1226,8 +1279,13 @@ async function changePassword() {
 
 function datasetLabel(dataset) {
   if (!dataset) return "Bez dávky";
-  const shop = dataset.shopName || dataset.shopCode || "neznámý e-shop";
-  const kind = dataset.datasetKind === "completion" ? "kompletace" : dataset.datasetKind;
+  const isWarehouse = dataset.datasetKind === "warehouse";
+  const shop = isWarehouse ? "sklad" : (dataset.shopName || dataset.shopCode || "neznámý e-shop");
+  const kind = dataset.datasetKind === "completion"
+    ? "kompletace"
+    : isWarehouse
+      ? "vyskladnění"
+      : dataset.datasetKind;
   const status = dataset.status && dataset.status !== "active" ? ` | ${dataset.status}` : "";
   return `${dataset.batchName || dataset.datasetDate} ${dataset.datasetTime} | ${shop} | ${kind} | ${dataset.rowsCount} řádků${status}`;
 }
@@ -1240,10 +1298,11 @@ function dayLabel(day) {
 
 function datasetInfoHtml(dataset) {
   if (!dataset) return `<span>Žádná aktivní dávka</span>`;
+  const isWarehouse = dataset.datasetKind === "warehouse";
   return `
     <span><strong>${escapeHtml(dataset.batchName || dataset.datasetDate)}</strong></span>
     <span>${escapeHtml(dataset.datasetTime || "")}</span>
-    <span>${escapeHtml(dataset.shopName || dataset.shopCode || "e-shop neurčen")}</span>
+    <span>${escapeHtml(isWarehouse ? "Vyskladnění" : (dataset.shopName || dataset.shopCode || "e-shop neurčen"))}</span>
     <span>${escapeHtml(dataset.rowsCount || 0)} řádků</span>
     <span>${escapeHtml(dataset.status || "active")}</span>
   `;
@@ -1752,6 +1811,7 @@ function hasSelectedExpeditionDay() {
 
 function activeModuleView() {
   if (els.tabCompletion?.classList.contains("active")) return "completion";
+  if (els.tabWarehouse?.classList.contains("active")) return "warehouse";
   if (els.tabEans?.classList.contains("active")) return "eans";
   if (els.tabAudit?.classList.contains("active")) return "audit";
   if (els.tabSettings?.classList.contains("active")) return "settings";
@@ -1764,6 +1824,11 @@ function clearSelectedExpeditionDayData(options = {}) {
   sortingState.dataset = null;
   sortingState.reportItems = [];
   sortingState.loaded = false;
+  warehouseState.datasets = [];
+  warehouseState.dataset = null;
+  warehouseState.rows = [];
+  warehouseState.loaded = false;
+  warehouseState.savingRows.clear();
   completionState.datasets = [];
   completionState.dataset = null;
   completionState.rows = [];
@@ -1798,11 +1863,14 @@ function clearSelectedExpeditionDayData(options = {}) {
   renderExpeditionBatchReport();
   hidePacketaDryRunResult();
   setMessage("Vyber expediční den vlevo.", "neutral");
+  setWarehouseMessage("Vyber expediční den vlevo.", "neutral");
   setCompletionMessage("Vyber expediční den vlevo.", "neutral");
   setWorkflowMessage("Vyber expediční den vlevo.", "neutral");
 
   if (options.render === false) return;
   renderSortingOptions();
+  renderWarehouseOptions();
+  renderWarehouse();
   renderCompletionOptions();
   renderAll();
   renderWorkflow();
@@ -1811,9 +1879,10 @@ function clearSelectedExpeditionDayData(options = {}) {
 }
 
 function renderDayRequiredGuard(view = activeModuleView()) {
-  const guarded = (view === "sorting" || view === "completion") && !hasSelectedExpeditionDay();
+  const guarded = (view === "sorting" || view === "warehouse" || view === "completion") && !hasSelectedExpeditionDay();
   els.dayRequiredView?.classList.toggle("hidden", !guarded);
   els.sortingView.classList.toggle("hidden", view !== "sorting" || guarded);
+  els.warehouseView?.classList.toggle("hidden", view !== "warehouse" || guarded);
   els.completionView.classList.toggle("hidden", view !== "completion" || guarded);
   els.eansView?.classList.toggle("hidden", view !== "eans");
   els.auditView?.classList.toggle("hidden", view !== "audit");
@@ -1848,10 +1917,24 @@ function switchView(view, options = {}) {
     view = "sorting";
   }
   const completion = view === "completion";
+  const warehouse = view === "warehouse";
   const eans = view === "eans";
   const audit = view === "audit";
   const settings = view === "settings";
-  els.tabSorting.classList.toggle("active", !completion && !eans && !audit && !settings);
+  const pageHeadings = {
+    sorting: ["Roztřídění zboží", "Roztřídění zboží (Původně EXCEL)"],
+    warehouse: ["Vyskladnění ze skladu", "Vyskladnění ze skladu"],
+    completion: ["Expedice", "Kompletace objednávek"],
+    eans: ["Administrace", "EAN katalog"],
+    audit: ["Administrace", "Audit operací"],
+    settings: ["Administrace", "Nastavení aplikace"],
+  };
+  const [sectionLabel, pageTitle] = pageHeadings[view] || pageHeadings.sorting;
+  if (els.appSectionLabel) els.appSectionLabel.textContent = sectionLabel;
+  if (els.appPageTitle) els.appPageTitle.textContent = pageTitle;
+  document.title = pageTitle;
+  els.tabSorting.classList.toggle("active", !completion && !warehouse && !eans && !audit && !settings);
+  els.tabWarehouse?.classList.toggle("active", warehouse);
   els.tabCompletion.classList.toggle("active", completion);
   els.tabEans?.classList.toggle("active", eans);
   els.tabAudit?.classList.toggle("active", audit);
@@ -1861,6 +1944,10 @@ function switchView(view, options = {}) {
 
   if (completion && !dayGuarded && !completionState.loaded) {
     loadCompletionDatasets();
+  }
+
+  if (warehouse && !dayGuarded) {
+    renderWarehouse();
   }
 
   if (eans) {
@@ -1880,7 +1967,7 @@ function switchView(view, options = {}) {
   }
 
   if (!dayGuarded) {
-    focusBarcodeInputForView(completion ? "completion" : !eans && !audit && !settings ? "sorting" : "");
+    focusBarcodeInputForView(completion ? "completion" : !warehouse && !eans && !audit && !settings ? "sorting" : "");
   }
 
   if (options.updateRoute !== false) {
@@ -1993,6 +2080,318 @@ function renderSortingOptions() {
   els.sortingDatasetInfo.innerHTML = datasetInfoHtml(sortingState.dataset);
 }
 
+function warehouseInitialQuantity(row) {
+  return Math.max(0, Math.trunc(toNumber(row?.initialQuantity ?? row?.quantity, 0)));
+}
+
+function warehouseRemainingQuantity(row) {
+  return Math.max(0, Math.min(warehouseInitialQuantity(row), Math.trunc(toNumber(row?.remaining, 0))));
+}
+
+function warehouseProductName(row) {
+  return String(row?.raw?.productName || row?.info || "").trim();
+}
+
+function warehouseAllocations(row) {
+  const rawAllocations = Array.isArray(row?.raw?.allocations) ? row.raw.allocations : [];
+  const parsed = rawAllocations
+    .map((item) => ({
+      quantity: Math.max(0, Math.trunc(toNumber(item?.quantity, 0))),
+      destination: Math.max(0, Math.trunc(toNumber(item?.destination, 0))),
+    }))
+    .filter((item) => item.quantity > 0 && item.destination > 0);
+  if (parsed.length) return parsed;
+
+  return String(row?.sequence || "")
+    .split(/[,;]+/)
+    .map((part) => part.trim().match(/^(\d+)\s*[x×]\s*(\d+)$/i))
+    .filter(Boolean)
+    .map((match) => ({ quantity: Number(match[1]), destination: Number(match[2]) }));
+}
+
+function warehouseImageHtml(row) {
+  const item = { ...row, productName: warehouseProductName(row) };
+  const image = productImageForItem(item);
+  const label = warehouseProductName(row) || row?.variantCode || row?.productCode || "Produkt";
+  if (!image) {
+    return `<span class="warehouse-photo-placeholder" aria-label="Fotografie zatím není dostupná">Bez fotky</span>`;
+  }
+  return `
+    <span class="product-image-frame warehouse-product-image" title="${escapeHtml(label)}">
+      <img src="${escapeHtml(image)}" alt="${escapeHtml(label)}" loading="lazy" decoding="async" />
+    </span>
+  `;
+}
+
+function warehouseAllocationChips(row) {
+  const allocations = warehouseAllocations(row);
+  if (!allocations.length) return `<span class="muted">Bez rozdělení</span>`;
+  return allocations
+    .map(
+      (item) => `
+        <span class="warehouse-allocation-chip" title="${escapeHtml(item.quantity)} ks do boxu ${escapeHtml(item.destination)}">
+          <span>Box ${escapeHtml(item.destination)}</span><b>${escapeHtml(item.quantity)} ks</b>
+        </span>
+      `
+    )
+    .join("");
+}
+
+function warehouseRowMatches(row, search) {
+  if (!search) return true;
+  const destinations = warehouseAllocations(row).map((item) => `box ${item.destination} ${item.destination}`).join(" ");
+  return normalize(
+    [row?.productCode, row?.variantCode, row?.variant, warehouseProductName(row), row?.sequence, destinations]
+      .filter(Boolean)
+      .join(" ")
+  ).includes(normalize(search));
+}
+
+function warehouseVisibleRows() {
+  const rows = (warehouseState.rows || []).filter((row) => {
+    if (!warehouseState.showCompleted && warehouseRemainingQuantity(row) === 0) return false;
+    return warehouseRowMatches(row, warehouseState.search);
+  });
+  const collator = new Intl.Collator("cs", { numeric: true, sensitivity: "base" });
+  return rows.sort((left, right) => {
+    if (warehouseState.sort === "quantity") {
+      return warehouseInitialQuantity(right) - warehouseInitialQuantity(left) || collator.compare(left.variantCode || "", right.variantCode || "");
+    }
+    if (warehouseState.sort === "remaining") {
+      return warehouseRemainingQuantity(right) - warehouseRemainingQuantity(left) || collator.compare(left.variantCode || "", right.variantCode || "");
+    }
+    if (warehouseState.sort === "variant") {
+      return collator.compare(left.variantCode || "", right.variantCode || "");
+    }
+    return (
+      collator.compare(left.productCode || "", right.productCode || "") ||
+      collator.compare(left.variantCode || "", right.variantCode || "")
+    );
+  });
+}
+
+function warehouseDestinations(rows = warehouseState.rows) {
+  return new Set((rows || []).flatMap((row) => warehouseAllocations(row).map((item) => item.destination)));
+}
+
+function renderWarehouseSummary() {
+  const rows = warehouseState.rows || [];
+  const pieces = rows.reduce((sum, row) => sum + warehouseInitialQuantity(row), 0);
+  const remaining = rows.reduce((sum, row) => sum + warehouseRemainingQuantity(row), 0);
+  const progress = pieces > 0 ? Math.round(((pieces - remaining) / pieces) * 100) : 0;
+  if (els.warehouseMetricVariants) els.warehouseMetricVariants.textContent = String(rows.length);
+  if (els.warehouseMetricPieces) els.warehouseMetricPieces.textContent = String(pieces);
+  if (els.warehouseMetricRemaining) els.warehouseMetricRemaining.textContent = String(remaining);
+  if (els.warehouseMetricBoxes) els.warehouseMetricBoxes.textContent = String(warehouseDestinations(rows).size);
+  if (els.warehouseMetricProgress) els.warehouseMetricProgress.textContent = `${progress} %`;
+  if (els.warehouseProgressBar) els.warehouseProgressBar.style.width = `${progress}%`;
+}
+
+function renderWarehouseProducts(rows) {
+  if (!els.warehouseBody) return;
+  if (!rows.length) {
+    els.warehouseBody.innerHTML = `
+      <tr><td colspan="6" class="warehouse-empty">${
+        warehouseState.rows.length ? "Filtru neodpovídá žádný nehotový řádek." : "Pro tento den není nahrané vyskladnění."
+      }</td></tr>
+    `;
+    if (els.warehouseRowCount) els.warehouseRowCount.textContent = "0 řádků";
+    return;
+  }
+
+  els.warehouseBody.innerHTML = rows
+    .map((row) => {
+      const initial = warehouseInitialQuantity(row);
+      const remaining = warehouseRemainingQuantity(row);
+      const completed = remaining === 0;
+      const saving = warehouseState.savingRows.has(String(row.id));
+      return `
+        <tr class="warehouse-row ${completed ? "completed" : ""}" data-warehouse-row-id="${escapeHtml(row.id)}">
+          <td>
+            <div class="warehouse-product-cell">
+              ${warehouseImageHtml(row)}
+              <div>
+                <strong>${escapeHtml(row.variantCode || row.productCode || "Bez kódu")}</strong>
+                <span>${escapeHtml(warehouseProductName(row) || "Název produktu není v Excelu")}</span>
+                ${row.productCode ? `<small>Skupina ${escapeHtml(row.productCode)}</small>` : ""}
+              </div>
+            </div>
+          </td>
+          <td><span class="warehouse-variant">${escapeHtml(row.variant || "Bez varianty")}</span></td>
+          <td><div class="warehouse-allocation-list">${warehouseAllocationChips(row)}</div></td>
+          <td><span class="warehouse-quantity total">${escapeHtml(initial)} ks</span></td>
+          <td><span class="warehouse-quantity ${completed ? "done" : "remaining"}">${completed ? "Hotovo" : `${escapeHtml(remaining)} ks`}</span></td>
+          <td>
+            <div class="warehouse-row-actions">
+              <button type="button" class="secondary icon-button" data-warehouse-action="restore" data-row-id="${escapeHtml(row.id)}" title="Vrátit jeden kus" aria-label="Vrátit jeden kus" ${saving || remaining >= initial ? "disabled" : ""}>+</button>
+              <button type="button" class="secondary icon-button" data-warehouse-action="deduct" data-row-id="${escapeHtml(row.id)}" title="Odepsat jeden kus" aria-label="Odepsat jeden kus" ${saving || completed ? "disabled" : ""}>−</button>
+              <button type="button" class="warehouse-complete-action" data-warehouse-action="${completed ? "reset" : "complete"}" data-row-id="${escapeHtml(row.id)}" ${saving ? "disabled" : ""}>${completed ? "Vrátit řádek" : "Hotovo"}</button>
+            </div>
+          </td>
+        </tr>
+      `;
+    })
+    .join("");
+  if (els.warehouseRowCount) els.warehouseRowCount.textContent = `${rows.length} / ${warehouseState.rows.length} řádků`;
+}
+
+function renderWarehouseBoxes(rows) {
+  if (!els.warehouseBoxes) return;
+  const groups = new Map();
+  rows.forEach((row) => {
+    warehouseAllocations(row).forEach((allocation) => {
+      if (!groups.has(allocation.destination)) groups.set(allocation.destination, []);
+      groups.get(allocation.destination).push({ row, quantity: allocation.quantity });
+    });
+  });
+  const destinations = [...groups.keys()].sort((a, b) => a - b);
+  if (els.warehouseBoxCount) els.warehouseBoxCount.textContent = `${destinations.length} boxů`;
+  if (!destinations.length) {
+    els.warehouseBoxes.innerHTML = `<div class="warehouse-empty">Filtru neodpovídá žádný box.</div>`;
+    return;
+  }
+  els.warehouseBoxes.innerHTML = destinations
+    .map((destination) => {
+      const items = groups.get(destination) || [];
+      const pieces = items.reduce((sum, item) => sum + item.quantity, 0);
+      return `
+        <section class="warehouse-box-group">
+          <header><div><span>Box</span><strong>${escapeHtml(destination)}</strong></div><b>${escapeHtml(pieces)} ks</b></header>
+          <div class="warehouse-box-items">
+            ${items
+              .sort((left, right) => String(left.row.variantCode || "").localeCompare(String(right.row.variantCode || ""), "cs", { numeric: true }))
+              .map(
+                ({ row, quantity }) => `
+                  <div class="warehouse-box-item ${warehouseRemainingQuantity(row) === 0 ? "completed" : ""}">
+                    ${warehouseImageHtml(row)}
+                    <div><strong>${escapeHtml(row.variantCode || row.productCode)}</strong><span>${escapeHtml(row.variant || warehouseProductName(row))}</span></div>
+                    <b>${escapeHtml(quantity)} ks</b>
+                  </div>
+                `
+              )
+              .join("")}
+          </div>
+        </section>
+      `;
+    })
+    .join("");
+}
+
+function renderWarehouse() {
+  if (!els.warehouseView) return;
+  const rows = warehouseVisibleRows();
+  renderWarehouseSummary();
+  renderWarehouseProducts(rows);
+  renderWarehouseBoxes(rows);
+  const boxes = warehouseState.view === "boxes";
+  els.warehouseProductsPanel?.classList.toggle("hidden", boxes);
+  els.warehouseBoxesPanel?.classList.toggle("hidden", !boxes);
+  document.querySelectorAll("[data-warehouse-view]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.warehouseView === warehouseState.view);
+  });
+}
+
+function renderWarehouseOptions() {
+  if (!els.warehouseDataset) return;
+  els.warehouseDataset.innerHTML = "";
+  if (!warehouseState.datasets.length) {
+    els.warehouseDataset.innerHTML = `<option value="">Žádná dávka vyskladnění</option>`;
+    if (els.warehouseDatasetInfo) els.warehouseDatasetInfo.innerHTML = datasetInfoHtml(null);
+    return;
+  }
+  warehouseState.datasets.forEach((dataset) => {
+    const option = document.createElement("option");
+    option.value = dataset.id;
+    option.textContent = datasetLabel(dataset);
+    els.warehouseDataset.appendChild(option);
+  });
+  if (warehouseState.dataset) els.warehouseDataset.value = String(warehouseState.dataset.id);
+  if (els.warehouseDatasetInfo) els.warehouseDatasetInfo.innerHTML = datasetInfoHtml(warehouseState.dataset);
+}
+
+function applyWarehouseDataset(dataset, rows) {
+  warehouseState.dataset = dataset || null;
+  warehouseState.rows = rows || [];
+  warehouseState.loaded = true;
+  renderWarehouseOptions();
+  renderWarehouse();
+  ensureProductImagesForCodes(collectProductImageCodesFromItems(warehouseState.rows));
+  if (dataset) {
+    setWarehouseMessage(`Načteno vyskladnění: ${datasetLabel(dataset)}.`, "success");
+  }
+}
+
+async function loadWarehouseDataset(datasetId) {
+  if (!hasSelectedExpeditionDay()) {
+    setWarehouseMessage("Nejdřív vyber expediční den vlevo.", "warning");
+    return;
+  }
+  if (!datasetId) return;
+  setWarehouseMessage("Načítám vybrané vyskladnění...", "neutral");
+  try {
+    const data = await fetchJson(`/api/datasets/${encodeURIComponent(datasetId)}`);
+    applyWarehouseDataset(data.dataset || null, data.rows || []);
+  } catch (error) {
+    setWarehouseMessage(`Vyskladnění se nepodařilo načíst: ${error.message}`, "error");
+  }
+}
+
+async function uploadWarehouseWorkbook(file) {
+  if (!isAdmin()) {
+    setWarehouseMessage("Excel vyskladnění může nahrát jen admin.", "warning");
+    return;
+  }
+  if (!expeditionState.day?.id) {
+    setWarehouseMessage("Nejdřív vyber expediční den vlevo.", "warning");
+    return;
+  }
+  const formData = new FormData();
+  formData.append("expeditionDayId", String(expeditionState.day.id));
+  formData.append("file", file, file.name);
+  setWarehouseMessage(`Nahrávám ${file.name}...`, "neutral");
+  try {
+    const data = await fetchJson("/api/warehouse/upload-xlsx", {
+      method: "POST",
+      body: formData,
+      progressLabel: "Nahrávám Excel vyskladnění...",
+    });
+    const currentDate = expeditionState.day.date;
+    setWarehouseMessage(
+      `Nahráno ${data.summary?.variants || data.rows?.length || 0} variant, ${data.summary?.pieces || 0} kusů do ${data.summary?.destinations || 0} boxů.`,
+      "success"
+    );
+    await loadExpeditionDays(currentDate);
+  } catch (error) {
+    setWarehouseMessage(`Excel se nepodařilo nahrát: ${error.message}`, "error");
+  }
+}
+
+async function updateWarehouseRow(rowId, action) {
+  const key = String(rowId);
+  if (!rowId || warehouseState.savingRows.has(key)) return;
+  warehouseState.savingRows.add(key);
+  renderWarehouse();
+  try {
+    const data = await fetchJson(`/api/warehouse/rows/${encodeURIComponent(rowId)}`, {
+      method: "PATCH",
+      body: JSON.stringify({ action }),
+    });
+    const index = warehouseState.rows.findIndex((row) => String(row.id) === key);
+    if (index >= 0 && data.row) warehouseState.rows[index] = data.row;
+    setWarehouseMessage(
+      data.row && warehouseRemainingQuantity(data.row) === 0
+        ? `${data.row.variantCode || "Řádek"}: hotovo.`
+        : `${data.row?.variantCode || "Řádek"}: zbývá ${warehouseRemainingQuantity(data.row)} ks.`,
+      "success"
+    );
+  } catch (error) {
+    setWarehouseMessage(`Změnu se nepodařilo uložit: ${error.message}`, "error");
+  } finally {
+    warehouseState.savingRows.delete(key);
+    renderWarehouse();
+  }
+}
+
 async function loadExpeditionDays(preferredDate = "") {
   expeditionState.showInactive = isAdmin() && els.expeditionShowInactive.checked;
   setExpeditionDaySummary(`<span>Načítám expediční dny...</span>`, { employeeVisible: true });
@@ -2041,11 +2440,16 @@ async function loadExpeditionDay(dayDate) {
   const data = await fetchJson(`/api/expedition-days/${encodeURIComponent(dayDate)}/full${includeInactiveQuery()}`);
   expeditionState.day = data.day || null;
   sortingState.datasets = data.sorting || [];
+  warehouseState.datasets = data.warehouse || [];
   completionState.datasets = data.completion || [];
   sortingState.loaded = true;
+  warehouseState.loaded = true;
   completionState.loaded = true;
   sortingState.dataset = null;
   sortingState.reportItems = [];
+  warehouseState.dataset = null;
+  warehouseState.rows = [];
+  warehouseState.savingRows.clear();
   completionState.dataset = null;
   completionState.rows = [];
   resetCompletionStockPiecesSnapshot();
@@ -2085,6 +2489,7 @@ async function loadExpeditionDay(dayDate) {
   }
 
   renderSortingOptions();
+  renderWarehouseOptions();
   renderCompletionOptions();
   renderExpeditionBatchReport();
 
@@ -2096,6 +2501,21 @@ async function loadExpeditionDay(dayDate) {
     resetCompletionStockPiecesSnapshot();
     renderSortingOptions();
     setMessage("Pro vybraný expediční den není nahrané roztřídění.", "warning");
+  }
+
+  if (data.activeWarehouse?.dataset) {
+    applyWarehouseDataset(data.activeWarehouse.dataset, data.activeWarehouse.rows || []);
+  } else {
+    warehouseState.dataset = null;
+    warehouseState.rows = [];
+    renderWarehouseOptions();
+    renderWarehouse();
+    setWarehouseMessage(
+      isAdmin()
+        ? "Pro vybraný den není nahrané vyskladnění. Nahraj Excel tlačítkem nahoře."
+        : "Pro vybraný den zatím není nahrané vyskladnění.",
+      "warning"
+    );
   }
 
   if (data.activeCompletion?.dataset) {
@@ -7798,6 +8218,7 @@ els.expeditionDayList.addEventListener("click", (event) => {
 });
 
 els.tabSorting.addEventListener("click", () => switchView("sorting"));
+els.tabWarehouse?.addEventListener("click", () => switchView("warehouse"));
 els.tabCompletion.addEventListener("click", () => switchView("completion"));
 els.tabEans?.addEventListener("click", () => switchView("eans"));
 els.tabAudit?.addEventListener("click", () => switchView("audit"));
@@ -7855,6 +8276,36 @@ els.sortingRefresh.addEventListener("click", () => {
 });
 els.sortingDataset.addEventListener("change", () => {
   loadSortingDataset(els.sortingDataset.value);
+});
+els.warehouseRefresh?.addEventListener("click", () => loadWarehouseDataset(els.warehouseDataset?.value));
+els.warehouseDataset?.addEventListener("change", () => loadWarehouseDataset(els.warehouseDataset.value));
+els.warehouseUpload?.addEventListener("change", (event) => {
+  const file = event.target.files?.[0];
+  if (file) uploadWarehouseWorkbook(file);
+  event.target.value = "";
+});
+els.warehouseSearch?.addEventListener("input", () => {
+  warehouseState.search = els.warehouseSearch.value.trim();
+  renderWarehouse();
+});
+els.warehouseSort?.addEventListener("change", () => {
+  warehouseState.sort = els.warehouseSort.value || "product";
+  renderWarehouse();
+});
+els.warehouseShowCompleted?.addEventListener("change", () => {
+  warehouseState.showCompleted = els.warehouseShowCompleted.checked;
+  renderWarehouse();
+});
+document.querySelectorAll("[data-warehouse-view]").forEach((button) => {
+  button.addEventListener("click", () => {
+    warehouseState.view = button.dataset.warehouseView === "boxes" ? "boxes" : "products";
+    renderWarehouse();
+  });
+});
+els.warehouseBody?.addEventListener("click", (event) => {
+  const button = event.target.closest("button[data-warehouse-action]");
+  if (!button) return;
+  updateWarehouseRow(button.dataset.rowId, button.dataset.warehouseAction);
 });
 els.completionRefresh.addEventListener("click", () => loadCompletionDatasets());
 els.paymentFeedSync.addEventListener("click", syncPaymentFeedsManually);

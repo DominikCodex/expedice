@@ -4,9 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Roztřídění zboží</title>
-    <link rel="stylesheet" href="styles.css?v=address-suggestion-actions-20260725-2" />
+    <link rel="stylesheet" href="styles.css?v=warehouse-xlsx-20260918-1" />
     <script defer src="seed-data.js"></script>
-    <script defer src="app.js?v=address-suggestion-actions-20260725-2"></script>
+    <script defer src="app.js?v=warehouse-xlsx-20260918-1"></script>
   </head>
   <body>
     <aside id="global-progress" class="global-progress hidden" role="status" aria-live="polite" aria-atomic="true">
@@ -62,8 +62,8 @@
     <main id="app-shell" class="shell hidden">
       <header class="topbar">
         <div>
-          <p class="eyebrow">Roztřídění zboží</p>
-          <h1>Roztřídění zboží (Původně EXCEL)</h1>
+          <p id="app-section-label" class="eyebrow">Roztřídění zboží</p>
+          <h1 id="app-page-title">Roztřídění zboží (Původně EXCEL)</h1>
         </div>
         <div class="user-panel" aria-label="Uživatel">
           <span id="auth-user-name">Nepřihlášen</span>
@@ -115,6 +115,7 @@
         <section class="module-area">
           <nav class="view-tabs" aria-label="Moduly expedice">
             <button id="tab-sorting" type="button" class="tab-button active">Roztřídění</button>
+            <button id="tab-warehouse" type="button" class="tab-button">Vyskladnění</button>
             <button id="tab-completion" type="button" class="tab-button">Kompletace</button>
             <button id="tab-eans" type="button" class="tab-button hidden">EANY</button>
             <button id="tab-audit" type="button" class="tab-button hidden">Audit</button>
@@ -124,7 +125,7 @@
           <section id="day-required-view" class="day-required-view hidden" aria-live="polite">
             <p class="eyebrow">Expediční den</p>
             <h2>Vyber expediční den vlevo</h2>
-            <p>Roztřídění a kompletace se načtou až po výběru konkrétního data.</p>
+            <p>Roztřídění, vyskladnění a kompletace se načtou až po výběru konkrétního data.</p>
           </section>
 
           <section id="sorting-view" class="app-view">
@@ -223,6 +224,93 @@
                 </div>
                 <div id="history-list" class="history-list"></div>
               </aside>
+            </section>
+          </section>
+
+          <section id="warehouse-view" class="app-view hidden">
+            <section class="dataset-toolbar warehouse-toolbar" aria-label="Dávka vyskladnění">
+              <label class="field">
+                <span>Dávka vyskladnění</span>
+                <select id="warehouse-dataset"></select>
+              </label>
+              <button id="warehouse-refresh" type="button" class="secondary">Načíst vyskladnění</button>
+              <label id="warehouse-upload-trigger" class="secondary file-trigger hidden" for="warehouse-upload">Nahrát Excel</label>
+              <input id="warehouse-upload" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" />
+              <div id="warehouse-dataset-info" class="dataset-summary">Pro vybraný den zatím není nahrané vyskladnění.</div>
+            </section>
+
+            <section id="warehouse-message" class="message neutral" aria-live="polite"></section>
+
+            <section class="warehouse-summary" aria-label="Souhrn vyskladnění">
+              <div><strong id="warehouse-metric-variants">0</strong><span>Variant</span></div>
+              <div><strong id="warehouse-metric-pieces">0</strong><span>Kusů celkem</span></div>
+              <div><strong id="warehouse-metric-remaining">0</strong><span>Zbývá kusů</span></div>
+              <div><strong id="warehouse-metric-boxes">0</strong><span>Boxů</span></div>
+              <div class="warehouse-progress-metric">
+                <strong id="warehouse-metric-progress">0 %</strong>
+                <span>Hotovo</span>
+                <span class="warehouse-progress-track" aria-hidden="true"><i id="warehouse-progress-bar"></i></span>
+              </div>
+            </section>
+
+            <section class="warehouse-controls" aria-label="Zobrazení vyskladnění">
+              <div class="warehouse-view-switch" role="group" aria-label="Seskupení vyskladnění">
+                <button type="button" class="secondary active" data-warehouse-view="products">Podle produktu</button>
+                <button type="button" class="secondary" data-warehouse-view="boxes">Podle boxu</button>
+              </div>
+              <label class="field warehouse-search-field">
+                <span>Hledat</span>
+                <input id="warehouse-search" autocomplete="off" placeholder="Kód, název, varianta nebo box..." />
+              </label>
+              <label class="field">
+                <span>Řazení</span>
+                <select id="warehouse-sort">
+                  <option value="product">Produkt a varianta</option>
+                  <option value="variant">Kód varianty</option>
+                  <option value="quantity">Nejvíc kusů</option>
+                  <option value="remaining">Nejvíc zbývá</option>
+                </select>
+              </label>
+              <label class="toggle warehouse-completed-toggle">
+                <input id="warehouse-show-completed" type="checkbox" />
+                <span>Zobrazit hotové</span>
+              </label>
+            </section>
+
+            <section id="warehouse-products-panel" class="table-panel warehouse-panel">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Vyskladnění ze skladu</p>
+                  <h2>Produkty k vychystání</h2>
+                </div>
+                <div id="warehouse-row-count" class="row-count">0 řádků</div>
+              </div>
+              <div class="table-wrap">
+                <table class="warehouse-table">
+                  <thead>
+                    <tr>
+                      <th>Produkt</th>
+                      <th>Varianta</th>
+                      <th>Rozdělit do boxů</th>
+                      <th>Celkem</th>
+                      <th>Zbývá</th>
+                      <th>Akce</th>
+                    </tr>
+                  </thead>
+                  <tbody id="warehouse-body"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section id="warehouse-boxes-panel" class="warehouse-boxes-panel hidden" aria-live="polite">
+              <div class="section-head">
+                <div>
+                  <p class="eyebrow">Rozdělení zboží</p>
+                  <h2>Obsah jednotlivých boxů</h2>
+                </div>
+                <div id="warehouse-box-count" class="row-count">0 boxů</div>
+              </div>
+              <div id="warehouse-boxes" class="warehouse-boxes"></div>
             </section>
           </section>
 

@@ -118,6 +118,14 @@ web: gunicorn app:app
 
 Databázové změny nejsou řízené externím migračním frameworkem. `ensure_schema()` v `app.py` používá idempotentní `CREATE TABLE IF NOT EXISTS` a `ALTER ... IF NOT EXISTS`. Každá další změna schématu musí zachovat tento styl, být opakovatelná a nesmí mazat existující produkční data.
 
+### Vyskladnění ze skladu
+
+Záložka `Vyskladnění` používá stávající tabulky `datasets` a `dataset_rows` s `dataset_kind = warehouse`; nevznikla další databázová tabulka. Administrátor může k vybranému expedičnímu dni nahrát `.xlsx` přes `POST /api/warehouse/upload-xlsx`. Aktivní starší skladová dávka téhož dne se měkce nahradí novou. Běžní přihlášení uživatelé mohou přes `PATCH /api/warehouse/rows/<id>` odepisovat, vracet nebo dokončit řádek. Hodnota `remaining` je uložena na serveru a změny jsou auditované.
+
+Podporovaný Excel má na prvním viditelném listu ve sloupcích B-E hlavičky `Kód varianty:`, `Varianta:`, `Kolik a kam s tím:` a `Celk.:`. Rozdělení do boxů používá zápis `množství x číslo boxu`, například `1x3, 2x14`. Import odmítne neznámý formát i nesoulad mezi rozepsaným a celkovým množstvím. Fotografie se dohledávají stávajícím produktovým feedem podle SKU; chybějící fotografie mají textový placeholder.
+
+Backendový parser pokrývá `tests/test_warehouse_workbook.py`, pracovní obrazovku a podporovaná rozlišení `tests/e2e/warehouse.spec.js`.
+
 ## 4. Datový model
 
 Hlavní tabulky:
@@ -611,6 +619,7 @@ Backendové testy jsou v:
 - `tests/test_expedition_editor.py`
 - `tests/test_integrity.py`
 - `tests/test_post_upload_checks.py`
+- `tests/test_warehouse_workbook.py`
 
 ### 18.3 Playwright
 
@@ -624,6 +633,7 @@ Hlavní scénáře:
 - `tests/e2e/bulk-day-delete.spec.js`
 - `tests/e2e/completion-quick-actions.spec.js`
 - `tests/e2e/post-upload-checks.spec.js`
+- `tests/e2e/warehouse.spec.js`
 - `tests/e2e/visual.spec.js`
 
 Playwright používá lokální mock server na portu `8123` a Chromium. Nemá měnit produkční data. Přihlašovací údaje nesmí být pevně zapsané v testech.

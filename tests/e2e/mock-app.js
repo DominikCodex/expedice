@@ -1,6 +1,7 @@
-const day = { id: 1, date: "2026-07-08", label: "8.7.2026", status: "active", activeBatches: 2, rowsCount: 12 };
+const day = { id: 1, date: "2026-07-08", label: "8.7.2026", status: "active", activeBatches: 3, rowsCount: 14 };
 const sortingDataset = { id: 11, datasetKind: "sorting", datasetDate: day.date, datasetTime: "06:20:18", label: "Test roztřídění", rowsCount: 5, status: "active" };
 const completionDataset = { id: 12, datasetKind: "completion", datasetDate: day.date, datasetTime: "06:20:18", label: "Test kompletace", rowsCount: 2, status: "active", shopCode: "galantra_cz" };
+const warehouseDataset = { id: 13, datasetKind: "warehouse", datasetDate: day.date, datasetTime: "06:22:00", label: "Test vyskladnění", rowsCount: 2, status: "active" };
 
 const sortingRows = [
   { id: 101, datasetId: 11, orderNumber: "42006263", sequence: "3", variantCode: "GBTW-3101-LXL-CERNA", productCode: "GBTW-3101", variant: "černá / L/XL", quantity: "2", initialQuantity: "2", remaining: 1, info: "Dámské bambusové kalhotky klasik", paircode: "GBTWP" },
@@ -11,6 +12,11 @@ const sortingRows = [
 const completionRows = [
   { id: 201, datasetId: 12, shopCode: "galantra_cz", orderNumber: "42006263", orderId: "1665", expeditionNumber: "19", expeditionOrderCode: "3", firstName: "NIKOLA", lastName: "VRABLIKOVA", streetWithNumber: "Vstiš 21", city: "Vstiš", zipCode: "33441", quantity: "3", paidStatus: "Dobírka", shippingMethod: "Osobní odběr na pobočce Zásilkovna.cz", completionStatus: "", raw: { items: [{ variantCode: "GBTW-3101-LXL-CERNA", quantity: 2, name: "Dámské bambusové kalhotky klasik" }, { variantCode: "GBTW-3101-LXL-RUZOVA", quantity: 1, name: "Dámské bambusové kalhotky klasik" }] }, cells: [] },
   { id: 202, datasetId: 12, shopCode: "galantra_cz", orderNumber: "42006264", expeditionNumber: "20", expeditionOrderCode: "0.8", firstName: "KVĚTOSLAVA", lastName: "MALÁ", streetWithNumber: "U Branišovského lesa 1", city: "České Budějovice", zipCode: "37005", quantity: "1", paidStatus: "Zaplaceno", shippingMethod: "Zásilkovna", completionStatus: "STORNO", raw: { items: [{ variantCode: "03019-MBH-LXL-UPE", quantity: 1, name: "Velmi dlouhý název produktu pro kontrolu bezpečného ořezání textu na malém skladovém monitoru" }] }, cells: [] },
+];
+
+const warehouseRows = [
+  { id: 301, datasetId: 13, rowNumber: 2, productCode: "6002P", variantCode: "6002-HOLLAND-LXL-CERNA", variant: "Velikost: L/XL, Barva: černá", quantity: "3", initialQuantity: "3", remaining: 3, sequence: "1x3, 2x14", info: "Dámské hladké kalhotky s vyšším pasem", raw: { productName: "Dámské hladké kalhotky s vyšším pasem", allocations: [{ quantity: 1, destination: 3 }, { quantity: 2, destination: 14 }] } },
+  { id: 302, datasetId: 13, rowNumber: 3, productCode: "GBTWP", variantCode: "GBTW-3109-SM-TELOVA", variant: "tělová / S/M", quantity: "1", initialQuantity: "1", remaining: 0, sequence: "1x6", info: "Bambusové vyšší dámské boxerky", raw: { productName: "Bambusové vyšší dámské boxerky", allocations: [{ quantity: 1, destination: 6 }] } },
 ];
 
 completionRows[0] = {
@@ -61,7 +67,7 @@ async function mockExpeditionApp(page, role = "admin") {
       const dates = request.postDataJSON()?.dates || [];
       return json(route, { ok: true, deletedDays: dates.length, deletedDatasets: dates.length * 2, expeditionDays: dates.map((date) => ({ date, status: "deleted" })) });
     }
-    if (pathname === `/api/expedition-days/${day.date}/full`) return json(route, { day, sorting: [sortingDataset], completion: [completionDataset], activeSorting: { dataset: sortingDataset, rows: sortingRows }, activeCompletion: { dataset: completionDataset, rows: completionRows } });
+    if (pathname === `/api/expedition-days/${day.date}/full`) return json(route, { day, sorting: [sortingDataset], warehouse: [warehouseDataset], completion: [completionDataset], activeSorting: { dataset: sortingDataset, rows: sortingRows }, activeWarehouse: { dataset: warehouseDataset, rows: warehouseRows }, activeCompletion: { dataset: completionDataset, rows: completionRows } });
     if (pathname === "/api/expedition-days/1/report") return json(route, { day, snapshot: { id: 1, metrics: { orders: 2, pieces: 4, stockOrders: 1, stockPieces: 1, addressErrors: 0, paymentWarnings: 0, codeRanges: [{ start: 19, end: 19, code: "3", count: 1 }, { start: 20, end: 20, code: "0.8", count: 1 }] } }, live: { sortingRemaining: 2 } });
     if (pathname === "/api/expedition-days/1/checks/latest") return json(route, { ok: true, automation: { postUploadPaymentCheck: true, postUploadAddressCheck: true }, job: { id: "check-1", kind: "post_upload_checks", status: "completed", phase: "done", progress: 100, current: 4, total: 4, message: "AutomatickĂˇ kontrola je dokonÄŤenĂˇ.", result: { payments: { status: "completed", current: 2, total: 2, problems: 2, errors: [] }, addresses: { status: "completed", current: 2, total: 2, problems: 1, suggestions: 1, errors: [] } } } });
     if (pathname === "/api/expedition-days/1/checks/retry" && request.method() === "POST") return json(route, { ok: true, checkJob: { id: "check-2", status: "queued", phase: "queued", progress: 0, current: 0, total: 4, message: "Kontrola ÄŤekĂˇ na spuĹˇtÄ›nĂ­.", result: { payments: { status: "queued", current: 0, total: 2 }, addresses: { status: "queued", current: 0, total: 2 } } } }, 202);
@@ -80,6 +86,17 @@ async function mockExpeditionApp(page, role = "admin") {
     if (pathname === "/api/pickup-points") return json(route, { ok: true, widgetKey: "test-key", catalog: { rowsCount: 1, refreshedAt: "2026-07-08T06:00:00Z" }, points: [{ carrier: url.searchParams.get("carrier"), country: "CZ", id: "1001", name: "Pobočka Praha", address: "Václavské náměstí 1", city: "Praha", zipCode: "11000", codAllowed: true }] });
     if (/\/api\/pickup-points\/(packeta|dpd)\//.test(pathname)) return json(route, { ok: true, point: { carrier: pathname.includes("dpd") ? "dpd" : "packeta", country: "CZ", id: "1001", name: "Pobočka Praha", address: "Václavské náměstí 1", city: "Praha", zipCode: "11000", codAllowed: true } });
     if (/\/api\/completion\/rows\/\d+\/workflow$/.test(pathname)) return json(route, { ok: true, row: { ...completionRows[0], completionStatus: "OK" }, integrityWarnings: [] });
+    if (/\/api\/warehouse\/rows\/\d+$/.test(pathname) && request.method() === "PATCH") {
+      const row = warehouseRows.find((item) => pathname.endsWith(`/${item.id}`));
+      const action = request.postDataJSON()?.action;
+      const initial = Number(row.initialQuantity || row.quantity || 0);
+      if (action === "deduct") row.remaining = Math.max(0, row.remaining - 1);
+      if (action === "restore") row.remaining = Math.min(initial, row.remaining + 1);
+      if (action === "complete") row.remaining = 0;
+      if (action === "reset") row.remaining = initial;
+      return json(route, { ok: true, row: { ...row } });
+    }
+    if (pathname === `/api/datasets/${warehouseDataset.id}`) return json(route, { dataset: warehouseDataset, rows: warehouseRows });
     if (pathname === "/api/product-images") return json(route, { ok: true, images: {} });
     if (pathname === "/api/payment-feeds/updates") return json(route, { rows: [] });
     if (pathname === "/api/audit-events") return json(route, { events: [], retentionDays: 90 });
