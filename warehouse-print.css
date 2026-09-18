@@ -28,7 +28,7 @@ h1 { margin: 0 0 5px; font-size: 24px; }
 .totals strong { font-size: 24px; }
 table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .photo-col { width: 8%; } .product-col { width: 29%; } .variant-col { width: 17%; }
-.quantity-col { width: 8%; } .boxes-col { width: 32%; } .check-col { width: 6%; }
+.quantity-col { width: 8%; } .boxes-col { width: 38%; }
 th { padding: 8px 6px; background: #e5eee9; border-bottom: 2px solid #416451; text-align: left; font-size: 11px; }
 td { padding: 4px 6px; border-bottom: 1px solid #bcc9c3; vertical-align: middle; overflow-wrap: anywhere; font-size: 12px; }
 tr.group-start td { border-top: 2px solid #6e897d; }
@@ -42,18 +42,17 @@ td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin:
 .allocations { display: flex; flex-wrap: wrap; gap: 4px 6px; }
 .allocation { display: inline-block; padding: 3px 6px; border: 1px solid #aabdb3; border-radius: 3px; white-space: nowrap; font-size: 12px; }
 .allocation b { font-size: 14px; }
-.check { display: block; width: 5mm; height: 5mm; margin: auto; border: 1px solid #53685d; }
 [data-orientation="portrait"] .photo-col { width: 10%; }
 [data-orientation="portrait"] .product-col { width: 28%; }
-[data-orientation="portrait"] .boxes-col { width: 29%; }
-[data-orientation="portrait"] .check-col { width: 8%; }
+[data-orientation="portrait"] .boxes-col { width: 37%; }
 [data-orientation="portrait"] th { padding: 6px 4px; font-size: 10px; }
 [data-orientation="portrait"] td { padding: 4px; font-size: 11px; }
 [data-orientation="portrait"] .quantity { font-size: 19px; }
 [data-orientation="portrait"] .variant-value { font-size: 14px; }
 [data-orientation="portrait"] td img, [data-orientation="portrait"] .no-photo { width: 12mm; height: 12mm; max-width: 100%; }
-[data-orientation="portrait"] .allocation { padding: 3px 4px; font-size: 11px; }
+[data-orientation="portrait"] .allocation { padding: 3px 2px; font-size: 11px; }
 [data-orientation="portrait"] .allocation b { font-size: 13px; }
+[data-orientation="portrait"] .allocations { column-gap: 3px; }
 [data-density="compact"] .sheet-heading { margin-bottom: 2mm; }
 [data-density="compact"] h1, [data-density="compact"] .totals strong { font-size: 20px; }
 [data-density="compact"] .photo-col { width: 6%; }
@@ -71,7 +70,8 @@ td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin:
 [data-density="compact"] .allocations { gap: 2px 4px; }
 [data-density="compact"] .allocation { padding: 1px 4px; font-size: 11px; }
 [data-density="compact"] .allocation b { font-size: 13px; }
-[data-density="compact"] .check { width: 4mm; height: 4mm; }
+[data-density="compact"][data-orientation="portrait"] .allocation { padding-inline: 2px; }
+[data-density="compact"][data-orientation="portrait"] .allocations { column-gap: 3px; }
 @page {
   size: A4 landscape;
   margin: 10mm;

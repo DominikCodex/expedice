@@ -67,7 +67,6 @@
         <td><span class="product-name">${escape(name)}</span><span class="sku">${escape(row.variantCode)}</span></td>
         <td><span class="variant-value">${escape(displayVariant(row.variant))}</span></td><td class="quantity">${escape(quantity(row))}</td>
         <td><div class="allocations">${allocations(row).map((item) => `<span class="allocation"><b>${escape(item.quantity)} ks</b> → box <b>${escape(item.destination)}</b></span>`).join("")}</div></td>
-        <td><span class="check" aria-label="Místo pro ruční odškrtnutí"></span></td>
       </tr>`;
     }).join("");
   }

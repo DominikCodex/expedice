@@ -96,6 +96,37 @@ test("odkaz z Excelu po přihlášení otevře stejnou sestavu", async ({ page }
   expect(page.url()).toContain("dataset=71");
 });
 
+test("boxy využijí sloupec Hotovo a vejdou se alespoň tři vedle sebe", async ({ page }) => {
+  const distribution = [[2, 7], [2, 14], [1, 18], [4, 20], [1, 27], [2, 28], [1, 52], [2, 56], [3, 62], [1, 66], [1, 67], [4, 68], [2, 74], [2, 78]];
+  const rows = [{ ...fixture()[0], raw: null, quantity: 28, initialQuantity: 28,
+    sequence: distribution.map(([quantity, box]) => `${quantity}x${box}`).join(", ") }];
+  await page.route("**/api/datasets/71", (route) => route.fulfill({ json: { dataset: { datasetKind: "warehouse_print" }, rows } }));
+  await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/warehouse-print.html?dataset=71");
+  await expect(page.locator("#print")).toBeEnabled();
+  await expect(page.getByRole("columnheader", { name: "Hotovo" })).toHaveCount(0);
+  await expect(page.locator("#rows tr td")).toHaveCount(5);
+  await expect(page.locator(".check")).toHaveCount(0);
+  for (const [orientation, label] of [["portrait", "Na výšku"], ["landscape", "Na šířku"]]) {
+    await page.getByText(label, { exact: true }).click();
+    for (const [density, densityLabel] of [["normal", "Běžné"], ["compact", "Kompaktní"]]) {
+      await page.getByText(densityLabel, { exact: true }).click();
+      await expect(page.locator(".allocation")).toHaveText(distribution.map(([quantity, box]) => `${quantity} ks → box ${box}`));
+      const layout = await page.locator(".allocation").evaluateAll((nodes) => nodes.map((node) => {
+        const rect = node.getBoundingClientRect();
+        return { top: rect.top, right: rect.right, width: node.clientWidth, content: node.scrollWidth, available: node.parentElement.clientWidth };
+      }));
+      expect(layout.filter((rect) => Math.abs(rect.top - layout[0].top) < 1).length, JSON.stringify(layout.slice(0, 3))).toBeGreaterThanOrEqual(3);
+      expect(new Set(layout.map((rect) => Math.round(rect.top))).size).toBeLessThanOrEqual(5);
+      expect(layout.every((rect) => rect.content <= rect.width)).toBe(true);
+      expect(await page.locator("#sheet").evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+      await page.screenshot({ path: `test-results/warehouse-boxes-${orientation}-${density}.png` });
+      await page.pdf({ path: `test-results/warehouse-boxes-${orientation}-${density}.pdf`, preferCSSPageSize: true, printBackground: true });
+    }
+  }
+});
+
 test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", async ({ page }, testInfo) => {
   const output = testInfo.outputPath("vyskladneni.html");
   const localPython = path.resolve(process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python");
