@@ -632,6 +632,7 @@ def ensure_schema():
                 INSERT INTO expedition_days (day_date, label)
                 SELECT DISTINCT dataset_date, TO_CHAR(dataset_date, 'FMDD.FMMM.YYYY')
                 FROM datasets
+                WHERE dataset_kind <> 'warehouse_print'
                 ON CONFLICT (day_date) DO UPDATE SET
                     label = EXCLUDED.label,
                     updated_at = NOW()
@@ -644,6 +645,7 @@ def ensure_schema():
                     batch_name = COALESCE(NULLIF(d.batch_name, ''), ed.label)
                 FROM expedition_days ed
                 WHERE d.dataset_date = ed.day_date
+                  AND d.dataset_kind <> 'warehouse_print'
                   AND (d.expedition_day_id IS NULL OR d.batch_name IS NULL OR d.batch_name = '')
                 """
             )
@@ -1356,7 +1358,7 @@ def enforce_api_auth():
     if path in public_paths:
         return None
 
-    if path == "/api/datasets/upload":
+    if path in {"/api/datasets/upload", "/api/warehouse/upload-print"}:
         return None
 
     if request.method == "GET" and valid_download_token():
@@ -3354,6 +3356,37 @@ def parse_warehouse_workbook(content):
         workbook.close()
 
 
+def normalize_warehouse_print_rows(rows):
+    """Validate the independent Excel print upload before creating a dataset."""
+    if not rows or len(rows) > 10000:
+        raise WarehouseWorkbookError("Vyskladnění musí obsahovat 1 až 10000 řádků.")
+    normalized = []
+    for index, item in enumerate(rows, start=2):
+        if not isinstance(item, dict):
+            raise WarehouseWorkbookError(f"Řádek {index}: neplatná data.")
+        sku = warehouse_cell_text(item.get("variantCode"))
+        if not sku:
+            raise WarehouseWorkbookError(f"Řádek {index}: chybí kód varianty.")
+        quantity = warehouse_positive_integer(item.get("quantity"), "Celk.", index)
+        sequence = warehouse_cell_text(item.get("sequence"))
+        allocations = parse_warehouse_allocations(sequence, index)
+        if sum(allocation["quantity"] for allocation in allocations) != quantity:
+            raise WarehouseWorkbookError(f"Řádek {index}: rozdělení do boxů neodpovídá Celk.")
+        normalized.append({
+            "rowNumber": index,
+            "productCode": warehouse_cell_text(item.get("productCode")),
+            "variantCode": sku,
+            "variant": warehouse_cell_text(item.get("variant")),
+            "quantity": str(quantity),
+            "initialQuantity": str(quantity),
+            "sequence": sequence,
+            "info": warehouse_cell_text(item.get("info")),
+            "productName": warehouse_cell_text(item.get("info")),
+            "allocations": allocations,
+        })
+    return normalized
+
+
 def row_to_api(row):
     return {
         "id": row["id"],
@@ -3748,7 +3781,7 @@ def index():
 def static_files(path):
     if path.startswith("api/"):
         return jsonify({"error": "Not found"}), 404
-    if path.strip("/").lower() in {"roztrideni", "kompletace", "eany", "nastaveni"}:
+    if path.strip("/").lower() in {"roztrideni", "vyskladneni", "kompletace", "eany", "nastaveni"}:
         return send_from_directory(APP_DIR, "index.html")
     return send_from_directory(APP_DIR, path)
 
@@ -4268,7 +4301,12 @@ def get_full_expedition_day(day_date):
 
 
 @app.route("/api/datasets/upload", methods=["POST"])
+@app.route("/api/warehouse/upload-print", methods=["POST"])
 def upload_dataset():
+    if request.path == "/api/warehouse/upload-print" and not valid_upload_token():
+        auth_error = require_admin()
+        if auth_error:
+            return auth_error
     auth_error = require_upload_token()
     if auth_error:
         return auth_error
@@ -4287,17 +4325,28 @@ def upload_dataset():
     dataset_kind = clean_text(payload.get("datasetKind")) or "sorting"
     if dataset_kind not in ("sorting", "completion", "warehouse"):
         return jsonify({"error": "datasetKind must be sorting, completion or warehouse"}), 400
+    print_upload = request.path == "/api/warehouse/upload-print"
+    if print_upload:
+        if dataset_kind != "warehouse":
+            return jsonify({"error": "Toto tlačítko nahrává pouze vyskladnění k tisku."}), 400
+        try:
+            rows = normalize_warehouse_print_rows(rows)
+        except WarehouseWorkbookError as exc:
+            return jsonify({"error": str(exc)}), 400
+        dataset_kind = "warehouse_print"
     shop_code = infer_dataset_shop_code(payload, rows)
     shop_name = clean_text(payload.get("shopName")) or shop_name_from_code(shop_code)
     source_system = clean_text(payload.get("sourceSystem")) or "excel"
     external_batch_id = clean_text(payload.get("externalBatchId"))
     batch_name = clean_text(payload.get("batchName")) or display_date_label(dataset_date)
     replace_mode = clean_text(payload.get("replaceMode")) or "replace-active"
+    if print_upload:
+        replace_mode = "append"
     label = clean_text(payload.get("label")) or f"{batch_name} | {dataset_kind} | {dataset_time}"
 
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
-            expedition_day = ensure_expedition_day(cur, dataset_date, batch_name)
+            expedition_day = None if print_upload else ensure_expedition_day(cur, dataset_date, batch_name)
             cur.execute(
                 """
                 INSERT INTO datasets (
@@ -4311,7 +4360,7 @@ def upload_dataset():
                 RETURNING *
                 """,
                 (
-                    expedition_day["id"],
+                    expedition_day["id"] if expedition_day else None,
                     dataset_kind,
                     batch_name,
                     shop_code,
@@ -4400,23 +4449,29 @@ def upload_dataset():
                     ),
                 )
 
-            batch_snapshot, _, _, _ = get_or_create_batch_snapshot(cur, expedition_day["id"])
+            batch_snapshot = None
+            if not print_upload:
+                batch_snapshot, _, _, _ = get_or_create_batch_snapshot(cur, expedition_day["id"])
 
     check_job = None
     if dataset_kind == "completion":
         check_job = enqueue_post_upload_checks(expedition_day["id"], dataset["id"], "upload")
 
-    return jsonify(
+    response = jsonify(
         {
             "ok": True,
             "dataset": dataset_summary(dataset),
-            "expeditionDay": expedition_day_summary(expedition_day),
+            "expeditionDay": expedition_day_summary(expedition_day) if expedition_day else None,
             "rows": len(rows),
             "replacedDatasets": replaced_datasets,
             "batchSnapshot": batch_snapshot,
             "checkJob": check_job,
+            "printPath": f"/warehouse-print.html?dataset={dataset['id']}" if print_upload else None,
         }
     )
+    if print_upload:
+        response.headers["X-Warehouse-Print-Path"] = f"/warehouse-print.html?dataset={dataset['id']}"
+    return response
 
 
 @app.route("/api/warehouse/upload-xlsx", methods=["POST"])
@@ -4793,6 +4848,8 @@ def fetch_datasets(include_deleted=False, dataset_kind=None, shop_code=None, dat
             if dataset_kind:
                 filters.append("dataset_kind = %s")
                 params.append(dataset_kind)
+            else:
+                filters.append("dataset_kind <> 'warehouse_print'")
             if shop_code:
                 filters.append("shop_code = %s")
                 params.append(normalize_shop_code(shop_code))
@@ -10000,7 +10057,7 @@ def latest_dataset():
     with db_conn() as conn:
         with conn.cursor(cursor_factory=RealDictCursor) as cur:
             cur.execute(
-                "SELECT id FROM datasets WHERE status = 'active' ORDER BY uploaded_at DESC, id DESC LIMIT 1"
+                "SELECT id FROM datasets WHERE status = 'active' AND dataset_kind <> 'warehouse_print' ORDER BY uploaded_at DESC, id DESC LIMIT 1"
             )
             row = cur.fetchone()
     if not row:

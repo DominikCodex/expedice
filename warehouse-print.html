@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="cs">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Vyskladnění k tisku</title>
+    <link rel="stylesheet" href="warehouse-print.css?v=20260918-1" />
+    <script defer src="warehouse-print.js?v=20260918-1"></script>
+  </head>
+  <body>
+    <nav class="toolbar" aria-label="Tisková sestava">
+      <strong>Vyskladnění k tisku</strong>
+      <label>Řazení
+        <select id="sort">
+          <option value="product">Produkt a varianta</option>
+          <option value="excel">Pořadí z Excelu</option>
+          <option value="box">První cílový box</option>
+        </select>
+      </label>
+      <button id="print" type="button" disabled>Tisk A4 na šířku</button>
+      <button id="reload" type="button">Načíst znovu</button>
+    </nav>
+    <p id="status" role="status">Načítám sestavu…</p>
+    <form id="login" hidden autocomplete="on">
+      <h1>Přihlášení do expedice</h1>
+      <label>Uživatelské jméno<input name="username" autocomplete="username" required /></label>
+      <label>Heslo<input name="password" type="password" autocomplete="current-password" required /></label>
+      <button type="submit">Přihlásit a zobrazit sestavu</button>
+    </form>
+    <main id="sheet" hidden>
+      <header class="sheet-heading">
+        <div><p>SKLAD / VYCHYSTÁNÍ</p><h1>Vyskladnění zboží</h1><span id="batch"></span></div>
+        <div class="totals"><strong id="pieces"></strong><span id="summary"></span></div>
+      </header>
+      <table>
+        <colgroup><col class="photo-col" /><col class="product-col" /><col class="variant-col" /><col class="quantity-col" /><col class="boxes-col" /><col class="check-col" /></colgroup>
+        <thead><tr><th>Foto</th><th>Produkt / kód varianty</th><th>Varianta</th><th>Celkem</th><th>Kolik a kam do boxů</th><th>Hotovo</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </main>
+  </body>
+</html>

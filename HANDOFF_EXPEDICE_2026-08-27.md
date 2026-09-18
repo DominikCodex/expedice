@@ -120,6 +120,8 @@ Databázové změny nejsou řízené externím migračním frameworkem. `ensure_
 
 ### Vyskladnění ze skladu
 
+Upřesnění 18. 9. 2026: hlavní požadavek uživatele je samostatné tlačítko v Excelu pro tiskovou sestavu A4 na šířku. Nový modul `vba/VyskladneniTisk.bas` se instaluje samostatně podle `vba/VyskladneniTisk.md`; žádné existující makro se neslučuje ani nemění. Vlastní endpoint `/api/warehouse/upload-print` ukládá dávky `warehouse_print` bez nahrazování starších dávek. Vrací odkaz na `warehouse-print.html?dataset=<id>`. Stránka používá původní množství, produktové fotografie, volitelné řazení, opakovanou tiskovou hlavičku a ruční odškrtávací políčka. Serverové testy jsou v `tests/test_warehouse_print.py`, browser/PDF kontroly v `tests/e2e/warehouse-print.spec.js`.
+
 Záložka `Vyskladnění` používá stávající tabulky `datasets` a `dataset_rows` s `dataset_kind = warehouse`; nevznikla další databázová tabulka. Administrátor může k vybranému expedičnímu dni nahrát `.xlsx` přes `POST /api/warehouse/upload-xlsx`. Aktivní starší skladová dávka téhož dne se měkce nahradí novou. Běžní přihlášení uživatelé mohou přes `PATCH /api/warehouse/rows/<id>` odepisovat, vracet nebo dokončit řádek. Hodnota `remaining` je uložena na serveru a změny jsou auditované.
 
 Podporovaný Excel má na prvním viditelném listu ve sloupcích B-E hlavičky `Kód varianty:`, `Varianta:`, `Kolik a kam s tím:` a `Celk.:`. Rozdělení do boxů používá zápis `množství x číslo boxu`, například `1x3, 2x14`. Import odmítne neznámý formát i nesoulad mezi rozepsaným a celkovým množstvím. Fotografie se dohledávají stávajícím produktovým feedem podle SKU; chybějící fotografie mají textový placeholder.
