@@ -28,9 +28,33 @@
   const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const key = (value) => String(value || "").trim().toUpperCase();
   const quantity = (row) => Number(row.initialQuantity || row.quantity || 0);
-  const displayVariant = (value) => String(value ?? "")
-    .replace(/(^|[\s,;|])(?:velikost|veľkosť|veľkost|velkost|barva|farba)\s*:\s*/giu, "$1")
-    .replace(/\s+/g, " ").trim();
+  function displayVariant(value) {
+    const text = String(value ?? "").replace(/\s+/g, " ").trim();
+    const labels = [...text.matchAll(/(?:^|[\s,;|])(velikost|veľkosť|veľkost|velkost|barva|farba)\s*:\s*/giu)];
+    const clean = (part) => part.replace(/^[\s,;|]+|[\s,;|]+$/g, "");
+    if (labels.length && !clean(text.slice(0, labels[0].index))) {
+      const parts = labels.map((label, index) => ({
+        size: !/^(barva|farba)$/iu.test(label[1]),
+        value: clean(text.slice(label.index + label[0].length, labels[index + 1]?.index)),
+      }));
+      return parts.sort((a, b) => Number(b.size) - Number(a.size)).map((part) => part.value).filter(Boolean).join(", ");
+    }
+    // Unlabelled Excel variants use both "colour / M/L" and "M/L, colour".
+    // Match a complete size at either edge; never split the slash inside M/L.
+    const size = "(?:X{0,3}[SL]|M|[2-9]XL|\\d{2,3}|UNI|ONE SIZE)(?:\\s*[/–-]\\s*(?:X{0,3}[SL]|M|[2-9]XL|\\d{2,3}))*";
+    if (!text.includes(":")) {
+      if (new RegExp(`^${size}$`, "i").test(text)) return text;
+      const first = text.match(new RegExp(`^(${size})\\s*[,;|/]\\s*(.+)$`, "i"));
+      const last = text.match(new RegExp(`^(.+?)\\s*[,;|/]\\s*(${size})$`, "i"));
+      const match = first || last;
+      if (match) {
+        const sizeValue = first ? match[1] : match[2];
+        const colour = first ? match[2] : match[1];
+        return `${sizeValue.replace(/\s*([/–-])\s*/g, "$1")}, ${colour.trim()}`;
+      }
+    }
+    return text;
+  }
   const allocations = (row) => row.raw?.allocations || String(row.sequence || "").split(/[,;]/).map((part) => {
     const match = part.trim().match(/^(\d+)\s*[x×]\s*(\d+)$/i);
     return match ? { quantity: Number(match[1]), destination: Number(match[2]) } : null;

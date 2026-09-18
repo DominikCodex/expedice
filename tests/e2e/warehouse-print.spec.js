@@ -55,10 +55,20 @@ test("tisk čeká na fotografie a zvládne jejich chybu", async ({ page }) => {
 test("varianty nemají popisky a hodnoty jsou výrazné v obou orientacích", async ({ page }) => {
   const variants = [
     ["Velikost: L/XL, Barva: bílá", "L/XL, bílá"],
-    ["  BARVA : černá | Velikost: S/M  ", "černá | S/M"],
-    ["Veľkosť: XL/XXL; Farba: telová", "XL/XXL; telová"],
-    ["biela / L/XL", "biela / L/XL"],
-    ["Barva: černá mix barev lemu, Velikost: M/L", "černá mix barev lemu, M/L"],
+    ["  BARVA : černá | Velikost: S/M  ", "S/M, černá"],
+    ["Veľkosť: XL/XXL; Farba: telová", "XL/XXL, telová"],
+    ["biela / L/XL", "L/XL, biela"],
+    ["Barva: černá mix barev lemu, Velikost: M/L", "M/L, černá mix barev lemu"],
+    ["červená / M/L", "M/L, červená"],
+    ["modrofialová / XL/XXL", "XL/XXL, modrofialová"],
+    ["růžová / S/M", "S/M, růžová"],
+    ["M/L, lékořice", "M/L, lékořice"],
+    ["M / L / bílá", "M/L, bílá"],
+    ["černá / bílá / XL", "XL, černá / bílá"],
+    ["černá / 38/40", "38/40, černá"],
+    ["Farba: biela, Veľkosť: UNI", "UNI, biela"],
+    ["S/M", "S/M"],
+    ["černá / bílá", "černá / bílá"],
     ["Motiv: Barva života / S/M", "Motiv: Barva života / S/M"],
     ['Velikost: <img src=x onerror="window.badVariant=true">', '<img src=x onerror="window.badVariant=true">'],
     [null, ""],
@@ -68,6 +78,7 @@ test("varianty nemají popisky a hodnoty jsou výrazné v obou orientacích", as
   await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
   await page.goto("/warehouse-print.html?dataset=71");
   await expect(page.locator("#print")).toBeEnabled();
+  await page.locator("#sort").selectOption("excel");
   for (const [label, size] of [["Na šířku", "16px"], ["Na výšku", "14px"]]) {
     await page.getByText(label, { exact: true }).click();
     await expect(page.locator(".variant-value")).toHaveText(variants.map(([, value]) => value));
