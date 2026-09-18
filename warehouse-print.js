@@ -18,6 +18,13 @@
     input.addEventListener("change", () => { if (input.checked) setOrientation(input.value); });
   });
   setOrientation(document.querySelector('input[name="orientation"]:checked')?.value);
+  function setDensity(value) {
+    document.documentElement.dataset.density = value === "compact" ? "compact" : "normal";
+  }
+  document.querySelectorAll('input[name="density"]').forEach((input) => {
+    input.addEventListener("change", () => { if (input.checked) setDensity(input.value); });
+  });
+  setDensity(document.querySelector('input[name="density"]:checked')?.value);
   const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const key = (value) => String(value || "").trim().toUpperCase();
   const quantity = (row) => Number(row.initialQuantity || row.quantity || 0);

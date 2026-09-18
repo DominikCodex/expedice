@@ -145,6 +145,32 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.screenshot({ path: `test-results/warehouse-${orientation}-preview.png` });
     await page.pdf({ path: `test-results/warehouse-${orientation}-a4.pdf`, preferCSSPageSize: true, printBackground: true });
+    const normalHeight = await page.locator("table").evaluate((node) => node.getBoundingClientRect().height);
+    const normalValues = await page.locator("#rows tr").allTextContents();
+    const photoCount = await page.locator("#rows img, #rows .no-photo").count();
+    await page.getByText("Kompaktní", { exact: true }).click();
+    await expect(page.getByRole("radio", { name: "Kompaktní", exact: true })).toBeChecked();
+    await expect(page.locator("html")).toHaveAttribute("data-density", "compact");
+    await expect(page.locator("html")).toHaveAttribute("data-orientation", orientation);
+    expect(await page.locator("table").evaluate((node) => node.getBoundingClientRect().height)).toBeLessThan(normalHeight * 0.85);
+    expect(await page.locator("#rows tr").allTextContents()).toEqual(normalValues);
+    await expect(page.locator("#rows img, #rows .no-photo")).toHaveCount(photoCount);
+    await expect(page.locator(".variant-value").first()).toHaveCSS("font-weight", "700");
+    await page.locator("#reload").click();
+    await expect(page.locator("#print")).toBeEnabled();
+    await expect(page.locator("html")).toHaveAttribute("data-density", "compact");
+    await expect(page.locator("#pieces")).toHaveText(`${expectedTotal} ks`);
+    for (const width of [1280, 1024]) {
+      await page.setViewportSize({ width, height: 900 });
+      expect(await page.locator("#sheet").evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+    }
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await page.screenshot({ path: `test-results/warehouse-${orientation}-compact-preview.png` });
+    await page.pdf({ path: `test-results/warehouse-${orientation}-compact-a4.pdf`, preferCSSPageSize: true, printBackground: true });
+    await page.getByText("Běžné", { exact: true }).click();
+    await expect(page.locator("html")).toHaveAttribute("data-density", "normal");
+    expect(await page.locator("table").evaluate((node) => node.getBoundingClientRect().height)).toBeCloseTo(normalHeight, 0);
   }
   expect(apiRequests).toEqual([]);
   expect(errors).toEqual([]);

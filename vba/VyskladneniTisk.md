@@ -33,6 +33,8 @@ Sestava nabízí řazení podle produktu a varianty, původní pořadí Excelu n
 
 Fotografie se dohledávají z nakonfigurovaného produktového feedu podle kódu varianty nebo produktu. Tiskové tlačítko čeká na načtení obrázků. Chybějící fotografie jsou viditelně označené.
 
+Přepínač `Běžné / Kompaktní` funguje v obou orientacích. Kompaktní režim zmenší fotografie, mezery a podpůrné texty, aby se vešlo více řádků na stránku. Počty kusů a hodnoty variant zůstávají tučné, žádné položky ani údaje se neskrývají. Výchozí zůstává běžné zobrazení. Ani tato volba nevyžaduje změnu Excel makra.
+
 Makro spouští webový prohlížeč podle nastavení odkazů HTTPS, nikoli aplikaci přiřazenou souborům `.html` (například PSPad). Pokud ho nelze dohledat, zkusí nainstalovaný Chrome, Edge nebo Firefox. Nastavení Windows se nemění. Při chybě otevření ukáže cestu k hotovému souboru. Již vytvořenou sestavu lze také otevřít v prohlížeči přes `Ctrl+O` ze složky `%TEMP%\ExpediceVyskladneni`.
 
 Generování tiskové sestavy nevytváří žádnou databázovou dávku. Nemění ani nenahrazuje dávky roztřídění, kompletace nebo interaktivního vyskladnění, neovlivňuje report dne a nespouští jejich automatické kontroly. Tisk zahrnuje všechny původní kusy z Excelu.

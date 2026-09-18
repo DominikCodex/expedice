@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Vyskladnění k tisku</title>
-    <link rel="stylesheet" href="warehouse-print.css?v=20260918-4" />
-    <script defer src="warehouse-print.js?v=20260918-4"></script>
+    <link rel="stylesheet" href="warehouse-print.css?v=20260918-5" />
+    <script defer src="warehouse-print.js?v=20260918-5"></script>
   </head>
   <body>
     <nav class="toolbar" aria-label="Tisková sestava">
@@ -17,10 +17,15 @@
           <option value="box">První cílový box</option>
         </select>
       </label>
-      <fieldset class="orientation">
+      <fieldset class="print-mode">
         <legend class="visually-hidden">Orientace papíru A4</legend>
         <label><input type="radio" name="orientation" value="landscape" checked /><span>Na šířku</span></label>
         <label><input type="radio" name="orientation" value="portrait" /><span>Na výšku</span></label>
+      </fieldset>
+      <fieldset class="print-mode">
+        <legend class="visually-hidden">Hustota tiskové sestavy</legend>
+        <label><input type="radio" name="density" value="normal" checked /><span>Běžné</span></label>
+        <label><input type="radio" name="density" value="compact" /><span>Kompaktní</span></label>
       </fieldset>
       <button id="print" type="button" disabled>Tisk A4 na šířku</button>
       <button id="reload" type="button">Načíst znovu</button>
