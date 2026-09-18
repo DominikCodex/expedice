@@ -98,6 +98,7 @@ def test_anonymous_render_is_self_contained_and_does_not_access_datasets(monkeyp
     assert '<link rel="stylesheet"' not in response.text
     assert '</script><img src=x' not in response.text
     assert 'size: A4 landscape' in response.text
+    assert 'content: "Strana " counter(page) " z " counter(pages)' in response.text
     database.assert_not_called()
 
 

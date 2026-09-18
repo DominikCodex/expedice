@@ -75,7 +75,7 @@ td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin:
 @page {
   size: A4 landscape;
   margin: 10mm;
-  @bottom-right { content: counter(page) " / " counter(pages); font: 9px Arial, sans-serif; color: #53685d; }
+  @bottom-right { content: "Strana " counter(page) " z " counter(pages); font: 700 14px Arial, sans-serif; color: #182b27; }
 }
 @media print {
   html, body { background: white; margin: 0; padding: 0; }
