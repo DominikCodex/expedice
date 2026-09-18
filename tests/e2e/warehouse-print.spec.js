@@ -52,6 +52,33 @@ test("tisk čeká na fotografie a zvládne jejich chybu", async ({ page }) => {
   await expect(page.locator(".no-photo")).toHaveCount(1);
 });
 
+test("varianty nemají popisky a hodnoty jsou výrazné v obou orientacích", async ({ page }) => {
+  const variants = [
+    ["Velikost: L/XL, Barva: bílá", "L/XL, bílá"],
+    ["  BARVA : černá | Velikost: S/M  ", "černá | S/M"],
+    ["Veľkosť: XL/XXL; Farba: telová", "XL/XXL; telová"],
+    ["biela / L/XL", "biela / L/XL"],
+    ["Barva: černá mix barev lemu, Velikost: M/L", "černá mix barev lemu, M/L"],
+    ["Motiv: Barva života / S/M", "Motiv: Barva života / S/M"],
+    ['Velikost: <img src=x onerror="window.badVariant=true">', '<img src=x onerror="window.badVariant=true">'],
+    [null, ""],
+  ];
+  const rows = variants.map(([variant], index) => ({ ...fixture()[0], rowNumber: index + 2, variantCode: `TEST-${index}`, variant }));
+  await page.route("**/api/datasets/71", (route) => route.fulfill({ json: { dataset: { datasetKind: "warehouse_print" }, rows } }));
+  await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
+  await page.goto("/warehouse-print.html?dataset=71");
+  await expect(page.locator("#print")).toBeEnabled();
+  for (const [label, size] of [["Na šířku", "16px"], ["Na výšku", "14px"]]) {
+    await page.getByText(label, { exact: true }).click();
+    await expect(page.locator(".variant-value")).toHaveText(variants.map(([, value]) => value));
+    await expect(page.locator(".variant-value").first()).toHaveCSS("font-size", size);
+    await expect(page.locator(".variant-value").first()).toHaveCSS("font-weight", "700");
+    await expect(page.locator(".variant-value img")).toHaveCount(0);
+    expect(await page.evaluate(() => window.badVariant)).toBeUndefined();
+    expect(await page.locator("#sheet").evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
+  }
+});
+
 test("odkaz z Excelu po přihlášení otevře stejnou sestavu", async ({ page }) => {
   let authenticated = false;
   await page.route("**/api/datasets/71", (route) => authenticated

@@ -37,6 +37,7 @@ td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin:
 .product-name, .sku { display: block; }
 .product-name { font-weight: 700; margin-bottom: 3px; }
 .sku { font-family: Consolas, monospace; font-size: 11px; }
+.variant-value { display: block; font-size: 16px; font-weight: 700; line-height: 1.3; }
 .quantity { font-size: 19px; text-align: center; font-weight: 700; white-space: nowrap; }
 .allocations { display: flex; flex-wrap: wrap; gap: 4px 6px; }
 .allocation { display: inline-block; padding: 3px 6px; border: 1px solid #aabdb3; border-radius: 3px; white-space: nowrap; font-size: 12px; }
@@ -49,6 +50,7 @@ td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin:
 [data-orientation="portrait"] th { padding: 6px 4px; font-size: 10px; }
 [data-orientation="portrait"] td { padding: 4px; font-size: 11px; }
 [data-orientation="portrait"] .quantity { font-size: 19px; }
+[data-orientation="portrait"] .variant-value { font-size: 14px; }
 [data-orientation="portrait"] td img, [data-orientation="portrait"] .no-photo { width: 12mm; height: 12mm; max-width: 100%; }
 [data-orientation="portrait"] .allocation { padding: 3px 4px; font-size: 11px; }
 [data-orientation="portrait"] .allocation b { font-size: 13px; }

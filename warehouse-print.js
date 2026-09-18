@@ -21,6 +21,9 @@
   const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const key = (value) => String(value || "").trim().toUpperCase();
   const quantity = (row) => Number(row.initialQuantity || row.quantity || 0);
+  const displayVariant = (value) => String(value ?? "")
+    .replace(/(^|[\s,;|])(?:velikost|veľkosť|veľkost|velkost|barva|farba)\s*:\s*/giu, "$1")
+    .replace(/\s+/g, " ").trim();
   const allocations = (row) => row.raw?.allocations || String(row.sequence || "").split(/[,;]/).map((part) => {
     const match = part.trim().match(/^(\d+)\s*[x×]\s*(\d+)$/i);
     return match ? { quantity: Number(match[1]), destination: Number(match[2]) } : null;
@@ -55,7 +58,7 @@
       return `<tr class="${groupStart ? "group-start" : ""}">
         <td>${image ? `<img src="${escape(image)}" alt="${escape(name)}" />` : '<span class="no-photo">Bez fotky</span>'}</td>
         <td><span class="product-name">${escape(name)}</span><span class="sku">${escape(row.variantCode)}</span></td>
-        <td>${escape(row.variant)}</td><td class="quantity">${escape(quantity(row))}</td>
+        <td><span class="variant-value">${escape(displayVariant(row.variant))}</span></td><td class="quantity">${escape(quantity(row))}</td>
         <td><div class="allocations">${allocations(row).map((item) => `<span class="allocation"><b>${escape(item.quantity)} ks</b> → box <b>${escape(item.destination)}</b></span>`).join("")}</div></td>
         <td><span class="check" aria-label="Místo pro ruční odškrtnutí"></span></td>
       </tr>`;
