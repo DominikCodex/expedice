@@ -4474,6 +4474,30 @@ def upload_dataset():
     return response
 
 
+def normalize_warehouse_print_helpers(helpers):
+    if not isinstance(helpers, dict) or set(helpers) - {"EXCEL", "KOMPLETACE"}:
+        raise WarehouseWorkbookError("Neplatné pomocné listy tiskové sestavy.")
+    normalized = {}
+    cell_count = 0
+    for name, sheet in helpers.items():
+        cells = sheet.get("cells") if isinstance(sheet, dict) else None
+        if not isinstance(cells, list) or not 1 <= len(cells) <= 10000:
+            raise WarehouseWorkbookError(f"Pomocný list {name} musí mít 1 až 10000 řádků.")
+        width = len(cells[0]) if isinstance(cells[0], list) else 0
+        if not 1 <= width <= 128:
+            raise WarehouseWorkbookError(f"Pomocný list {name} musí mít 1 až 128 sloupců.")
+        cell_count += len(cells) * width
+        if cell_count > 200000:
+            raise WarehouseWorkbookError("Pomocné listy přesahují limit 200000 buněk.")
+        for row in cells:
+            if not isinstance(row, list) or len(row) != width:
+                raise WarehouseWorkbookError(f"Pomocný list {name} má nestejný počet sloupců.")
+            if any(not isinstance(value, str) or len(value) > 32767 for value in row):
+                raise WarehouseWorkbookError(f"Pomocný list {name} obsahuje neplatnou hodnotu buňky.")
+        normalized[name] = {"cells": cells}
+    return normalized
+
+
 @app.route("/api/warehouse/render-print", methods=["POST"])
 def render_warehouse_print():
     # A stateless document generator: accepts only caller-supplied rows, never a dataset ID.
@@ -4487,6 +4511,7 @@ def render_warehouse_print():
         if len(payload["rows"]) > 1000:
             raise WarehouseWorkbookError("Najednou lze vytisknout nejvýše 1000 řádků.")
         rows = normalize_warehouse_print_rows(payload["rows"])
+        helper_sheets = normalize_warehouse_print_helpers(payload.get("helperSheets", {}))
     except (ValueError, TypeError, OverflowError, RecursionError, WarehouseWorkbookError) as exc:
         message = str(exc) if isinstance(exc, WarehouseWorkbookError) else "Neplatná data vyskladnění."
         return Response(message, status=400, mimetype="text/plain")
@@ -4512,6 +4537,7 @@ def render_warehouse_print():
         "rows": rows,
         "images": images,
         "imageWarning": warning,
+        "helperSheets": helper_sheets,
     }
     # Escaping '<' prevents spreadsheet text from ending the JSON script element.
     serialized = json.dumps(document, ensure_ascii=True).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")

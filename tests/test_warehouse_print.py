@@ -127,3 +127,38 @@ def test_anonymous_render_survives_image_service_failure(monkeypatch):
     assert data["images"] == {}
     assert data["imageWarning"]
     assert "private-details" not in response.text
+
+
+def test_print_helpers_are_preserved_only_in_document_without_database(monkeypatch):
+    database = MagicMock(side_effect=AssertionError("Dataset access is forbidden"))
+    monkeypatch.setattr(app, "db_conn", database)
+    monkeypatch.setattr(app, "product_image_cache", lambda: {"configured": True, "images": {}})
+    helpers = {
+        "EXCEL": {"cells": [["Kód varianty", "Produkt", ""], ["SKU-ČERNÁ", "čřž ľô", ""]]},
+        "KOMPLETACE": {"cells": [["Objednávka", "Expediční číslo"], ["00123", '</script><img src=x onerror=alert(1)>']]},
+    }
+    response = app.app.test_client().post("/api/warehouse/render-print", json={"rows": [print_row()], "helperSheets": helpers})
+    assert response.status_code == 200
+    data = rendered_data(response)
+    assert data["helperSheets"] == helpers
+    assert data["rows"][0]["variantCode"] == "SKU-ČERNÁ"
+    assert '</script><img src=x' not in response.text
+    database.assert_not_called()
+
+
+@pytest.mark.parametrize("helpers", [
+    None, [], {"OTHER": {"cells": [["x"]]}}, {"EXCEL": {}},
+    {"EXCEL": {"cells": []}}, {"EXCEL": {"cells": [[]]}},
+    {"EXCEL": {"cells": [["a"], ["b", "c"]]}},
+    {"EXCEL": {"cells": [[None]]}}, {"EXCEL": {"cells": [[123]]}},
+    {"EXCEL": {"cells": [["x" * 32768]]}},
+    {"EXCEL": {"cells": [[""] * 129]}},
+    {"EXCEL": {"cells": [[""]] * 10001}},
+    {"EXCEL": {"cells": [[""] * 100] * 1001}, "KOMPLETACE": {"cells": [[""] * 100] * 1000}},
+])
+def test_invalid_print_helpers_rejected_before_feed_access(monkeypatch, helpers):
+    cache = MagicMock()
+    monkeypatch.setattr(app, "product_image_cache", cache)
+    response = app.app.test_client().post("/api/warehouse/render-print", json={"rows": [print_row()], "helperSheets": helpers})
+    assert response.status_code == 400
+    cache.assert_not_called()

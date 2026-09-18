@@ -191,6 +191,12 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
   await expect(page.locator("#print")).toBeEnabled();
   await expect(page.locator("#login")).toBeHidden();
   await expect(page.locator("#rows tr")).toHaveCount(45);
+  const helpers = await page.locator("#warehouse-print-data").evaluate((node) => JSON.parse(node.textContent).helperSheets);
+  expect(helpers.EXCEL.cells[1]).toEqual(["SKU-ČERNÁ", "TEST-POMOCNY-PRODUKT"]);
+  expect(helpers.KOMPLETACE.cells[1][0]).toBe("00123");
+  expect(await page.locator("body").innerText()).not.toContain("TEST-POMOCNY-PRODUKT");
+  expect(await page.locator("body").innerText()).not.toContain("TEST-NEZOBRAZOVAT");
+  expect(await page.evaluate(() => window.helperExecuted)).toBeUndefined();
   await expect(page.locator("#batch")).toContainText("Vyskladnění");
   const expectedTotal = process.env.WAREHOUSE_PRINT_FIXTURE
     ? fixture().reduce((sum, row) => sum + Number(row.quantity), 0) : 135;

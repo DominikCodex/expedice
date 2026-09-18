@@ -12,9 +12,11 @@ Modul `VyskladneniTisk.bas` je samostatný. Existující makra pro roztříděn�
 
 ### Aktualizace dříve přidaného tlačítka
 
-Pokud už tlačítko existuje a hlásí HTTP 401 nebo po kliknutí neotevře prohlížeč, přes `Alt+F11` otevři jeho samostatný modul a nahraď jeho obsah aktuálním `VyskladneniTisk.bas`. Nevytvářej druhý modul se stejně pojmenovanými makry. Název `VyskladneniNahratATisk` zůstává stejný, takže přiřazení tlačítka není potřeba měnit. Ostatní moduly pro kompletaci a roztřídění ponech beze změny. Sešit ulož.
+Pro přidání pomocných listů `EXCEL` a `KOMPLETACE` přes `Alt+F11` otevři samostatný tiskový modul a nahraď jeho obsah aktuálním `VyskladneniTisk.bas`. Nevytvářej druhý modul se stejně pojmenovanými makry. Název `VyskladneniNahratATisk` zůstává stejný, takže přiřazení tlačítka není potřeba měnit. Ostatní moduly pro kompletaci a roztřídění ponech beze změny. Sešit ulož.
 
 ## Každodenní použití
+
+Ve stejném sešitu musí být neprázdné pomocné listy pojmenované `EXCEL` a `KOMPLETACE`. Makro je čte automaticky, není potřeba na ně přepínat. Pokud některý chybí, nic neodešle a vypíše jeho název.
 
 Na aktivním listu musí být od druhého řádku tabulka:
 
@@ -39,9 +41,18 @@ Makro spouští webový prohlížeč podle nastavení odkazů HTTPS, nikoli apli
 
 Generování tiskové sestavy nevytváří žádnou databázovou dávku. Nemění ani nenahrazuje dávky roztřídění, kompletace nebo interaktivního vyskladnění, neovlivňuje report dne a nespouští jejich automatické kontroly. Tisk zahrnuje všechny původní kusy z Excelu.
 
+## Pomocné listy pouze pro tisk
+
+Oba listy se odešlou ve stejném požadavku jako vyskladnění. Přenášejí se hodnoty buněk od A1 po poslední použitý řádek a sloupec, včetně hlaviček a prázdných pozic uvnitř tabulky. Vzorce se neposílají, pouze jejich aktuální výsledky. Číselné buňky se přenášejí jako podkladové hodnoty bez formátování (datum jako sériové číslo Excelu); kódy s úvodními nulami musí být uložené jako text. Chyba vzorce přeruší odeslání a uvede list a buňku. Každý list má limit 10000 řádků a 128 sloupců, dohromady nejvýše 200000 buněk. Celý požadavek má stále limit 2 MB, kontrolovaný před odesláním i na serveru.
+
+Server pomocné listy validuje a vloží do datové části výsledného HTML. Nezobrazují se v tabulce ani v tisku a nezapisují se do databáze. Toto je přenos dat pro samostatný tisk, nikoli import kompletace nebo roztřídění. Automatické párování produktů z listu `EXCEL` zatím není zapojené; vyžaduje ověřit jeho skutečnou strukturu.
+
+**Soukromí:** výsledný soubor HTML obsahuje i neveřejná data pomocných listů, včetně případných kontaktů zákazníků. Skrytí v tiskovém náhledu není šifrování. Soubor nesdílej veřejně; uložené sestavy zůstávají v `%TEMP%\ExpediceVyskladneni` až do odstranění. Vytištěný dokument ani PDF tyto pomocné tabulky neobsahují.
+
 ## Technické rozhraní
 
 - `POST /api/warehouse/render-print` přijímá vlastní řádky v JSON a vrací hotové HTML bez autentizace. Limit je 2 MB a 1000 řádků; množství musí odpovídat součtu rozdělení do boxů.
+- Volitelný objekt `helperSheets` obsahuje klíče `EXCEL` a `KOMPLETACE`, každý s obdélníkovým polem `cells` (řádky a sloupce, všechny hodnoty jako řetězce). Starší makro bez pomocných listů zůstává na serveru podporované.
 - Z existujících dat používá pouze produktové fotografie k zaslaným kódům. Nelze jím načíst existující expediční dávku podle ID.
 - VBA zapíše odpověď binárně přes `ADODB.Stream`, aby zachovalo UTF-8.
 - Starší `POST /api/warehouse/upload-print` a `warehouse-print.html?dataset=<id>` zůstávají chráněné a podporované, nové samostatné tlačítko je nepoužívá.

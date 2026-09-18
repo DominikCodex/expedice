@@ -18,6 +18,10 @@ with patch.object(app, "product_image_cache", return_value={"configured": True, 
      patch.object(app, "db_conn", side_effect=AssertionError("No database allowed")):
     response = app.app.test_client().post("/api/warehouse/render-print", json={
         "rows": rows, "worksheetName": "Vyskladnění", "datasetDate": "2026-09-18", "datasetTime": "08:30",
+        "helperSheets": {
+            "EXCEL": {"cells": [["Kód varianty", "Produkt"], ["SKU-ČERNÁ", "TEST-POMOCNY-PRODUKT"]]},
+            "KOMPLETACE": {"cells": [["Objednávka", "Poznámka"], ["00123", "TEST-NEZOBRAZOVAT-ľô</script><script>window.helperExecuted=true</script>"]]},
+        },
     })
 assert response.status_code == 200, response.text
 Path(sys.argv[1]).write_bytes(response.data)

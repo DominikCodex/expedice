@@ -14,7 +14,7 @@ Public Sub VyskladneniNahratATisk()
     On Error GoTo Failed
     Dim ws As Worksheet
     Set ws = ActiveSheet
-    Dim lastRow As Long, r As Long, payload As String, rows As String
+    Dim lastRow As Long, r As Long, payload As String, rows As String, helperSheets As String
     lastRow = ws.Cells(ws.Rows.Count, "B").End(xlUp).Row
     If lastRow < 2 Then Err.Raise vbObjectError + 801, , "Na aktivnim listu nejsou data vyskladneni."
     If InStr(1, WhPrintCell(ws.Cells(1, 2)), "variant", vbTextCompare) = 0 Or _
@@ -38,6 +38,7 @@ Public Sub VyskladneniNahratATisk()
         End If
     Next r
     If Len(rows) = 0 Then Err.Raise vbObjectError + 804, , "Nejsou vyplnene varianty."
+    helperSheets = WhPrintHelperSheets(ws.Parent)
 
     payload = "{""datasetKind"":""warehouse"",""source"":""excel-vba-print""," & _
         """shopCode"":""unknown"",""shopName"":""Sklad""," & _
@@ -45,7 +46,9 @@ Public Sub VyskladneniNahratATisk()
         """worksheetName"":" & WhPrintJson(ws.Name) & "," & _
         """datasetDate"":" & WhPrintJson(Format$(Date, "yyyy-mm-dd")) & "," & _
         """datasetTime"":" & WhPrintJson(Format$(Now, "hh:nn:ss")) & "," & _
-        """rows"": [" & rows & "]}"
+        """rows"": [" & rows & "],""helperSheets"":" & helperSheets & "}"
+    ' WhPrintJson emits ASCII, so character count equals the UTF-8 byte count.
+    If Len(payload) > 2 * 1024 * 1024 Then Err.Raise vbObjectError + 811, , "Tiskova data vcetne pomocnych listu presahuji limit 2 MB. Nic nebylo odeslano."
 
     Application.StatusBar = "Nahravam vyskladneni k tisku..."
     Dim http As Object
@@ -82,6 +85,55 @@ Failed:
     If Len(printPath) > 0 Then failure = failure & vbCrLf & vbCrLf & "Soubor sestavy: " & printPath
     MsgBox failure, vbExclamation
 End Sub
+
+Private Function WhPrintHelperSheets(ByVal book As Workbook) As String
+    Dim name As Variant, ws As Worksheet, result As String, cellCount As Long
+    For Each name In Array("EXCEL", "KOMPLETACE")
+        Set ws = Nothing
+        On Error Resume Next
+        Set ws = book.Worksheets(CStr(name))
+        On Error GoTo 0
+        If ws Is Nothing Then Err.Raise vbObjectError + 812, , "V sesitu chybi pomocny list " & CStr(name) & ". Nic nebylo odeslano."
+        If Len(result) > 0 Then result = result & ","
+        result = result & WhPrintJson(CStr(name)) & ":" & WhPrintSheetJson(ws, cellCount)
+    Next name
+    WhPrintHelperSheets = "{" & result & "}"
+End Function
+
+Private Function WhPrintSheetJson(ByVal ws As Worksheet, ByRef cellCount As Long) As String
+    Dim lastCell As Range, lastRow As Long, lastColumn As Long, r As Long, c As Long
+    Set lastCell = ws.Cells.Find(What:="*", After:=ws.Cells(1, 1), LookIn:=xlFormulas, _
+        LookAt:=xlPart, SearchOrder:=xlByRows, SearchDirection:=xlPrevious, MatchCase:=False, SearchFormat:=False)
+    If lastCell Is Nothing Then Err.Raise vbObjectError + 813, , "Pomocny list " & ws.Name & " je prazdny."
+    lastRow = lastCell.Row
+    Set lastCell = ws.Cells.Find(What:="*", After:=ws.Cells(1, 1), LookIn:=xlFormulas, _
+        LookAt:=xlPart, SearchOrder:=xlByColumns, SearchDirection:=xlPrevious, MatchCase:=False, SearchFormat:=False)
+    lastColumn = lastCell.Column
+    If lastRow > 10000 Or lastColumn > 128 Then Err.Raise vbObjectError + 814, , "Pomocny list " & ws.Name & " presahuje limit 10000 radku nebo 128 sloupcu."
+    cellCount = cellCount + lastRow * lastColumn
+    If cellCount > 200000 Then Err.Raise vbObjectError + 814, , "Pomocne listy dohromady presahuji limit 200000 bunek."
+    Dim values As Variant, lines() As String, fields() As String, value As Variant
+    values = ws.Range(ws.Cells(1, 1), ws.Cells(lastRow, lastColumn)).Value2
+    ReDim lines(1 To lastRow)
+    ReDim fields(1 To lastColumn)
+    For r = 1 To lastRow
+        For c = 1 To lastColumn
+            If lastRow = 1 And lastColumn = 1 Then
+                value = values
+            Else
+                value = values(r, c)
+            End If
+            If IsError(value) Then Err.Raise vbObjectError + 807, , "Chyba Excelu v " & ws.Name & "!" & ws.Cells(r, c).Address(False, False)
+            If IsEmpty(value) Or IsNull(value) Then
+                fields(c) = """"""
+            Else
+                fields(c) = WhPrintJson(CStr(value))
+            End If
+        Next c
+        lines(r) = "[" & Join(fields, ",") & "]"
+    Next r
+    WhPrintSheetJson = "{""cells"":[" & Join(lines, ",") & "]}"
+End Function
 
 Private Sub WhPrintOpenBrowser(ByVal printPath As String)
     Dim files As Object, browser As String, operation As String, arguments As String
