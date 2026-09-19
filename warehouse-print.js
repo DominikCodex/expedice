@@ -107,6 +107,20 @@
     return match ? { quantity: Number(match[1]), destination: Number(match[2]) } : null;
   }).filter(Boolean);
 
+  function variantSortParts(row) {
+    const value = displayVariant(row.variant);
+    const [size, ...colour] = value.split(",");
+    const normalized = key(size).replace(/\s+/g, "");
+    const alpha = { XXXS: -3, XXS: -2, XS: -1, S: 0, M: 1, L: 2, XL: 3, XXL: 4, XXXL: 5 };
+    const rank = (part) => alpha[part] ?? (/^[2-9]XL$/.test(part) ? Number(part[0]) + 2 : NaN);
+    const parts = normalized.split(/[/–-]/);
+    const ranks = parts.map(rank);
+    if (ranks.every(Number.isFinite)) return [0, ranks[0], ranks.at(-1), normalized, colour.join(",").trim()];
+    if (parts.every((part) => /^\d{2,3}$/.test(part))) return [1, Number(parts[0]), Number(parts.at(-1)), normalized, colour.join(",").trim()];
+    if (["UNI", "ONESIZE"].includes(normalized)) return [2, 0, 0, normalized, colour.join(",").trim()];
+    return [3, 0, 0, "", value];
+  }
+
   async function json(url, options) {
     const response = await fetch(url, { cache: "no-store", ...options });
     const data = await response.json();
@@ -122,6 +136,7 @@
     const priorityFirst = document.querySelector('input[name="priority"]:checked')?.value === "first";
     const priorityRows = new Set(state.rows.filter((row) => allocations(row).some((item) => state.redBoxes.has(Number(item.destination)))));
     const groups = new Map(state.rows.map((row) => [row, productGroup(row)]));
+    const variants = new Map(state.rows.map((row) => [row, variantSortParts(row)]));
     const rows = [...state.rows].sort((a, b) => {
       if (priorityFirst) {
         const difference = Number(priorityRows.has(b)) - Number(priorityRows.has(a))
@@ -133,30 +148,47 @@
         const difference = Math.min(...allocations(a).map((item) => item.destination)) - Math.min(...allocations(b).map((item) => item.destination));
         if (difference) return difference;
       }
-      return (els.sort.value === "product" ? Number(secondQuality(a)) - Number(secondQuality(b)) : 0)
-        || collator.compare(els.sort.value === "product" ? groups.get(a) : a.productCode || "", els.sort.value === "product" ? groups.get(b) : b.productCode || "")
-        || collator.compare(a.variantCode || "", b.variantCode || "");
+      if (els.sort.value === "product") {
+        const groupA = groups.get(a), groupB = groups.get(b);
+        const va = variants.get(a), vb = variants.get(b);
+        return Number(secondQuality(a)) - Number(secondQuality(b))
+          || collator.compare(groupA, groupB)
+          || (groupA === groupB ? 0 : groupA < groupB ? -1 : 1)
+          || va[0] - vb[0] || va[1] - vb[1] || va[2] - vb[2]
+          || collator.compare(va[4], vb[4]) || collator.compare(va[3], vb[3])
+          || collator.compare(a.variantCode || "", b.variantCode || "");
+      }
+      return collator.compare(a.productCode || "", b.productCode || "") || collator.compare(a.variantCode || "", b.variantCode || "");
     });
-    let lastProduct = null;
-    let lastQuality = null;
-    let lastPriority = null;
-    els.rows.innerHTML = rows.map((row) => {
-      const name = row.raw?.productName || row.info || row.productCode;
-      const image = state.images[key(row.variantCode)] || state.images[key(row.productCode)];
-      const quality = secondQuality(row);
-      const priority = priorityRows.has(row);
-      const groupStart = lastProduct !== groups.get(row)
-        || ((els.sort.value === "product" || priorityFirst) && lastQuality !== quality)
-        || (priorityFirst && lastPriority !== priority);
-      lastProduct = groups.get(row);
-      lastQuality = quality;
-      lastPriority = priority;
-      return `<tr class="${groupStart ? "group-start" : ""}">
-        <td>${image ? `<img src="${escape(image)}" alt="${escape(name)}" />` : '<span class="no-photo">Bez fotky</span>'}</td>
-        <td><span class="product-name">${escape(name)}</span><span class="sku">${escape(row.variantCode)}</span></td>
-        <td><span class="variant-value">${escape(displayVariant(row.variant))}</span></td><td class="quantity">${escape(quantity(row))}</td>
-        <td><div class="allocations">${allocations(row).map((item) => `<span class="allocation${state.redBoxes.has(Number(item.destination)) ? " allocation-red" : ""}"><b>${escape(item.quantity)} ks</b> → box <b>${escape(item.destination)}</b></span>`).join("")}</div></td>
-      </tr>`;
+    const blocks = [];
+    for (const row of rows) {
+      const group = groups.get(row), quality = secondQuality(row), priority = priorityFirst && priorityRows.has(row);
+      const last = blocks.at(-1);
+      if (last && last.group === group && last.quality === quality && last.priority === priority) last.rows.push(row);
+      else blocks.push({ group, quality, priority, rows: [row] });
+    }
+    let lastSection = null;
+    els.rows.innerHTML = blocks.map((block, blockIndex) => {
+      const section = `${block.priority}:${block.quality}`;
+      const sectionStart = (priorityFirst || els.sort.value === "product") && section !== lastSection;
+      lastSection = section;
+      const label = priorityFirst ? `${block.priority ? "PRIORITNÍ" : "OSTATNÍ"}${block.quality ? " – II. JAKOST" : ""}`
+        : block.quality ? "II. JAKOST" : "BĚŽNÉ ZBOŽÍ";
+      const sectionHeading = sectionStart ? `<tr class="section-heading"><th colspan="5" scope="rowgroup">${escape(label)}</th></tr>` : "";
+      const first = block.rows[0];
+      const productHeading = block.rows.length > 1 ? `<tr class="product-heading"><th colspan="5" scope="rowgroup"><span>${escape(first.raw?.productName || first.info || first.productCode)}</span><small>${escape(block.group)} · ${block.rows.length} ${block.rows.length < 5 ? "varianty" : "variant"}</small></th></tr>` : "";
+      const content = block.rows.map((row, index) => {
+        const name = row.raw?.productName || row.info || row.productCode;
+        const image = state.images[key(row.variantCode)] || state.images[key(row.productCode)];
+        const quality = secondQuality(row);
+        return `<tr class="item-row${index === 0 ? " group-start" : ""}${index === block.rows.length - 1 ? " group-end" : ""}">
+          <td>${image ? `<img src="${escape(image)}" alt="${escape(name)}" />` : '<span class="no-photo">Bez fotky</span>'}</td>
+          <td>${quality ? '<span class="quality-label">II. JAKOST</span>' : ""}<span class="product-name">${escape(name)}</span><span class="sku">${escape(row.variantCode)}</span></td>
+          <td><span class="variant-value">${escape(displayVariant(row.variant))}</span></td><td class="quantity">${escape(quantity(row))}</td>
+          <td><div class="allocations">${allocations(row).map((item) => `<span class="allocation${Number(item.quantity) > 1 ? " allocation-multiple" : ""}${state.redBoxes.has(Number(item.destination)) ? " allocation-red" : ""}"><b>${escape(item.quantity)} ks</b> → box <b>${escape(item.destination)}</b></span>`).join("")}</div></td>
+        </tr>`;
+      }).join("");
+      return `${blockIndex ? '<tr class="group-gap" aria-hidden="true"><td colspan="5"></td></tr>' : ""}${sectionHeading}${productHeading}${content}`;
     }).join("");
   }
 

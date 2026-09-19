@@ -31,7 +31,15 @@ table { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .quantity-col { width: 8%; } .boxes-col { width: 38%; }
 th { padding: 8px 6px; background: #e5eee9; border-bottom: 2px solid #416451; text-align: left; font-size: 11px; }
 td { padding: 4px 6px; border-bottom: 1px solid #bcc9c3; vertical-align: middle; overflow-wrap: anywhere; font-size: 12px; }
-tr.group-start td { border-top: 2px solid #6e897d; }
+tr.group-start td { border-top: 2px solid #53685d; }
+tr.group-end td { border-bottom: 2px solid #53685d; }
+.item-row td:first-child { border-left: 2px solid #53685d; }
+.item-row td:last-child { border-right: 2px solid #53685d; }
+.product-heading th { border: 2px solid #53685d; background: #edf1ef; padding: 6px; }
+.product-heading span { display: block; font-size: 16px; line-height: 1.2; }
+.product-heading small { display: block; font-size: 10px; font-weight: 400; margin-top: 2px; }
+.section-heading th { background: #253b32; color: white; font-size: 14px; padding: 6px; border: 2px solid #253b32; }
+.quality-label { display: inline-block; border: 2px solid currentColor; padding: 1px 4px; font-size: 10px; font-weight: 700; margin-bottom: 3px; }
 td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin: auto; }
 .no-photo { display: flex; align-items: center; justify-content: center; width: 14mm; height: 14mm; margin: auto; font-size: 9px; color: #6d7974; border: 1px dashed #bcc9c3; }
 .product-name, .sku { display: block; }
@@ -42,10 +50,12 @@ td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin:
 .allocations { display: flex; flex-wrap: wrap; gap: 4px 6px; }
 .allocation { display: inline-block; padding: 3px 6px; border: 1px solid #aabdb3; border-radius: 3px; white-space: nowrap; font-size: 12px; }
 .allocation b { font-size: 14px; }
+.allocation-multiple { border-color: currentColor; box-shadow: inset 0 0 0 1px currentColor; }
+.allocation-multiple b:first-child { text-decoration: underline; text-underline-offset: 2px; }
 .allocation-red { color: #b42318; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 [data-orientation="portrait"] .photo-col { width: 10%; }
-[data-orientation="portrait"] .product-col { width: 28%; }
-[data-orientation="portrait"] .boxes-col { width: 37%; }
+[data-orientation="portrait"] .product-col { width: 27%; }
+[data-orientation="portrait"] .boxes-col { width: 38%; }
 [data-orientation="portrait"] th { padding: 6px 4px; font-size: 10px; }
 [data-orientation="portrait"] td { padding: 4px; font-size: 11px; }
 [data-orientation="portrait"] .quantity { font-size: 19px; }
@@ -59,6 +69,7 @@ td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin:
 [data-density="compact"] .photo-col { width: 6%; }
 [data-density="compact"] .product-col { width: 31%; }
 [data-density="compact"][data-orientation="portrait"] .photo-col { width: 7%; }
+[data-density="compact"][data-orientation="portrait"] .product-col { width: 30%; }
 [data-density="compact"] th { padding: 4px; }
 [data-density="compact"] td { padding: 2px 4px; line-height: 1.15; }
 [data-density="compact"] td img, [data-density="compact"] .no-photo { width: 8mm; height: 8mm; max-width: 100%; }
@@ -73,6 +84,11 @@ td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin:
 [data-density="compact"] .allocation b { font-size: 13px; }
 [data-density="compact"][data-orientation="portrait"] .allocation { padding-inline: 2px; }
 [data-density="compact"][data-orientation="portrait"] .allocations { column-gap: 3px; }
+.group-gap td { height: 5px; padding: 0 !important; border: 0; }
+[data-density="compact"] .group-gap td { height: 3px; }
+[data-density="compact"] .product-heading th { padding: 3px 4px; }
+[data-density="compact"] .product-heading span { font-size: 14px; }
+[data-density="compact"] .section-heading th { padding: 4px; font-size: 12px; }
 @page {
   size: A4 landscape;
   margin: 10mm;
@@ -84,6 +100,8 @@ td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin:
   #sheet { width: 100%; max-width: none; padding: 0; margin: 0; }
   thead { display: table-header-group; }
   tr, .sheet-heading { break-inside: avoid; page-break-inside: avoid; }
+  .product-heading, .section-heading, .group-gap { break-after: avoid; page-break-after: avoid; }
+  .section-heading th { background: white; color: #182b27; }
   th { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }
 @media screen and (max-width: 760px) {

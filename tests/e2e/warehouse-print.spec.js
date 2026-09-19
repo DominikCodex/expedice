@@ -49,6 +49,8 @@ test("všechny prioritní řádky včetně II. jakosti předcházejí ostatním"
     const original = await page.locator(".sku").allTextContents();
     await page.getByText("Prioritní zásilky první", { exact: true }).click();
     await expect(page.locator(".sku")).toHaveText(orders[sort]);
+    await expect(page.locator(".section-heading th")).toHaveText(["PRIORITNÍ", "PRIORITNÍ – II. JAKOST", "OSTATNÍ", "OSTATNÍ – II. JAKOST"]);
+    await expect(page.locator(".quality-label")).toHaveCount(4);
     await expect(page.locator("#pieces")).toHaveText("9 ks");
     await expect(page.locator(".allocation")).toHaveCount(9);
     await expect(page.locator(".allocation-red")).toHaveCount(4);
@@ -110,7 +112,7 @@ test("produkty se oddělují podle kódu a Giny spárované z EXCEL", async ({ p
   // Group ordering must not be based on the old broad productCode (ZZZ/SKUPINA).
   await expect(page.locator(".sku").nth(0)).toHaveText(codes[1]);
   await expect(page.locator(".sku").nth(1)).toHaveText(codes[0]);
-  await expect(page.locator("#rows tr").nth(1)).not.toHaveClass("group-start");
+  await expect(page.locator("#rows .item-row").nth(1)).not.toHaveClass(/group-start/);
   await page.locator("#sort").selectOption("excel");
   const boundaries = [0, 2, 4, 5, 6, 8, 10, 11, 12, 13, 14, 15];
   await expect(page.locator(".sku")).toHaveText(codes);
@@ -123,7 +125,7 @@ test("produkty se oddělují podle kódu a Giny spárované z EXCEL", async ({ p
       await page.getByText(density, { exact: true }).click();
       await expect(page.locator("tr.group-start .sku")).toHaveText(boundaries.map((i) => codes[i]));
       await expect(page.locator("tr.group-start").first().locator("td").first()).toHaveCSS("border-top-width", "2px");
-      await expect(page.locator("#rows tr").nth(1).locator("td").first()).toHaveCSS("border-top-width", "0px");
+      await expect(page.locator("#rows .item-row").nth(1).locator("td").first()).toHaveCSS("border-top-width", "0px");
       for (const width of [1280, 1024]) {
         await page.setViewportSize({ width, height: 900 });
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -139,8 +141,60 @@ test("produkty se oddělují podle kódu a Giny spárované z EXCEL", async ({ p
     helpers = fallback;
     await page.locator("#reload").click();
     await expect(page.locator("#print")).toBeEnabled();
-    await expect(page.locator("#rows tr").nth(1)).toHaveClass("group-start");
+    await expect(page.locator("#rows .item-row").nth(1)).toHaveClass(/group-start/);
   }
+});
+
+test("rámečky, nadpisy, více kusů a přirozené velikosti zůstávají čitelné i v tisku", async ({ page }) => {
+  const variants = ["XL/XXL, černá", "L/XL, černá", "S/M, červená", "M/L, bílá", "S/M, bílá", "UNI, černá", "40/42, modrá", "38/40, modrá", "XXL/3XL, černá"];
+  const rows = variants.map((variant, i) => ({
+    rowNumber: i + 2, productCode: "MODEL", variantCode: `MODEL-BAMBOO-${i}`, variant,
+    info: "Dámské bambusové kalhotky – český název", initialQuantity: i === 0 ? 3 : 1, sequence: `${i === 0 ? 3 : 1}x${i + 1}`,
+  }));
+  rows.push({ ...rows[0], rowNumber: 20, variantCode: "MODEL-BAMBOO-II-JAKOST", initialQuantity: 1, sequence: "1x20" });
+  rows.push({ ...rows[0], rowNumber: 21, variantCode: "JINY-VYROBEK-SM", info: '<img src=x onerror="window.badHeading=true">', initialQuantity: 1, sequence: "1x21" });
+  rows.push({ ...rows.at(-1), rowNumber: 22, variantCode: "JINY-VYROBEK-ML", sequence: "1x22" });
+  const header = Array(18).fill("");
+  const completion = [...header]; completion[16] = "1"; completion[17] = "0,8";
+  await page.route("**/api/datasets/71", (route) => route.fulfill({ json: {
+    dataset: { datasetKind: "warehouse_print" }, rows, helperSheets: { KOMPLETACE: { cells: [header, completion] } },
+  } }));
+  await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
+  await page.goto("/warehouse-print.html?dataset=71");
+  await expect(page.locator("#print")).toBeEnabled();
+  const model = page.locator(".item-row").filter({ has: page.locator(".sku", { hasText: /^MODEL-BAMBOO-\d$/ }) });
+  await expect(model.locator(".variant-value")).toHaveText([4, 2, 3, 1, 0, 8, 7, 6, 5].map((i) => variants[i]));
+  await expect(page.locator(".product-heading")).toHaveCount(2);
+  await expect(page.locator(".product-heading img")).toHaveCount(0);
+  expect(await page.evaluate(() => window.badHeading)).toBeUndefined();
+  await expect(page.locator(".item-row")).toHaveCount(12);
+  await expect(page.locator("#pieces")).toHaveText("14 ks");
+  await expect(page.locator(".quality-label")).toHaveCount(1);
+  await expect(page.locator(".allocation-multiple")).toHaveCount(1);
+  await expect(page.locator(".allocation-multiple")).toHaveText("3 ks → box 1");
+  await expect(page.locator(".allocation-multiple")).toHaveCSS("color", "rgb(180, 35, 24)");
+  await expect(page.locator(".allocation-multiple b").first()).toHaveCSS("text-decoration-line", "underline");
+  for (const [orientation, label] of [["landscape", "Na šířku"], ["portrait", "Na výšku"]]) {
+    await page.getByText(label, { exact: true }).click();
+    for (const [density, label] of [["normal", "Běžné"], ["compact", "Kompaktní"]]) {
+      await page.getByText(label, { exact: true }).click();
+      for (const width of [1280, 1024]) {
+        await page.setViewportSize({ width, height: 900 });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      }
+      await expect(page.locator(".item-row").first().locator("td").first()).toHaveCSS("border-left-width", "2px");
+      await expect(page.locator(".item-row").first().locator("td").last()).toHaveCSS("border-right-width", "2px");
+      await expect(page.locator(".group-end").first().locator("td").first()).toHaveCSS("border-bottom-width", "2px");
+      await page.screenshot({ path: `test-results/warehouse-workflow-${orientation}-${density}.png`, fullPage: true });
+      await page.emulateMedia({ media: "print" });
+      await expect(page.locator(".section-heading th").first()).toHaveCSS("color", "rgb(24, 43, 39)");
+      await expect(page.locator(".product-heading").first()).toHaveCSS("break-after", "avoid");
+      await page.pdf({ path: `test-results/warehouse-workflow-${orientation}-${density}.pdf`, preferCSSPageSize: true, printBackground: false });
+      await page.emulateMedia({ media: "screen" });
+    }
+  }
+  await page.locator("#sort").selectOption("excel");
+  await expect(page.locator(".sku")).toHaveText(rows.map((row) => row.variantCode));
 });
 
 test("samostatná sestava tiskne všechny původní kusy na A4 na šířku", async ({ page }) => {
@@ -150,7 +204,7 @@ test("samostatná sestava tiskne všechny původní kusy na A4 na šířku", asy
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto("/warehouse-print.html?dataset=71");
   await expect(page.locator("#print")).toBeEnabled();
-  await expect(page.locator("#rows tr")).toHaveCount(rows.length);
+  await expect(page.locator("#rows .item-row")).toHaveCount(rows.length);
   const total = rows.reduce((sum, row) => sum + Number(row.initialQuantity || row.quantity), 0);
   await expect(page.locator("#pieces")).toHaveText(`${total} ks`);
   await page.locator("#sort").selectOption("excel");
@@ -340,7 +394,7 @@ test("boxy využijí sloupec Hotovo a vejdou se alespoň tři vedle sebe", async
   await page.goto("/warehouse-print.html?dataset=71");
   await expect(page.locator("#print")).toBeEnabled();
   await expect(page.getByRole("columnheader", { name: "Hotovo" })).toHaveCount(0);
-  await expect(page.locator("#rows tr td")).toHaveCount(5);
+  await expect(page.locator("#rows .item-row td")).toHaveCount(5);
   await expect(page.locator(".check")).toHaveCount(0);
   for (const [orientation, label] of [["portrait", "Na výšku"], ["landscape", "Na šířku"]]) {
     await page.getByText(label, { exact: true }).click();
@@ -375,7 +429,7 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
   await page.goto(pathToFileURL(output).href);
   await expect(page.locator("#print")).toBeEnabled();
   await expect(page.locator("#login")).toBeHidden();
-  await expect(page.locator("#rows tr")).toHaveCount(45);
+  await expect(page.locator("#rows .item-row")).toHaveCount(45);
   const helpers = await page.locator("#warehouse-print-data").evaluate((node) => JSON.parse(node.textContent).helperSheets);
   expect(helpers.EXCEL.cells[1]).toEqual(["SKU-ČERNÁ", "TEST-POMOCNY-PRODUKT"]);
   expect(helpers.KOMPLETACE.cells[1][0]).toBe("00123");
@@ -402,6 +456,7 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
   await page.screenshot({ path: "test-results/warehouse-anonymous-preview.png" });
   await page.pdf({ path: "test-results/warehouse-anonymous-a4.pdf", preferCSSPageSize: true, printBackground: true });
 
+  await page.locator("#sort").selectOption("product");
   for (const [orientation, label] of [["portrait", "Na výšku"], ["landscape", "Na šířku"]]) {
     await page.getByText(label, { exact: true }).click();
     await expect(page.getByRole("radio", { name: label, exact: true })).toBeChecked();
@@ -418,7 +473,9 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
     }
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.screenshot({ path: `test-results/warehouse-${orientation}-preview.png` });
+    await page.emulateMedia({ media: "print" });
     await page.pdf({ path: `test-results/warehouse-${orientation}-a4.pdf`, preferCSSPageSize: true, printBackground: true });
+    await page.emulateMedia({ media: "screen" });
     const normalHeight = await page.locator("table").evaluate((node) => node.getBoundingClientRect().height);
     const normalValues = await page.locator("#rows tr").allTextContents();
     const photoCount = await page.locator("#rows img, #rows .no-photo").count();
@@ -441,7 +498,9 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
     }
     await page.setViewportSize({ width: 1280, height: 900 });
     await page.screenshot({ path: `test-results/warehouse-${orientation}-compact-preview.png` });
+    await page.emulateMedia({ media: "print" });
     await page.pdf({ path: `test-results/warehouse-${orientation}-compact-a4.pdf`, preferCSSPageSize: true, printBackground: true });
+    await page.emulateMedia({ media: "screen" });
     await page.getByText("Běžné", { exact: true }).click();
     await expect(page.locator("html")).toHaveAttribute("data-density", "normal");
     expect(await page.locator("table").evaluate((node) => node.getBoundingClientRect().height)).toBeCloseTo(normalHeight, 0);
