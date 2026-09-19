@@ -291,6 +291,37 @@ test("rámečky, nadpisy, více kusů a přirozené velikosti zůstávají čite
   await expect(page.locator(".sku")).toHaveText(rows.map((row) => row.variantCode));
 });
 
+test("tisk skryje pouze přesnou frázi o pěti kusech, ostatní vícepacky zachová", async ({ page }) => {
+  const cases = [
+    ["Výhodné balení 5 kusů -\u00a0Dámské kalhotky", "Dámské kalhotky"],
+    ["Výhodné balení 5 kusů - Dámské kalhotky", "Dámské kalhotky"],
+    ["Výhodné balení 5 kusů -&#xA0;&#x20;Dámské kalhotky", "Dámské kalhotky"],
+    ["Výhodné balení 5 kusů -&nbsp;Dámské kalhotky", "Dámské kalhotky"],
+    ["5-PACK Výhodné balení pánských boxerek", "5-PACK Výhodné balení pánských boxerek"],
+    ["3-PACK Bambusové ponožky", "3-PACK Bambusové ponožky"],
+    ["Výhodné balení 3 kusů - Ponožky", "Výhodné balení 3 kusů - Ponožky"],
+    ["Výhodné balení 5 kusů – Ponožky", "Výhodné balení 5 kusů – Ponožky"],
+    ["5-PACK Výhodné balení 5 kusů - Boxerky II. jakost", "5-PACK Boxerky II. jakost"],
+    ['Výhodné balení 5 kusů - <img src=x onerror="window.badName=true">', '<img src=x onerror="window.badName=true">'],
+  ];
+  const rows = cases.flatMap(([name], i) => [0, 1].map((variant) => ({
+    productCode: "MODEL", variantCode: `MODEL-${i}-${variant}`, rowNumber: i * 2 + variant + 2,
+    variant: "S/M, černá", initialQuantity: 1, sequence: "1x7", info: name,
+    ...(variant === 0 ? { raw: { productName: name } } : {}),
+  })));
+  await page.route("**/api/datasets/71", (route) => route.fulfill({ json: { dataset: { datasetKind: "warehouse_print" }, rows } }));
+  await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
+  await page.goto("/warehouse-print.html?dataset=71");
+  await expect(page.locator("#print")).toBeEnabled();
+  await page.locator("#sort").selectOption("excel");
+  await expect(page.locator(".product-name")).toHaveText(cases.flatMap(([, expected]) => [expected, expected]));
+  await expect(page.locator(".product-heading span")).toHaveText(cases.map(([, expected]) => expected));
+  await expect(page.locator("#pieces")).toHaveText("20 ks");
+  await expect(page.locator(".quality-label")).toHaveCount(2);
+  expect(await page.evaluate(() => window.badName)).toBeUndefined();
+  await page.screenshot({ path: "test-results/warehouse-clean-product-names.png", fullPage: true });
+});
+
 test("nadpis sčítá jen varianty a kusy vypsané v příslušném bloku", async ({ page }) => {
   const rows = [
     ["MODEL-A-SM", "S/M, bílá", "2x7, 3x20", "5"],

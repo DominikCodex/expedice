@@ -28,6 +28,8 @@
   const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const key = (value) => String(value || "").trim().toUpperCase();
   const quantity = (row) => Number(row.initialQuantity || row.quantity || 0);
+  const displayProductName = (row) => String(row.raw?.productName || row.info || row.productCode || "")
+    .replace(/Výhodné balení 5 kusů -(?:[ \t\u00a0]|&(?:nbsp|#160|#32|#x[Aa]0|#x20);)*/g, "").trim();
   function excelGinaVariants(data) {
     const cells = data.helperSheets?.EXCEL?.cells;
     if (!Array.isArray(cells) || !Array.isArray(cells[0])) return new Set();
@@ -191,9 +193,9 @@
       const sectionHeading = sectionStart ? `<tr class="section-heading"><th colspan="5" scope="rowgroup">${escape(label)}</th></tr>` : "";
       const first = block.rows[0];
       const blockQuantity = block.rows.reduce((sum, row) => sum + quantity(row), 0);
-      const productHeading = block.rows.length > 1 ? `<tr class="product-heading"><th colspan="5" scope="rowgroup"><span>${escape(first.raw?.productName || first.info || first.productCode)}</span><small>${escape(block.group)} · ${block.rows.length} ${block.rows.length < 5 ? "varianty" : "variant"} · <strong class="product-total">Celkem ${escape(blockQuantity)} ks</strong></small></th></tr>` : "";
+      const productHeading = block.rows.length > 1 ? `<tr class="product-heading"><th colspan="5" scope="rowgroup"><span>${escape(displayProductName(first))}</span><small>${escape(block.group)} · ${block.rows.length} ${block.rows.length < 5 ? "varianty" : "variant"} · <strong class="product-total">Celkem ${escape(blockQuantity)} ks</strong></small></th></tr>` : "";
       const content = block.rows.map((row, index) => {
-        const name = row.raw?.productName || row.info || row.productCode;
+        const name = displayProductName(row);
         const image = state.images[key(row.variantCode)] || state.images[key(row.productCode)];
         const quality = secondQuality(row);
         return `<tr class="item-row${index === 0 ? " group-start" : ""}${index === block.rows.length - 1 ? " group-end" : ""}">
