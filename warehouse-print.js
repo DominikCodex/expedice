@@ -190,7 +190,8 @@
         : block.quality ? "II. JAKOST" : "BĚŽNÉ ZBOŽÍ";
       const sectionHeading = sectionStart ? `<tr class="section-heading"><th colspan="5" scope="rowgroup">${escape(label)}</th></tr>` : "";
       const first = block.rows[0];
-      const productHeading = block.rows.length > 1 ? `<tr class="product-heading"><th colspan="5" scope="rowgroup"><span>${escape(first.raw?.productName || first.info || first.productCode)}</span><small>${escape(block.group)} · ${block.rows.length} ${block.rows.length < 5 ? "varianty" : "variant"}</small></th></tr>` : "";
+      const blockQuantity = block.rows.reduce((sum, row) => sum + quantity(row), 0);
+      const productHeading = block.rows.length > 1 ? `<tr class="product-heading"><th colspan="5" scope="rowgroup"><span>${escape(first.raw?.productName || first.info || first.productCode)}</span><small>${escape(block.group)} · ${block.rows.length} ${block.rows.length < 5 ? "varianty" : "variant"} · <strong class="product-total">Celkem ${escape(blockQuantity)} ks</strong></small></th></tr>` : "";
       const content = block.rows.map((row, index) => {
         const name = row.raw?.productName || row.info || row.productCode;
         const image = state.images[key(row.variantCode)] || state.images[key(row.productCode)];

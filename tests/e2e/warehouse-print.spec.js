@@ -248,6 +248,7 @@ test("rámečky, nadpisy, více kusů a přirozené velikosti zůstávají čite
   const model = page.locator(".item-row").filter({ has: page.locator(".sku", { hasText: /^MODEL-BAMBOO-\d$/ }) });
   await expect(model.locator(".variant-value")).toHaveText([4, 2, 3, 1, 0, 8, 7, 6, 5].map((i) => variants[i]));
   await expect(page.locator(".product-heading")).toHaveCount(2);
+  await expect(page.locator(".product-total")).toHaveText(["Celkem 2 ks", "Celkem 11 ks"]);
   await expect(page.locator(".product-heading img")).toHaveCount(0);
   expect(await page.evaluate(() => window.badHeading)).toBeUndefined();
   await expect(page.locator(".item-row")).toHaveCount(12);
@@ -288,6 +289,43 @@ test("rámečky, nadpisy, více kusů a přirozené velikosti zůstávají čite
   }
   await page.locator("#sort").selectOption("excel");
   await expect(page.locator(".sku")).toHaveText(rows.map((row) => row.variantCode));
+});
+
+test("nadpis sčítá jen varianty a kusy vypsané v příslušném bloku", async ({ page }) => {
+  const rows = [
+    ["MODEL-A-SM", "S/M, bílá", "2x7, 3x20", "5"],
+    ["MODEL-A-ML", "M/L, černá", "1x7, 4x20", "5"],
+    ["MODEL-A-SM-II-JAKOST", "S/M, bílá", "3x7, 1x20", "4"],
+    ["MODEL-A-ML-II-JAKOST", "M/L, černá", "2x7, 4x20", "6"],
+  ].map(([variantCode, variant, sequence, initialQuantity], i) => ({
+    variantCode, variant, sequence, initialQuantity, rowNumber: i + 2, productCode: "MODEL",
+    info: "Dámské kalhotky s vyšším pasem",
+  }));
+  await page.route("**/api/datasets/71", (route) => route.fulfill({ json: {
+    dataset: { datasetKind: "warehouse_print" }, rows,
+    helperSheets: { KOMPLETACE: { cells: [Array(18).fill(""), [...Array(16).fill(""), 7, "0,8"]] } },
+  } }));
+  await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
+  await page.goto("/warehouse-print.html?dataset=71");
+  await expect(page.locator("#print")).toBeEnabled();
+  for (const sort of ["product", "excel", "box"]) {
+    await page.locator("#sort").selectOption(sort);
+    // Box sorting interleaves quality classes here, leaving only single-row blocks.
+    await expect(page.locator(".product-total")).toHaveText(sort === "box" ? [] : ["Celkem 10 ks", "Celkem 10 ks"]);
+    await page.getByText("Prioritní zásilky první", { exact: true }).click();
+    await expect(page.locator(".product-total")).toHaveText(["Celkem 10 ks", "Celkem 10 ks"]);
+    await page.getByText("Prioritní kusy zvlášť", { exact: true }).click();
+    await expect(page.locator(".product-total")).toHaveText(["Celkem 3 ks", "Celkem 5 ks", "Celkem 7 ks", "Celkem 5 ks"]);
+    await expect(page.locator("#pieces")).toHaveText("20 ks");
+    await expect(page.locator("#summary")).toHaveText("4 variant · 2 boxů");
+    await page.getByText("Běžné pořadí", { exact: true }).click();
+  }
+  await page.getByText("Prioritní kusy zvlášť", { exact: true }).click();
+  await page.getByText("Na výšku", { exact: true }).click();
+  await page.getByText("Kompaktní", { exact: true }).click();
+  await page.screenshot({ path: "test-results/warehouse-product-totals.png", fullPage: true });
+  await page.emulateMedia({ media: "print" });
+  await page.pdf({ path: "test-results/warehouse-product-totals.pdf", preferCSSPageSize: true });
 });
 
 test("samostatná sestava tiskne všechny původní kusy na A4 na šířku", async ({ page }) => {
