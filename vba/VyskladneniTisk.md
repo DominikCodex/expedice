@@ -1,4 +1,4 @@
-# Samostatné tlačítko Vyskladnění k tisku
+# Samostatná makra Vyskladnění k tisku
 
 Modul `VyskladneniTisk.bas` je samostatný. Existující makra pro roztřídění a kompletaci se neupravují.
 
@@ -6,8 +6,8 @@ Modul `VyskladneniTisk.bas` je samostatný. Existující makra pro roztříděn�
 
 1. Otevři pracovní sešit s makry (`.xlsm` nebo `.xlsb`) a stiskni `Alt+F11`.
 2. Přes `File > Import File` importuj `VyskladneniTisk.bas` jako nový modul.
-3. Vrať se do Excelu a otevři libovolný list tohoto sešitu, kam chceš vložit tiskové tlačítko. Token ani přihlášení se nenastavují.
-4. Přes `Alt+F8` jednou spusť `VlozitTlacitkoVyskladneniTisk`. V oblasti H2 vznikne samostatné tlačítko. Případně svému vlastnímu tlačítku přiřaď makro `VyskladneniNahratATisk`.
+3. Vrať se do Excelu na libovolný list tohoto sešitu. Token ani přihlášení se nenastavují.
+4. Pro ruční HTML náhled spusť přes `Alt+F8` makro `VyskladneniNahratATisk`, případně ho přiřaď vlastnímu tlačítku. Modul žádná tlačítka nevytváří ani nemění.
 5. Ulož sešit ve formátu podporujícím makra. Původní `.xlsx` makra uchovat neumí.
 
 ### Aktualizace dříve přidaného tlačítka
@@ -16,19 +16,22 @@ Pro přidání pomocných listů `EXCEL` a `KOMPLETACE` přes `Alt+F11` otevři 
 
 ## Každodenní použití
 
-### Další tlačítko: PDF a automatický tisk
+### Dvě makra: vytvoření PDF a tisk přes Adobe
 
-Relativní hledání podporuje názvy `SumatraPDF.exe` i `SumatraPDF-3.6.1-64.exe`: vedle sešitu, v jeho `bin` a ve složkách `Expedice\Adresy` / `Adresy` hledaných od umístění sešitu směrem k nadřazeným složkám. Verzi 3.6.1 tedy není potřeba přejmenovávat ani zadávat cestu s osobním uživatelským jménem. Zachovej stejnou strukturu sdílených složek na ostatních počítačích.
+Původní `VyskladneniNahratATisk` zůstává pro ruční HTML náhled a tisk z prohlížeče. PDF workflow má nyní dvě oddělená makra, bez závislosti na Sumatře či tiskovém agentovi:
 
-Původní `VyskladneniNahratATisk` zůstává pro ruční náhled a tisk. Nové makro `VyskladneniPdfATisk` odešle stejné listy, stáhne serverem vytvořené PDF a předá jednu kopii Sumatře na **výchozí tiskárnu Windows daného počítače**. Nepoužívá tiskového agenta ani přihlášení. Server použije výchozí sestavu: produkt a varianta, A4 na výšku, kompaktní, prioritní kusy zvlášť na oddělených stránkách.
+- `VyskladneniPdfVygenerovat`: odešle stejné listy, vygeneruje PDF na serveru, uloží jej a otevře v prohlížeči k náhledu. **Nic netiskne.** Server použije výchozí sestavu: produkt a varianta, A4 na výšku, kompaktní, prioritní kusy zvlášť na oddělených stránkách.
+- `VyskladneniPdfVytisknoutAdobe`: použije PDF naposledy vytvořené tímto sešitem v aktuální relaci Excelu. Po restartu Excelu, resetu VBA nebo při chybějícím souboru nabídne výběr PDF. Nevybírá automaticky nejnovější soubor ve společné složce. Před předáním Adobe vyžádá potvrzení konkrétního souboru a výchozí tiskárny Windows.
 
-1. Aktualizuj obsah modulu `VyskladneniTisk.bas`.
-2. Importuj také aktuální `ExpediceTiskPresSumatra.bas`; pokud jej již máš, aktualizuj jeho obsah, nevytvářej duplikát.
-3. Přes `Alt+F8` jednou spusť `VlozitTlacitkoVyskladneniPdfATisk`, které přidá nové tlačítko u H5 na aktivní list. Nebo vlastnímu tlačítku přiřaď `VyskladneniPdfATisk`. Funguje z libovolného listu sešitu s makrem.
+1. Aktualizuj pouze obsah modulu `VyskladneniTisk.bas`, bez vytvoření duplicitního modulu.
+2. Vlastním tlačítkům přiřaď `VyskladneniPdfVygenerovat` a `VyskladneniPdfVytisknoutAdobe`, nebo je spouštěj přes `Alt+F8`. Obě makra fungují z libovolného listu sešitu s makrem. Tlačítka se automaticky nevytvářejí ani neupravují.
+3. Starší název `VyskladneniPdfATisk` zůstává kvůli existujícím přiřazením, ale nyní **jen generuje a otevírá PDF**. Modul `ExpediceTiskPresSumatra.bas` tento postup už nepoužívá.
 
-Cesty nejsou vázané na konkrétního uživatele: PDF se ukládá do `VyskladneniPDF` vedle sešitu, včetně síťové složky. Sešit musí být uložený v místní nebo sdílené složce s právem zápisu, nikoli otevřený pouze přes webovou URL. Sumatra se vyhledá relativně k sešitu, v připravené složce agenta nebo v běžných instalačních složkách aktuálního počítače. Lze ji mít i přímo vedle sešitu jako `SumatraPDF.exe`; není potřeba osobní absolutní cesta.
+Cesty nejsou vázané na konkrétního uživatele: PDF se ukládá do `VyskladneniPDF` vedle sešitu, včetně síťové složky. Sešit musí být uložený v místní nebo sdílené složce s právem zápisu, nikoli otevřený pouze přes webovou URL. Adobe se hledá podle registrace Acrobat/Reader a instalačních složek daného počítače. Výchozí tiskárna, ovladač a port se načtou z Windows až při požadavku na tisk. Nastavení tiskárny se nemění.
 
-PDF zůstává uložené i po chybě tisku. Makro kontroluje typ a signaturu staženého souboru a tisk samo neopakuje. Zpráva o předání k tisku neznamená potvrzení fyzického vytištění; při potížích nejprve zkontroluj frontu tiskárny, aby nevznikly duplikáty. Nedostupné fotografie neblokují tisk a jejich počet se ukáže po předání PDF. Fotografie se pro PDF zmenšují na nejvýše 400 pixelů na delší straně, aby rozsáhlé sestavy zbytečně nezatěžovaly stahování a tiskárnu. Pro ruční opakování načtení fotek použij původní HTML náhled.
+Adobe používáme příkazem `/t` s cestou PDF, názvem tiskárny, ovladačem a portem. Adobe jej popisuje, ale oficiálně negarantuje jeho podporu ve všech verzích: [Adobe SDK FAQ](https://opensource.adobe.com/dc-acrobat-sdk-docs/library/overview/apxDevFAQ.html#how-do-i-use-the-windows-command-line). Makro proto potvrzuje jen předání požadavku aplikaci, nikoli dokončený tisk. Adobe automaticky neukončujeme, nevypínáme jeho ochrany a nepřepínáme na jiný tiskový nástroj při chybě. Před opakováním zkontroluj frontu, aby nevznikly duplicitní kopie. Menší tisková úloha je možnost k ověření, nikoli záruka.
+
+PDF zůstává uložené i po chybě otevření či tisku. Makro kontroluje typ a signaturu staženého souboru a před tiskem také existenci, příponu a velikost vybraného PDF (nejvýše 32 MB). Neúspěšný nový pokus o generování ruší zapamatovaný odkaz na předchozí várku. Nedostupné fotografie neblokují vytvoření PDF; jejich počet se ukáže po otevření náhledu. Fotografie se pro PDF zmenšují na nejvýše 400 pixelů na delší straně. Pro ruční opakování načtení fotek použij původní HTML náhled.
 
 Server potřebuje Chromium z instalace Playwright; připravuje jej přiložený Dockerfile. Generátor spouští pouze vlastní tiskovou šablonu a dovoluje externě načítat pouze obrázky z HTTPS `cdn.myshoptet.com`. Ostatní zdroje z bezpečnostních důvodů přeskočí. Současně vytváří nejvýše jedno PDF na proces; při obsazení vrátí pokyn zkusit generování později.
 

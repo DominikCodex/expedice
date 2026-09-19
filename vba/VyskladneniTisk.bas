@@ -1,5 +1,6 @@
 Private Const WHPRINT_BASE_URL As String = "https://expedice-production.up.railway.app"
 Private Const WHPRINT_MAX_PAYLOAD_BYTES As Long = 10485760
+Private whPrintLastPdf As String
 
 #If VBA7 Then
 Private Declare PtrSafe Function WhPrintShellExecute Lib "shell32.dll" Alias "ShellExecuteW" ( _
@@ -16,19 +17,22 @@ Public Sub VyskladneniNahratATisk()
 End Sub
 
 Public Sub VyskladneniPdfATisk()
+    ' Compatibility with existing buttons: generation no longer starts printing.
+    VyskladneniPdfVygenerovat
+End Sub
+
+Public Sub VyskladneniPdfVygenerovat()
     WhPrintRun True
 End Sub
 
-Private Sub WhPrintRun(ByVal automaticPdf As Boolean)
+Private Sub WhPrintRun(ByVal generatePdf As Boolean)
     On Error GoTo Failed
     Static running As Boolean
     If running Then Exit Sub
     running = True
-    Dim macroPrefix As String, sumatraPath As String, pdfFolder As String
-    macroPrefix = "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!"
-    If automaticPdf Then
-        ' Resolve on this computer before uploading; the agent is never contacted.
-        sumatraPath = Application.Run(macroPrefix & "ExpediceCestaSumatraPDF")
+    Dim pdfFolder As String
+    If generatePdf Then
+        whPrintLastPdf = ""
         pdfFolder = WhPrintPdfFolder(ThisWorkbook.Path)
     End If
     Dim ws As Worksheet
@@ -69,8 +73,8 @@ Private Sub WhPrintRun(ByVal automaticPdf As Boolean)
     Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
     Dim endpoint As String
     endpoint = "/api/warehouse/render-print"
-    If automaticPdf Then endpoint = "/api/warehouse/render-pdf"
-    http.setTimeouts 10000, 10000, 30000, IIf(automaticPdf, 180000, 60000)
+    If generatePdf Then endpoint = "/api/warehouse/render-pdf"
+    http.setTimeouts 10000, 10000, 30000, IIf(generatePdf, 180000, 60000)
     http.Open "POST", WHPRINT_BASE_URL & endpoint, False
     http.setRequestHeader "Content-Type", "application/json; charset=utf-8"
     http.send payload
@@ -79,31 +83,31 @@ Private Sub WhPrintRun(ByVal automaticPdf As Boolean)
     End If
 
     Dim expectedType As String
-    expectedType = IIf(automaticPdf, "application/pdf", "text/html")
+    expectedType = IIf(generatePdf, "application/pdf", "text/html")
     If InStr(1, http.getResponseHeader("Content-Type"), expectedType, vbTextCompare) = 0 Then
         Err.Raise vbObjectError + 806, , "Server nevratil tiskovou sestavu."
     End If
-    If automaticPdf Then
+    If generatePdf Then
         If Not WhPrintIsPdf(http.responseBody) Then Err.Raise vbObjectError + 816, , "Server nevratil platny PDF soubor. Nic nebylo vytisteno."
     End If
     Dim files As Object, outputFolder As String, printPath As String, stream As Object
     Set files = CreateObject("Scripting.FileSystemObject")
     outputFolder = files.BuildPath(files.GetSpecialFolder(2), "ExpediceVyskladneni")
-    If automaticPdf Then outputFolder = pdfFolder
+    If generatePdf Then outputFolder = pdfFolder
     If Not files.FolderExists(outputFolder) Then files.CreateFolder outputFolder
     printPath = files.BuildPath(outputFolder, files.GetBaseName(files.GetTempName) & ".html")
-    If automaticPdf Then printPath = files.BuildPath(outputFolder, "Vyskladneni-" & Format$(Now, "yyyymmdd-hhnnss") & "-" & files.GetBaseName(files.GetTempName) & ".pdf")
+    If generatePdf Then printPath = files.BuildPath(outputFolder, "Vyskladneni-" & Format$(Now, "yyyymmdd-hhnnss") & "-" & files.GetBaseName(files.GetTempName) & ".pdf")
     Set stream = CreateObject("ADODB.Stream")
     stream.Type = 1
     stream.Open
     stream.Write http.responseBody
     stream.SaveToFile printPath, 2
     stream.Close
-    If automaticPdf Then
-        Application.StatusBar = "Tisknu PDF na vychozi tiskarnu Windows..."
-        Application.Run macroPrefix & "ExpedicePrintPdfSouborPresSumatra", printPath, "", 1
+    If generatePdf Then
+        whPrintLastPdf = printPath
+        WhPrintOpenBrowser printPath
         Dim notice As String
-        notice = "PDF bylo predano k tisku na vychozi tiskarnu Windows." & vbCrLf & "Ulozeno: " & printPath
+        notice = "PDF bylo ulozeno a otevreno k nahledu. Tisk nebyl spusten." & vbCrLf & "Ulozeno: " & printPath & vbCrLf & "Pro tisk pouzij VyskladneniPdfVytisknoutAdobe."
         If Val(http.getResponseHeader("X-Warehouse-Missing-Images")) > 0 Then notice = notice & vbCrLf & "Pozor: pocet radku bez fotografie: " & http.getResponseHeader("X-Warehouse-Missing-Images")
         MsgBox notice, vbInformation
     Else
@@ -120,6 +124,116 @@ Failed:
     If Len(printPath) > 0 Then failure = failure & vbCrLf & vbCrLf & "Soubor sestavy: " & printPath
     MsgBox failure, vbExclamation
 End Sub
+
+Public Sub VyskladneniPdfVytisknoutAdobe()
+    On Error GoTo Failed
+    Static running As Boolean
+    If running Then Exit Sub
+    running = True
+    Dim pdfPath As String, adobe As String, printer As Variant, arguments As String
+    pdfPath = whPrintLastPdf
+    If Len(pdfPath) > 0 Then
+        If Not CreateObject("Scripting.FileSystemObject").FileExists(pdfPath) Then pdfPath = ""
+    End If
+    If Len(pdfPath) = 0 Then
+        Dim picker As Object
+        Set picker = Application.FileDialog(3)
+        picker.Title = "Vyber PDF vyskladneni k tisku pres Adobe"
+        picker.AllowMultiSelect = False
+        picker.Filters.Clear
+        picker.Filters.Add "PDF", "*.pdf"
+        If Len(ThisWorkbook.Path) > 0 And InStr(ThisWorkbook.Path, "://") = 0 Then
+            picker.InitialFileName = WhPrintPdfFolder(ThisWorkbook.Path) & "\"
+        End If
+        If picker.Show <> -1 Then GoTo Finished
+        pdfPath = picker.SelectedItems(1)
+    End If
+    pdfPath = WhPrintValidatedPdf(pdfPath)
+    adobe = WhPrintAdobePath()
+    If Len(adobe) = 0 Then Err.Raise vbObjectError + 818, , "Adobe Acrobat nebo Reader nebyl nalezen. PDF zustava ulozene; muzes je vytisknout rucne z nahledu."
+    printer = WhPrintDefaultPrinter()
+    arguments = WhPrintAdobeArguments(pdfPath, CStr(printer(0)), CStr(printer(1)), CStr(printer(2)))
+    If MsgBox("Odeslat PDF k tisku pres Adobe?" & vbCrLf & vbCrLf & pdfPath & vbCrLf & vbCrLf & _
+        "Vychozi tiskarna: " & CStr(printer(0)) & vbCrLf & "Pred opakovanym tiskem zkontroluj tiskovou frontu.", _
+        vbQuestion + vbYesNo + vbDefaultButton2, "Tisk vyskladneni") <> vbYes Then GoTo Finished
+    WhPrintLaunchApplication adobe, arguments
+    whPrintLastPdf = pdfPath
+    MsgBox "Pozadavek byl predan Adobe. To nepotvrzuje fyzicke vytisteni; zkontroluj tiskovou frontu." & vbCrLf & _
+        "PDF zustava ulozene: " & pdfPath, vbInformation
+Finished:
+    running = False
+    Exit Sub
+Failed:
+    running = False
+    MsgBox "Tisk pres Adobe se nepodarilo spustit:" & vbCrLf & Err.Description, vbExclamation
+End Sub
+
+Private Function WhPrintValidatedPdf(ByVal path As String) As String
+    Dim files As Object, stream As Object, content As Variant
+    Set files = CreateObject("Scripting.FileSystemObject")
+    If Not files.FileExists(path) Then Err.Raise vbObjectError + 819, , "PDF soubor nebyl nalezen."
+    If LCase$(files.GetExtensionName(path)) <> "pdf" Then Err.Raise vbObjectError + 819, , "Vyber soubor PDF."
+    If files.GetFile(path).Size < 5 Or files.GetFile(path).Size > 33554432 Then Err.Raise vbObjectError + 819, , "Neplatna velikost PDF (maximum 32 MB)."
+    Set stream = CreateObject("ADODB.Stream")
+    stream.Type = 1
+    stream.Open
+    stream.LoadFromFile path
+    content = stream.Read(5)
+    stream.Close
+    If Not WhPrintIsPdf(content) Then Err.Raise vbObjectError + 819, , "Soubor nema PDF signaturu. Nic nebylo vytisteno."
+    WhPrintValidatedPdf = files.GetAbsolutePathName(path)
+End Function
+
+Private Function WhPrintAdobePath() As String
+    Dim shell As Object, files As Object, hive As Variant, exe As Variant, key As String, candidate As String
+    Set shell = CreateObject("WScript.Shell")
+    Set files = CreateObject("Scripting.FileSystemObject")
+    For Each hive In Array("HKCU\SOFTWARE\", "HKLM\SOFTWARE\", "HKLM\SOFTWARE\WOW6432Node\")
+        For Each exe In Array("Acrobat.exe", "AcroRd32.exe")
+            key = CStr(hive) & "Microsoft\Windows\CurrentVersion\App Paths\" & CStr(exe) & "\"
+            candidate = Trim$(shell.ExpandEnvironmentStrings(WhPrintRegRead(shell, key)))
+            If Left$(candidate, 1) = Chr$(34) And Right$(candidate, 1) = Chr$(34) Then candidate = Mid$(candidate, 2, Len(candidate) - 2)
+            If files.FileExists(candidate) Then
+                WhPrintAdobePath = candidate
+                Exit Function
+            End If
+        Next exe
+    Next hive
+    Dim base As Variant, relative As Variant
+    For Each base In Array(Environ$("ProgramW6432"), Environ$("ProgramFiles"), Environ$("ProgramFiles(x86)"))
+        If Len(CStr(base)) > 0 Then
+            For Each relative In Array("Adobe\Acrobat DC\Acrobat\Acrobat.exe", "Adobe\Acrobat Reader DC\Reader\AcroRd32.exe", "Adobe\Reader 11.0\Reader\AcroRd32.exe")
+                candidate = files.BuildPath(CStr(base), CStr(relative))
+                If files.FileExists(candidate) Then
+                    WhPrintAdobePath = candidate
+                    Exit Function
+                End If
+            Next relative
+        End If
+    Next base
+End Function
+
+Private Function WhPrintDefaultPrinter() As Variant
+    Dim printers As Object, printer As Object
+    Set printers = GetObject("winmgmts:\\.\root\cimv2").ExecQuery("SELECT Name, DriverName, PortName FROM Win32_Printer WHERE Default = TRUE")
+    For Each printer In printers
+        WhPrintDefaultPrinter = Array(CStr(printer.Name), CStr(printer.DriverName), CStr(printer.PortName))
+        Exit Function
+    Next printer
+    Err.Raise vbObjectError + 820, , "Ve Windows neni nastavena vychozi tiskarna."
+End Function
+
+Private Function WhPrintAdobeArguments(ByVal pdf As String, ByVal printer As String, ByVal driver As String, ByVal port As String) As String
+    WhPrintAdobeArguments = "/t " & WhPrintQuoteArgument(pdf) & " " & WhPrintQuoteArgument(printer) & " " & _
+        WhPrintQuoteArgument(driver) & " " & WhPrintQuoteArgument(port)
+End Function
+
+Private Function WhPrintQuoteArgument(ByVal value As String) As String
+    If Len(value) = 0 Or InStr(value, Chr$(34)) > 0 Or InStr(value, vbCr) > 0 Or InStr(value, vbLf) > 0 Or InStr(value, Chr$(0)) > 0 Then
+        Err.Raise vbObjectError + 821, , "Neplatna cesta nebo udaje tiskarny."
+    End If
+    WhPrintQuoteArgument = Chr$(34) & value & Chr$(34)
+End Function
 
 Private Function WhPrintIsPdf(ByVal content As Variant) As Boolean
     On Error GoTo Invalid
@@ -216,20 +330,24 @@ Private Function WhPrintSheetJson(ByVal ws As Worksheet, ByRef cellCount As Long
 End Function
 
 Private Sub WhPrintOpenBrowser(ByVal printPath As String)
-    Dim files As Object, browser As String, operation As String, arguments As String
+    Dim files As Object, browser As String
     Set files = CreateObject("Scripting.FileSystemObject")
     If Not files.FileExists(printPath) Then Err.Raise vbObjectError + 808, , "Tiskovy soubor nebyl ulozen."
     browser = WhPrintBrowserPath()
     If Len(browser) = 0 Then Err.Raise vbObjectError + 809, , "Webovy prohlizec nebyl nalezen. Otevri soubor sestavy rucne v prohlizeci."
+    WhPrintLaunchApplication browser, WhPrintQuoteArgument(printPath)
+End Sub
+
+Private Sub WhPrintLaunchApplication(ByVal executable As String, ByVal arguments As String)
+    Dim operation As String
     operation = "open"
-    arguments = Chr$(34) & printPath & Chr$(34)
 #If VBA7 Then
     Dim result As LongPtr
 #Else
     Dim result As Long
 #End If
-    result = WhPrintShellExecute(0, StrPtr(operation), StrPtr(browser), StrPtr(arguments), 0, 1)
-    If result <= 32 Then Err.Raise vbObjectError + 810, , "Prohlizec se nepodarilo otevrit (kod Windows " & CStr(result) & ")."
+    result = WhPrintShellExecute(0, StrPtr(operation), StrPtr(executable), StrPtr(arguments), 0, 1)
+    If result <= 32 Then Err.Raise vbObjectError + 810, , "Aplikaci se nepodarilo spustit (kod Windows " & CStr(result) & ")."
 End Sub
 
 Private Function WhPrintBrowserPath() As String
@@ -277,34 +395,6 @@ Private Function WhPrintExecutable(ByVal command As String) As String
     End If
     If LCase$(Right$(WhPrintExecutable, 4)) <> ".exe" Then WhPrintExecutable = ""
 End Function
-
-Public Sub VlozitTlacitkoVyskladneniTisk()
-    Dim ws As Worksheet, button As Shape
-    Set ws = ActiveSheet
-    On Error Resume Next
-    Set button = ws.Shapes("VyskladneniTiskButton")
-    On Error GoTo 0
-    If button Is Nothing Then
-        Set button = ws.Shapes.AddFormControl(xlButtonControl, ws.Range("H2").Left, ws.Range("H2").Top, 180, 32)
-        button.Name = "VyskladneniTiskButton"
-    End If
-    button.TextFrame.Characters.Text = "Vyskladneni k tisku"
-    button.OnAction = "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!VyskladneniNahratATisk"
-End Sub
-
-Public Sub VlozitTlacitkoVyskladneniPdfATisk()
-    Dim ws As Worksheet, button As Shape
-    Set ws = ActiveSheet
-    On Error Resume Next
-    Set button = ws.Shapes("VyskladneniPdfTiskButton")
-    On Error GoTo 0
-    If button Is Nothing Then
-        Set button = ws.Shapes.AddFormControl(xlButtonControl, ws.Range("H5").Left, ws.Range("H5").Top, 210, 32)
-        button.Name = "VyskladneniPdfTiskButton"
-    End If
-    button.TextFrame.Characters.Text = "Vyskladneni - PDF a tisk"
-    button.OnAction = "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!VyskladneniPdfATisk"
-End Sub
 
 Private Function WhPrintCell(ByVal cell As Range) As String
     If IsError(cell.Value) Then
