@@ -1,7 +1,7 @@
 "use strict";
 
 (() => {
-  const els = Object.fromEntries(["sort", "print", "reload", "status", "login", "sheet", "batch", "pieces", "summary", "rows"].map((id) => [id, document.getElementById(id)]));
+  const els = Object.fromEntries(["sort", "print", "reload", "status", "login", "sheet", "batch", "pieces", "rows"].map((id) => [id, document.getElementById(id)]));
   const datasetId = new URLSearchParams(location.search).get("dataset");
   const embeddedData = document.getElementById("warehouse-print-data");
   const standalone = embeddedData ? JSON.parse(embeddedData.textContent) : null;
@@ -275,7 +275,6 @@
       const dataset = data.dataset;
       els.batch.textContent = [dataset.batchName || dataset.datasetDate, dataset.datasetTime, dataset.worksheetName].filter(Boolean).join(" · ");
       els.pieces.textContent = `${state.rows.reduce((sum, row) => sum + quantity(row), 0)} ks`;
-      els.summary.textContent = `${state.rows.length} variant · ${new Set(state.rows.flatMap((row) => allocations(row).map((item) => Number(item.destination)))).size} boxů`;
       document.title = `Vyskladnění ${dataset.datasetDate || ""}`;
       render();
       els.sheet.hidden = false;

@@ -112,7 +112,7 @@ test("prioritní kusy se oddělí i uvnitř varianty bez změny původních sou�
     await page.getByText("Prioritní kusy zvlášť", { exact: true }).click();
     await expect(page.locator(".item-row")).toHaveCount(8);
     await expect(page.locator("#pieces")).toHaveText("15 ks");
-    await expect(page.locator("#summary")).toHaveText("6 variant · 5 boxů");
+    await expect(page.locator(".totals")).toHaveText("15 ks");
     await expect(page.locator(".section-heading th")).toHaveText([
       "PRIORITNÍ KUSY", "PRIORITNÍ KUSY – II. JAKOST", "OSTATNÍ KUSY", "OSTATNÍ KUSY – II. JAKOST",
     ]);
@@ -363,7 +363,7 @@ test("nadpis sčítá jen varianty a kusy vypsané v příslušném bloku", asyn
     await page.getByText("Prioritní kusy zvlášť", { exact: true }).click();
     await expect(page.locator(".product-total")).toHaveText(["Celkem 3 ks", "Celkem 5 ks", "Celkem 7 ks", "Celkem 5 ks"]);
     await expect(page.locator("#pieces")).toHaveText("20 ks");
-    await expect(page.locator("#summary")).toHaveText("4 variant · 2 boxů");
+    await expect(page.locator(".totals")).toHaveText("20 ks");
     await page.getByText("Běžné pořadí", { exact: true }).click();
   }
   await page.getByText("Prioritní kusy zvlášť", { exact: true }).click();
@@ -614,6 +614,7 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
   await expect(page.locator("#login")).toBeHidden();
   await expect(page.locator("#rows .item-row")).toHaveCount(45);
   await expect(page.locator("#batch-report")).toBeVisible();
+  await expect(page.locator("#summary")).toHaveCount(0);
   const report = await page.locator("#warehouse-print-data").evaluate((node) => JSON.parse(node.textContent).printReport);
   await expect(page.locator(".print-report-metrics dd")).toHaveText([report.orders, report.pieces, report.stockOrders, report.stockPieces].map(String));
   await expect(page.locator(".print-report-range.priority b")).toHaveText("3");
