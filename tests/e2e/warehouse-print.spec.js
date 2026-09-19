@@ -205,6 +205,11 @@ test("samostatná sestava tiskne všechny původní kusy na A4 na šířku", asy
   await page.goto("/warehouse-print.html?dataset=71");
   await expect(page.locator("#print")).toBeEnabled();
   await expect(page.locator("#rows .item-row")).toHaveCount(rows.length);
+  await expect(page.locator("thead th")).toHaveText(["Produkt / kód varianty", "Foto", "Varianta", "Celkem", "Kolik a kam do boxů"]);
+  const firstCells = page.locator("#rows .item-row").first().locator("td");
+  await expect(firstCells.nth(0).locator(".sku")).toHaveCount(1);
+  await expect(firstCells.nth(1).locator("img, .no-photo")).toHaveCount(1);
+  await expect(firstCells.nth(2).locator(".variant-value")).toHaveCount(1);
   const total = rows.reduce((sum, row) => sum + Number(row.initialQuantity || row.quantity), 0);
   await expect(page.locator("#pieces")).toHaveText(`${total} ks`);
   await page.locator("#sort").selectOption("excel");
@@ -230,6 +235,7 @@ test("tisk čeká na fotografie a zvládne jejich chybu", async ({ page }) => {
   await page.route("**/test-product.png", async (route) => { await releaseImage; await route.fulfill({ status: 404, body: "missing" }); });
   await page.goto("/warehouse-print.html?dataset=71", { waitUntil: "domcontentloaded" });
   await expect(page.locator("#rows img")).toHaveCount(1);
+  await expect(page.locator("#rows .item-row td").nth(1).locator("img")).toHaveCount(1);
   await expect(page.locator("#print")).toBeDisabled();
   finishImage();
   await expect(page.locator("#print")).toBeEnabled();
