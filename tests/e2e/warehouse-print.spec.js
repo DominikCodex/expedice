@@ -13,6 +13,63 @@ const fixture = () => process.env.WAREHOUSE_PRINT_FIXTURE
       initialQuantity: "3", quantity: "3", remaining: 0, sequence: "1x3, 2x14",
     }));
 
+test("fotografie lze znovu načíst z místního HTML a výpadek neblokuje tisk", async ({ page }, testInfo) => {
+  const output = testInfo.outputPath("retry-images.html");
+  const localPython = path.resolve(process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python");
+  execFileSync(process.env.TEST_PYTHON || (fs.existsSync(localPython) ? localPython : "python"), [
+    "tests/e2e/render-print-fixture.py", output,
+  ]);
+  let fail = true;
+  const requests = [];
+  await page.route("**/api/warehouse/print-images", async (route) => {
+    if (route.request().method() === "OPTIONS") {
+      return route.fulfill({ status: 204, headers: { "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS", "Access-Control-Allow-Headers": "Content-Type" } });
+    }
+    const payload = route.request().postDataJSON();
+    requests.push(payload);
+    expect(Object.keys(payload)).toEqual(["codes"]);
+    expect(route.request().headers().cookie).toBeUndefined();
+    await route.fulfill({ status: fail ? 503 : 200, contentType: "application/json",
+      headers: { "Access-Control-Allow-Origin": "*" },
+      body: JSON.stringify(fail ? { error: "Temporary outage" } : { ok: true, configured: true,
+        images: Object.fromEntries(payload.codes.map((code) => [code, "https://photos.example.test/image.png"])) }),
+    });
+  });
+  await page.route("https://photos.example.test/image.png", (route) => route.fulfill({
+    contentType: "image/png",
+    body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6ptkAAAAASUVORK5CYII=", "base64"),
+  }));
+  await page.goto(pathToFileURL(output).href);
+  await expect(page.locator("#print")).toBeEnabled();
+  const rowCount = await page.locator(".item-row").count();
+  const pieces = await page.locator("#pieces").textContent();
+  await expect(page.locator(".no-photo")).toHaveCount(rowCount);
+  await page.locator("#retry-images").evaluate((button) => { button.click(); button.click(); });
+  await expect(page.locator("#status")).toContainText("Další pokus");
+  expect(requests).toHaveLength(1);
+  await expect(page.locator("#print")).toBeEnabled();
+  fail = false;
+  await page.locator("#retry-images").click();
+  await expect(page.locator("#print")).toBeEnabled();
+  await expect(page.locator(".no-photo")).toHaveCount(0);
+  await expect(page.locator("#rows img")).toHaveCount(rowCount);
+  expect(await page.locator("#rows img").evaluateAll((images) => images.every((image) => image.naturalWidth > 0))).toBe(true);
+  await expect(page.locator("#status")).not.toContainText("nepodařilo");
+  fail = true;
+  await page.locator("#retry-images").click();
+  await expect(page.locator("#status")).toContainText("Další pokus");
+  await expect(page.locator("#rows img")).toHaveCount(rowCount);
+  await expect(page.locator("#print")).toBeEnabled();
+  await expect(page.locator("#pieces")).toHaveText(pieces);
+  await expect(page.locator("#login")).toBeHidden();
+  await page.locator("#reload").click();
+  await expect(page.locator("#print")).toBeEnabled();
+  await expect(page.locator(".no-photo")).toHaveCount(0);
+  expect(requests).toHaveLength(3);
+  await page.screenshot({ path: testInfo.outputPath("retry-images.png") });
+});
+
 test("všechny prioritní řádky včetně II. jakosti předcházejí ostatním", async ({ page }) => {
   const items = [
     ["B", "B-N", "1x8"],

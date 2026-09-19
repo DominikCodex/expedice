@@ -1,7 +1,7 @@
 "use strict";
 
 (() => {
-  const els = Object.fromEntries(["sort", "print", "reload", "status", "login", "sheet", "batch", "pieces", "rows"].map((id) => [id, document.getElementById(id)]));
+  const els = Object.fromEntries(["sort", "print", "reload", "retry-images", "status", "login", "sheet", "batch", "pieces", "rows"].map((id) => [id, document.getElementById(id)]));
   const datasetId = new URLSearchParams(location.search).get("dataset");
   const embeddedData = document.getElementById("warehouse-print-data");
   const standalone = embeddedData ? JSON.parse(embeddedData.textContent) : null;
@@ -251,6 +251,7 @@
     state.ready = false;
     els.print.disabled = true;
     els.sort.disabled = true;
+    els["retry-images"].disabled = true;
     els.sheet.hidden = true;
     els.status.textContent = "Načítám sestavu a fotografie…";
     try {
@@ -286,11 +287,63 @@
       els.print.disabled = false;
       els.sort.disabled = false;
     } catch (error) { els.status.textContent = error.message; }
-    finally { state.busy = false; }
+    finally { state.busy = false; els["retry-images"].disabled = !state.ready; }
+  }
+
+  async function retryImages() {
+    if (state.busy || !state.ready) return;
+    state.busy = true;
+    els["retry-images"].disabled = true;
+    els.print.disabled = true;
+    els.sort.disabled = true;
+    els.reload.disabled = true;
+    els.status.textContent = "Znovu načítám fotografie…";
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 45000);
+    let warning = "";
+    let refreshed = false;
+    const priorityInputs = [...document.querySelectorAll('input[name="priority"]')];
+    priorityInputs.forEach((input) => { input.disabled = true; });
+    try {
+      const codes = [...new Set(state.rows.flatMap((row) => [row.variantCode, row.productCode]).filter(Boolean))];
+      const endpoint = standalone?.imageRetryUrl || "/api/product-images";
+      const response = await fetch(endpoint, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        credentials: standalone ? "omit" : "same-origin", cache: "no-store",
+        signal: controller.signal, body: JSON.stringify({ codes }),
+      });
+      if (!response.ok) throw new Error("Image lookup failed");
+      const data = await response.json();
+      if (data.ok === false) throw new Error("Image lookup failed");
+      refreshed = true;
+      for (const [code, url] of Object.entries(data.images || {})) {
+        if (typeof url === "string" && /^https?:\/\//i.test(url)) state.images[key(code)] = url;
+      }
+      if (data.configured === false) warning = "Produktové fotografie nejsou nastavené. ";
+      if (standalone) {
+        standalone.images = { ...state.images };
+        standalone.imageWarning = warning;
+      }
+    } catch (_) {
+      warning = "Fotografie se nepodařilo znovu načíst. Další pokus můžete spustit později. ";
+    } finally { clearTimeout(timer); }
+    try {
+      if (refreshed) render();
+      await settleImages();
+      const missing = els.rows.querySelectorAll(".no-photo").length;
+      els.status.textContent = `${warning}${missing ? `Bez fotografie: ${missing} variant. ` : ""}Sestava je připravená k tisku.`;
+    } finally {
+      state.busy = false;
+      els["retry-images"].disabled = false;
+      els.print.disabled = false;
+      els.sort.disabled = false;
+      els.reload.disabled = false;
+      priorityInputs.forEach((input) => { input.disabled = false; });
+    }
   }
 
   async function rerender() {
-    if (!state.ready) return;
+    if (!state.ready || state.busy) return;
     els.print.disabled = true;
     render();
     await settleImages();
@@ -307,6 +360,7 @@
     els.print.disabled = false;
   });
   els.reload.addEventListener("click", load);
+  els["retry-images"].addEventListener("click", retryImages);
   els.login.addEventListener("submit", async (event) => {
     event.preventDefault();
     const fields = new FormData(els.login);

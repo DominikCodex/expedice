@@ -176,16 +176,63 @@ def test_anonymous_render_accepts_payload_through_ten_mb(monkeypatch, size):
     assert rendered_data(response)["rows"][0]["variantCode"] == "SKU-ČERNÁ"
 
 
-def test_anonymous_render_does_not_create_incomplete_document_on_image_service_failure(monkeypatch):
+def test_anonymous_render_keeps_printable_document_on_image_service_failure(monkeypatch):
     monkeypatch.setattr(app, "product_image_cache", MagicMock(side_effect=RuntimeError("private-details")))
     response = app.app.test_client().post("/api/warehouse/render-print", json={"rows": [print_row()]})
-    assert response.status_code == 503
-    assert response.mimetype == "text/plain"
-    assert response.headers["Retry-After"] == "5"
+    assert response.status_code == 200
+    assert response.mimetype == "text/html"
     assert response.headers["Cache-Control"] == "no-store"
-    assert "Sestava nebyla vytvořena" in response.text
-    assert "warehouse-print-data" not in response.text
+    data = rendered_data(response)
+    assert data["images"] == {}
+    assert data["imageWarning"]
+    assert data["imageRetryUrl"] == "http://localhost/api/warehouse/print-images"
     assert "private-details" not in response.text
+
+
+def test_print_retry_url_uses_https_behind_proxy(monkeypatch):
+    monkeypatch.setattr(app, "product_image_cache", lambda: {"images": {}})
+    response = app.app.test_client().post("/api/warehouse/render-print", json={"rows": [print_row()]},
+                                         headers={"X-Forwarded-Proto": "https"})
+    assert rendered_data(response)["imageRetryUrl"] == "https://localhost/api/warehouse/print-images"
+
+
+def test_public_print_images_are_limited_to_requested_codes_without_user_data(monkeypatch):
+    monkeypatch.setattr(app, "current_user", MagicMock(side_effect=AssertionError("No session lookup")))
+    monkeypatch.setattr(app, "product_image_cache", lambda: {"configured": True, "images": {
+        "SKU-ČERNÁ": "https://example.invalid/photo.jpg", "OTHER": "https://example.invalid/other.jpg",
+        "BAD": "javascript:alert(1)",
+    }, "secret": "private-details"})
+    client = app.app.test_client()
+    response = client.post("/api/warehouse/print-images", json={"codes": ["sku-černá", "BAD"]}, headers={"Origin": "null"})
+    assert response.status_code == 200
+    assert response.json == {"ok": True, "configured": True, "images": {"SKU-ČERNÁ": "https://example.invalid/photo.jpg"}}
+    assert response.headers["Access-Control-Allow-Origin"] == "*"
+    assert "Access-Control-Allow-Credentials" not in response.headers
+    preflight = client.options("/api/warehouse/print-images", headers={"Origin": "null"})
+    assert preflight.status_code == 204
+    assert preflight.headers["Access-Control-Allow-Headers"] == "Content-Type"
+    assert "Access-Control-Allow-Origin" not in client.get("/warehouse-print.html").headers
+
+
+@pytest.mark.parametrize("payload", [{}, [], {"codes": []}, {"codes": [None]}, {"codes": ["x"] * 2001},
+                                         {"codes": ["x" * 501]}, {"codes": [" "]}])
+def test_print_image_retry_rejects_invalid_codes_before_lookup(monkeypatch, payload):
+    cache = MagicMock()
+    monkeypatch.setattr(app, "product_image_cache", cache)
+    response = app.app.test_client().post("/api/warehouse/print-images", json=payload)
+    assert response.status_code == 400
+    cache.assert_not_called()
+
+
+def test_print_image_retry_failure_is_cors_readable_and_hides_details(monkeypatch):
+    monkeypatch.setattr(app, "product_image_cache", MagicMock(side_effect=RuntimeError("private-details")))
+    client = app.app.test_client()
+    response = client.post("/api/warehouse/print-images", json={"codes": ["SKU"]})
+    assert response.status_code == 503
+    assert response.headers["Access-Control-Allow-Origin"] == "*"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert "private-details" not in response.text
+    assert client.post("/api/warehouse/print-images", data=b" " * (256 * 1024 + 1)).status_code == 413
 
 
 def test_print_helpers_are_preserved_only_in_document_without_database(monkeypatch):

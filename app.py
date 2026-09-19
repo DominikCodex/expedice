@@ -1355,7 +1355,7 @@ def enforce_api_auth():
     if not path.startswith("/api/"):
         return None
 
-    public_paths = {"/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/me", "/api/warehouse/render-print"}
+    public_paths = {"/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/me", "/api/warehouse/render-print", "/api/warehouse/print-images"}
     if path in public_paths:
         return None
 
@@ -4510,6 +4510,44 @@ def normalize_warehouse_print_helpers(helpers):
     return normalized
 
 
+@app.after_request
+def warehouse_print_images_cors(response):
+    # Local file:// printouts have an opaque origin. This public, read-only endpoint
+    # exposes only the same product photo URLs already included by render-print.
+    if request.path == "/api/warehouse/print-images":
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type"
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.route("/api/warehouse/print-images", methods=["POST", "OPTIONS"])
+def warehouse_print_images():
+    if request.method == "OPTIONS":
+        return Response(status=204)
+    content = request.stream.read(256 * 1024 + 1)
+    if len(content) > 256 * 1024:
+        return jsonify({"error": "Příliš mnoho kódů produktů."}), 413
+    try:
+        payload = json.loads(content)
+        codes = payload.get("codes") if isinstance(payload, dict) else None
+        if (not isinstance(codes, list) or not 1 <= len(codes) <= 2000
+                or any(not isinstance(code, str) or not code.strip() or len(code) > 500 for code in codes)):
+            raise ValueError()
+        codes = {product_image_code_key(code) for code in codes}
+    except (ValueError, TypeError, RecursionError):
+        return jsonify({"error": "Neplatné kódy produktů."}), 400
+    try:
+        cache = product_image_cache()
+        images = {code: url for code, url in (cache.get("images") or {}).items()
+                  if code in codes and isinstance(url, str) and url.startswith(("https://", "http://"))}
+        return jsonify({"ok": True, "configured": bool(cache.get("configured")), "images": images})
+    except Exception:
+        app.logger.warning("Warehouse print image retry failed", exc_info=True)
+        return jsonify({"error": "Fotografie se nepodařilo načíst. Zkuste to za chvíli znovu."}), 503
+
+
 @app.route("/api/warehouse/render-print", methods=["POST"])
 def render_warehouse_print():
     # A stateless document generator: accepts only caller-supplied rows, never a dataset ID.
@@ -4540,15 +4578,7 @@ def render_warehouse_print():
             warning = "Produktové fotografie nejsou nastavené. "
     except Exception:
         app.logger.warning("Warehouse print image lookup failed", exc_info=True)
-        # A standalone HTML cannot recover an empty embedded image map by reloading.
-        response = Response(
-            "Produktové fotografie se nepodařilo načíst. Sestava nebyla vytvořena, "
-            "aby nechyběly fotografie. Zkuste za chvíli znovu spustit tisk vyskladnění z Excelu.",
-            status=503, mimetype="text/plain",
-        )
-        response.headers["Retry-After"] = "5"
-        response.headers["Cache-Control"] = "no-store"
-        return response
+        warning = "Produktové fotografie se nepodařilo načíst. "
 
     document = {
         "dataset": {"datasetKind": "warehouse_print", **{
@@ -4558,6 +4588,9 @@ def render_warehouse_print():
         "rows": rows,
         "images": images,
         "imageWarning": warning,
+        "imageRetryUrl": (request.url_root.replace("http://", "https://", 1)
+                          if request.headers.get("X-Forwarded-Proto", "").split(",")[0].strip() == "https"
+                          else request.url_root).rstrip("/") + "/api/warehouse/print-images",
         "helperSheets": helper_sheets,
         "printReport": build_print_report(rows, helper_sheets, EXPEDITION_ORDER_CODE_LABELS_DEFAULT),
     }
