@@ -5,7 +5,7 @@
   const datasetId = new URLSearchParams(location.search).get("dataset");
   const embeddedData = document.getElementById("warehouse-print-data");
   const standalone = embeddedData ? JSON.parse(embeddedData.textContent) : null;
-  const state = { rows: [], images: {}, redBoxes: new Set(), ready: false, busy: false };
+  const state = { rows: [], images: {}, redBoxes: new Set(), ginaVariants: new Set(), ready: false, busy: false };
   const pageStyle = document.createElement("style");
   document.head.append(pageStyle);
   function setOrientation(value) {
@@ -28,6 +28,33 @@
   const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const key = (value) => String(value || "").trim().toUpperCase();
   const quantity = (row) => Number(row.initialQuantity || row.quantity || 0);
+  function excelGinaVariants(data) {
+    const cells = data.helperSheets?.EXCEL?.cells;
+    if (!Array.isArray(cells) || !Array.isArray(cells[0])) return new Set();
+    const header = (value) => key(value).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/:\s*$/, "");
+    const codeColumn = cells[0].findIndex((value) => header(value) === "OZNACENI VARIANTY");
+    const infoColumn = cells[0].findIndex((value) => header(value) === "DOPLNKOVE INFO");
+    if (codeColumn < 0 || infoColumn < 0) return new Set();
+    const brands = new Map();
+    // Repeated order lines must agree on the brand; missing/conflicting evidence is not Gina.
+    for (const row of cells.slice(1)) {
+      if (!Array.isArray(row)) continue;
+      const code = key(row[codeColumn]);
+      if (!code) continue;
+      const brand = key(String(row[infoColumn] ?? "").match(/^\s*\/\/\s*([^/]+?)\s*\/\//)?.[1]);
+      if (!brands.has(code)) brands.set(code, new Set());
+      brands.get(code).add(brand);
+    }
+    return new Set([...brands].filter(([, values]) => values.size === 1 && values.has("GINA")).map(([code]) => code));
+  }
+  function productGroup(row) {
+    const code = key(row.variantCode) || key(row.productCode);
+    const parts = code.split("-");
+    if (parts.some((part) => !part.trim())) return code;
+    const count = parts[0] === "BOXERKY" && parts[1] === "BASIC" ? 3
+      : state.ginaVariants.has(key(row.variantCode)) ? 1 : 2;
+    return parts.slice(0, count).join("-");
+  }
   function completionRedBoxes(data) {
     const cells = data.helperSheets?.KOMPLETACE?.cells;
     const boxes = new Set();
@@ -94,6 +121,7 @@
     const collator = new Intl.Collator("cs", { numeric: true, sensitivity: "base" });
     const priorityFirst = document.querySelector('input[name="priority"]:checked')?.value === "first";
     const priorityRows = new Set(state.rows.filter((row) => allocations(row).some((item) => state.redBoxes.has(Number(item.destination)))));
+    const groups = new Map(state.rows.map((row) => [row, productGroup(row)]));
     const rows = [...state.rows].sort((a, b) => {
       if (priorityFirst) {
         const difference = Number(priorityRows.has(b)) - Number(priorityRows.has(a))
@@ -106,7 +134,7 @@
         if (difference) return difference;
       }
       return (els.sort.value === "product" ? Number(secondQuality(a)) - Number(secondQuality(b)) : 0)
-        || collator.compare(a.productCode || "", b.productCode || "")
+        || collator.compare(els.sort.value === "product" ? groups.get(a) : a.productCode || "", els.sort.value === "product" ? groups.get(b) : b.productCode || "")
         || collator.compare(a.variantCode || "", b.variantCode || "");
     });
     let lastProduct = null;
@@ -117,10 +145,10 @@
       const image = state.images[key(row.variantCode)] || state.images[key(row.productCode)];
       const quality = secondQuality(row);
       const priority = priorityRows.has(row);
-      const groupStart = lastProduct !== row.productCode
+      const groupStart = lastProduct !== groups.get(row)
         || ((els.sort.value === "product" || priorityFirst) && lastQuality !== quality)
         || (priorityFirst && lastPriority !== priority);
-      lastProduct = row.productCode;
+      lastProduct = groups.get(row);
       lastQuality = quality;
       lastPriority = priority;
       return `<tr class="${groupStart ? "group-start" : ""}">
@@ -169,6 +197,7 @@
       if (!["warehouse", "warehouse_print"].includes(data.dataset?.datasetKind)) throw new Error("Tato dávka není vyskladnění.");
       state.rows = data.rows || [];
       state.redBoxes = completionRedBoxes(data);
+      state.ginaVariants = excelGinaVariants(data);
       if (!state.rows.length) throw new Error("Tato sestava neobsahuje žádné položky.");
       state.images = {};
       let imageWarning = standalone?.imageWarning || "";

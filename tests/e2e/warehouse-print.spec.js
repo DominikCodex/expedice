@@ -79,6 +79,70 @@ test("všechny prioritní řádky včetně II. jakosti předcházejí ostatním"
   await page.pdf({ path: "test-results/warehouse-priority.pdf", preferCSSPageSize: true, printBackground: true });
 });
 
+test("produkty se oddělují podle kódu a Giny spárované z EXCEL", async ({ page }) => {
+  const codes = [
+    "03019-MBH-XLXXL-UPE", "03019-LBH-LXL-UPE",
+    "BOXERKY-BASIC-021-LXL-CERNA", "BOXERKY-BASIC-021-ML-CERNA", "BOXERKY-BASIC-022-ML-CERNA",
+    "GBTW-3106-XXL3XL-CERNA", "GBTW-3109-SM-CERNA", "GBTW-3109-SM-TELOVA",
+    "6002-HOLLAND-LXL-BILA", "6002-HOLLAND-SM-BILA", "BEZPOMLCKY", "KRATKY-KOD",
+    "03100-A-SM", "03100-B-SM", "03200-A-SM", "03200-B-SM",
+  ];
+  const rows = codes.map((variantCode, i) => ({
+    rowNumber: i + 2, productCode: i === 0 ? "ZZZ" : "SKUPINA", variantCode,
+    info: i < 2 ? "Boxerky vyšší bamboo Gina" : "Testovací výrobek", variant: "L/XL, černá",
+    initialQuantity: 1, sequence: `1x${i + 1}`,
+  }));
+  const helperRow = (code, brand) => ["", "", code, "", "", "", "", "", "", brand];
+  const cells = [helperRow("Označení varianty:", "Doplňkové info:"),
+    helperRow(` ${codes[0].toLowerCase()} `, " // gInA //Boxerky"), helperRow(codes[0], "//Gina//Boxerky"),
+    helperRow(codes[1], "//Gina//Boxerky"),
+    helperRow(codes[12], "//Gina//Výrobek"), helperRow(codes[12], "//Jiná značka//Výrobek"),
+    helperRow(codes[13], "//Gina//Výrobek"), helperRow(codes[13], "//Jiná značka//Výrobek"),
+    helperRow(codes[14], "//Jiná značka//Název obsahuje Gina"), helperRow(codes[15], "//Jiná značka//Gina"),
+  ];
+  let helpers = { EXCEL: { cells } };
+  await page.route("**/api/datasets/71", (route) => route.fulfill({ json: {
+    dataset: { datasetKind: "warehouse_print" }, rows, helperSheets: helpers,
+  } }));
+  await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
+  await page.goto("/warehouse-print.html?dataset=71");
+  await expect(page.locator("#print")).toBeEnabled();
+  // Group ordering must not be based on the old broad productCode (ZZZ/SKUPINA).
+  await expect(page.locator(".sku").nth(0)).toHaveText(codes[1]);
+  await expect(page.locator(".sku").nth(1)).toHaveText(codes[0]);
+  await expect(page.locator("#rows tr").nth(1)).not.toHaveClass("group-start");
+  await page.locator("#sort").selectOption("excel");
+  const boundaries = [0, 2, 4, 5, 6, 8, 10, 11, 12, 13, 14, 15];
+  await expect(page.locator(".sku")).toHaveText(codes);
+  await expect(page.locator("tr.group-start .sku")).toHaveText(boundaries.map((i) => codes[i]));
+  await expect(page.locator("#pieces")).toHaveText("16 ks");
+  await expect(page.locator(".allocation")).toHaveCount(16);
+  for (const orientation of ["Na šířku", "Na výšku"]) {
+    await page.getByText(orientation, { exact: true }).click();
+    for (const density of ["Běžné", "Kompaktní"]) {
+      await page.getByText(density, { exact: true }).click();
+      await expect(page.locator("tr.group-start .sku")).toHaveText(boundaries.map((i) => codes[i]));
+      await expect(page.locator("tr.group-start").first().locator("td").first()).toHaveCSS("border-top-width", "2px");
+      await expect(page.locator("#rows tr").nth(1).locator("td").first()).toHaveCSS("border-top-width", "0px");
+      for (const width of [1280, 1024]) {
+        await page.setViewportSize({ width, height: 900 });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      }
+    }
+  }
+  await page.screenshot({ path: "test-results/warehouse-product-groups.png", fullPage: true });
+  await page.emulateMedia({ media: "print" });
+  await page.pdf({ path: "test-results/warehouse-product-groups.pdf", preferCSSPageSize: true, printBackground: true });
+  await page.emulateMedia({ media: "screen" });
+  // A later load with missing or incomplete helper data must not reuse the old Gina match.
+  for (const fallback of [{}, { EXCEL: { cells: [["Něco:"]] } }]) {
+    helpers = fallback;
+    await page.locator("#reload").click();
+    await expect(page.locator("#print")).toBeEnabled();
+    await expect(page.locator("#rows tr").nth(1)).toHaveClass("group-start");
+  }
+});
+
 test("samostatná sestava tiskne všechny původní kusy na A4 na šířku", async ({ page }) => {
   const rows = fixture();
   await page.route("**/api/datasets/71", (route) => route.fulfill({ json: { dataset: { id: 71, datasetKind: "warehouse_print", datasetDate: "2026-09-18", datasetTime: "08:30", worksheetName: "Vyskladnění" }, rows } }));
@@ -180,7 +244,7 @@ test("II. jakost je až na konci celé sestavy za všemi běžnými produkty", a
   await expect(page.locator(".sku")).toHaveText(expected.map((index) => items[index][1]));
   await expect(page.locator(".allocation")).toHaveText(expected.map((index) => `2 ks → box ${items[index][3]}`));
   await expect(page.locator("#pieces")).toHaveText("16 ks");
-  await expect(page.locator("#rows tr.group-start .sku")).toHaveText([1, 2, 3, 4, 6].map((index) => items[index][1]));
+  await expect(page.locator("#rows tr.group-start .sku")).toHaveText([1, 2, 5, 3, 4, 0, 6].map((index) => items[index][1]));
   for (const label of ["Na šířku", "Na výšku"]) {
     await page.getByText(label, { exact: true }).click();
     expect(await page.locator("#sheet").evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true);
