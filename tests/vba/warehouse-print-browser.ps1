@@ -13,6 +13,19 @@ End Function
 Public Function TestHelperSheets() As String
     TestHelperSheets = WhPrintHelperSheets(ThisWorkbook)
 End Function
+Public Function TestWarehouseSheet() As String
+    Dim ws As Worksheet
+    Set ws = WhPrintWarehouseSheet(ThisWorkbook)
+    TestWarehouseSheet = ws.Name
+End Function
+Public Function TestWarehouseFailure() As Long
+    On Error GoTo Expected
+    Dim ws As Worksheet
+    Set ws = WhPrintWarehouseSheet(ThisWorkbook)
+    Exit Function
+Expected:
+    TestWarehouseFailure = Err.Number - vbObjectError
+End Function
 Public Function TestHelperFailure() As Long
     On Error GoTo Expected
     Dim value As String
@@ -39,6 +52,7 @@ End Function
 $excel = $null
 $book = $null
 $component = $null
+$otherBook = $null
 try {
     # A new instance and unsaved workbook only; never attach to the user's workbook.
     $excel = New-Object -ComObject Excel.Application
@@ -95,6 +109,42 @@ try {
     if ($excel.Run($prefix + 'TestHelperFailure') -ne 814) { throw 'Oversize helper sheet was not rejected.' }
     Write-Output 'PASS: helper sheets, Unicode, cached formulas, leading zeros, blank positions, missing/empty/error/oversize rejection. No upload performed.'
 
+    if ($excel.Run($prefix + 'TestWarehouseFailure') -ne 802) { throw 'Missing warehouse sheet was not rejected.' }
+    $warehouseSheet = $book.Worksheets.Add()
+    $warehouseSheet.Name = 'VYSKLADNI'
+    $warehouseSheet.Cells.Item(1, 2).Value2 = 'Kod varianty:'
+    $warehouseSheet.Cells.Item(1, 4).Value2 = 'Kolik a kam s tim:'
+    $warehouseSheet.Cells.Item(1, 5).Value2 = 'Celk.:'
+    foreach ($tab in @($sourceSheet, $completionSheet, $warehouseSheet)) {
+        $tab.Activate()
+        if ($excel.Run($prefix + 'TestWarehouseSheet') -cne 'VYSKLADNI') { throw 'Could not resolve warehouse sheet from another tab.' }
+        if ($excel.ActiveSheet.Name -cne $tab.Name) { throw 'Resolver switched the active tab.' }
+    }
+    $warehouseSheet.Name = 'Tisk skladu'
+    $completionSheet.Activate()
+    $warehouseSheet.Visible = 0
+    if ($excel.Run($prefix + 'TestWarehouseSheet') -cne 'Tisk skladu') { throw 'Renamed or hidden warehouse sheet was not found.' }
+    $unrelatedSheet = $book.Worksheets.Add()
+    $unrelatedSheet.Cells.Item(1, 2).Formula = '=1/0'
+    if ($excel.Run($prefix + 'TestWarehouseSheet') -cne 'Tisk skladu') { throw 'Unrelated cell error broke discovery.' }
+    foreach ($tab in @($sourceSheet, $completionSheet)) {
+        $tab.Cells.Item(1, 2).Value2 = 'variant'
+        $tab.Cells.Item(1, 4).Value2 = 'kam'
+        $tab.Cells.Item(1, 5).Value2 = 'Celk'
+    }
+    if ($excel.Run($prefix + 'TestWarehouseSheet') -cne 'Tisk skladu') { throw 'A helper sheet was treated as warehouse data.' }
+    $otherBook = $excel.Workbooks.Add()
+    if ($excel.Run($prefix + 'TestWarehouseSheet') -cne 'Tisk skladu') { throw 'Resolver read the wrong workbook.' }
+    $otherBook.Close($false)
+    [void][Runtime.InteropServices.Marshal]::ReleaseComObject($otherBook)
+    $otherBook = $null
+    $duplicateSheet = $book.Worksheets.Add()
+    $duplicateSheet.Cells.Item(1, 2).Value2 = 'variant'
+    $duplicateSheet.Cells.Item(1, 4).Value2 = 'kam'
+    $duplicateSheet.Cells.Item(1, 5).Value2 = 'Celk'
+    if ($excel.Run($prefix + 'TestWarehouseFailure') -ne 815) { throw 'Ambiguous warehouse sheets were not rejected.' }
+    Write-Output 'PASS: discovery from every tab; renamed/hidden sheets; unrelated errors; helper exclusion; workbook isolation; ambiguity rejection.'
+
     if ($ReportPath) {
         $resolved = (Resolve-Path -LiteralPath $ReportPath).Path
         if ([IO.Path]::GetExtension($resolved) -ne '.html') { throw 'Expected an HTML print report.' }
@@ -103,9 +153,10 @@ try {
         Write-Output 'PASS: Excel requested report opening in the web browser.'
     }
 } finally {
+    if ($otherBook) { $otherBook.Close($false) }
     if ($book) { $book.Close($false) }
     if ($excel) { $excel.Quit() }
-    foreach ($object in @($component, $book, $excel)) {
+    foreach ($object in @($otherBook, $component, $book, $excel)) {
         if ($object) { [void][Runtime.InteropServices.Marshal]::ReleaseComObject($object) }
     }
 }

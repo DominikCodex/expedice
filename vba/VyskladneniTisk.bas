@@ -13,15 +13,10 @@ Private Declare Function WhPrintShellExecute Lib "shell32.dll" Alias "ShellExecu
 Public Sub VyskladneniNahratATisk()
     On Error GoTo Failed
     Dim ws As Worksheet
-    Set ws = ActiveSheet
+    Set ws = WhPrintWarehouseSheet(ThisWorkbook)
     Dim lastRow As Long, r As Long, payload As String, rows As String, helperSheets As String
     lastRow = ws.Cells(ws.Rows.Count, "B").End(xlUp).Row
-    If lastRow < 2 Then Err.Raise vbObjectError + 801, , "Na aktivnim listu nejsou data vyskladneni."
-    If InStr(1, WhPrintCell(ws.Cells(1, 2)), "variant", vbTextCompare) = 0 Or _
-       InStr(1, WhPrintCell(ws.Cells(1, 4)), "kam", vbTextCompare) = 0 Or _
-       InStr(1, WhPrintCell(ws.Cells(1, 5)), "Celk", vbTextCompare) = 0 Then
-        Err.Raise vbObjectError + 802, , "Otevri list vyskladneni: B = kod varianty, C = varianta, D = kolik a kam, E = celkem, F = nazev."
-    End If
+    If lastRow < 2 Then Err.Raise vbObjectError + 801, , "Na listu " & ws.Name & " nejsou data vyskladneni."
 
     For r = 2 To lastRow
         If Len(Trim$(WhPrintCell(ws.Cells(r, 2)))) > 0 Then
@@ -85,6 +80,32 @@ Failed:
     If Len(printPath) > 0 Then failure = failure & vbCrLf & vbCrLf & "Soubor sestavy: " & printPath
     MsgBox failure, vbExclamation
 End Sub
+
+Private Function WhPrintWarehouseSheet(ByVal book As Workbook) As Worksheet
+    Dim ws As Worksheet, found As Worksheet, names As String, matches As Long
+    For Each ws In book.Worksheets
+        If UCase$(ws.Name) <> "EXCEL" And UCase$(ws.Name) <> "KOMPLETACE" Then
+            If WhPrintHasWarehouseHeaders(ws) Then
+                matches = matches + 1
+                Set found = ws
+                If Len(names) > 0 Then names = names & ", "
+                names = names & ws.Name
+            End If
+        End If
+    Next ws
+    If matches = 0 Then Err.Raise vbObjectError + 802, , "V sesitu " & book.Name & " chybi list vyskladneni s hlavickou B = kod varianty, D = kolik a kam, E = celkem. Nic nebylo odeslano."
+    If matches > 1 Then Err.Raise vbObjectError + 815, , "V sesitu je vice tabulek vyskladneni: " & names & ". Ponech pouze jednu tiskovou tabulku s touto hlavickou. Nic nebylo odeslano."
+    Set WhPrintWarehouseSheet = found
+End Function
+
+Private Function WhPrintHasWarehouseHeaders(ByVal ws As Worksheet) As Boolean
+    ' Unrelated sheets may contain formula errors in their first row.
+    If IsError(ws.Cells(1, 2).Value) Or IsError(ws.Cells(1, 4).Value) Or IsError(ws.Cells(1, 5).Value) Then Exit Function
+    WhPrintHasWarehouseHeaders = _
+        InStr(1, WhPrintCell(ws.Cells(1, 2)), "variant", vbTextCompare) > 0 And _
+        InStr(1, WhPrintCell(ws.Cells(1, 4)), "kam", vbTextCompare) > 0 And _
+        InStr(1, WhPrintCell(ws.Cells(1, 5)), "Celk", vbTextCompare) > 0
+End Function
 
 Private Function WhPrintHelperSheets(ByVal book As Workbook) As String
     Dim name As Variant, ws As Worksheet, result As String, cellCount As Long

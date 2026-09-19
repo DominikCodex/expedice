@@ -6,7 +6,7 @@ Modul `VyskladneniTisk.bas` je samostatný. Existující makra pro roztříděn�
 
 1. Otevři pracovní sešit s makry (`.xlsm` nebo `.xlsb`) a stiskni `Alt+F11`.
 2. Přes `File > Import File` importuj `VyskladneniTisk.bas` jako nový modul.
-3. Vrať se do Excelu a otevři list s tabulkou vyskladnění. Token ani přihlášení se nenastavují.
+3. Vrať se do Excelu a otevři libovolný list tohoto sešitu, kam chceš vložit tiskové tlačítko. Token ani přihlášení se nenastavují.
 4. Přes `Alt+F8` jednou spusť `VlozitTlacitkoVyskladneniTisk`. V oblasti H2 vznikne samostatné tlačítko. Případně svému vlastnímu tlačítku přiřaď makro `VyskladneniNahratATisk`.
 5. Ulož sešit ve formátu podporujícím makra. Původní `.xlsx` makra uchovat neumí.
 
@@ -18,7 +18,9 @@ Pro přidání pomocných listů `EXCEL` a `KOMPLETACE` přes `Alt+F11` otevři 
 
 Ve stejném sešitu musí být neprázdné pomocné listy pojmenované `EXCEL` a `KOMPLETACE`. Makro je čte automaticky, není potřeba na ně přepínat. Pokud některý chybí, nic neodešle a vypíše jeho název.
 
-Na aktivním listu musí být od druhého řádku tabulka:
+Makro lze spustit z kteréhokoli listu. Vyskladnění si najde podle hlaviček B1 (`variant`), D1 (`kam`) a E1 (`Celk`), bez ohledu na název listu. Prohledává pouze sešit, ve kterém je tiskové makro uložené; nepřepíná aktivní list a funguje i se skrytým listem vyskladnění. Listy `EXCEL` a `KOMPLETACE` jsou vždy jen pomocné. Pokud tiskovou tabulku nenajde nebo najde více odpovídajících listů, nic neodešle a vypíše chybu (u více listů jejich názvy).
+
+Na nalezeném listu musí být od druhého řádku tabulka:
 
 | Sloupec | Obsah |
 | --- | --- |
