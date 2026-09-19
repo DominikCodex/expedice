@@ -179,6 +179,8 @@ test("prioritní kusy se oddělí i uvnitř varianty bez změny původních sou�
     const original = await readRows();
     await page.getByText("Prioritní kusy zvlášť", { exact: true }).click();
     await expect(page.locator(".item-row")).toHaveCount(8);
+    await expect(page.locator(".priority-page-start")).toHaveCount(1);
+    await expect(page.locator(".priority-page-start")).toHaveText("OSTATNÍ KUSY");
     await expect(page.locator("#pieces")).toHaveText("15 ks");
     await expect(page.locator(".totals")).toHaveText("15 ks");
     await expect(page.locator(".section-heading th")).toHaveText([
@@ -199,6 +201,7 @@ test("prioritní kusy se oddělí i uvnitř varianty bez změny původních sou�
       "MODEL-C-SM", "MODEL-A-SM", "MODEL-E-SM-II-JAKOST", "MODEL-A-ML-II-JAKOST",
     ]);
     await page.getByText("Prioritní zásilky první", { exact: true }).click();
+    await expect(page.locator(".priority-page-start")).toHaveCount(0);
     await expect(page.locator(".item-row")).toHaveCount(6);
     expect((await readRows()).find((row) => row.code === "MODEL-A-SM").quantity).toBe(5);
     await page.getByText("Běžné pořadí", { exact: true }).click();
@@ -215,7 +218,9 @@ test("prioritní kusy se oddělí i uvnitř varianty bez změny původních sou�
       }
       await page.setViewportSize({ width: 1280, height: 900 });
       await page.screenshot({ path: `test-results/warehouse-split-${orientation}-${density}.png`, fullPage: true });
+      await expect(page.locator(".priority-page-start")).toHaveCSS("break-before", "auto");
       await page.emulateMedia({ media: "print" });
+      await expect(page.locator(".priority-page-start")).toHaveCSS("break-before", "page");
       await expect(page.locator(".toolbar")).toBeHidden();
       await page.pdf({ path: `test-results/warehouse-split-${orientation}-${density}.pdf`, preferCSSPageSize: true, printBackground: true });
       await page.emulateMedia({ media: "screen" });
@@ -229,7 +234,19 @@ test("prioritní kusy se oddělí i uvnitř varianty bez změny původních sou�
   await expect(page.locator("#print")).toBeEnabled();
   await expect(page.locator(".item-row")).toHaveCount(6);
   await expect(page.locator(".allocation-red")).toHaveCount(0);
+  await expect(page.locator(".priority-page-start")).toHaveCount(0);
   await expect(page.locator("#pieces")).toHaveText("15 ks");
+  helpers = { KOMPLETACE: { cells: [Array(18).fill(""),
+    ...[7, 10, 12, 20, 30].map((box) => [...Array(16).fill(""), box, "0.8"])] } };
+  await page.locator("#reload").click();
+  await expect(page.locator("#print")).toBeEnabled();
+  await expect(page.locator(".priority-page-start")).toHaveCount(0);
+  helpers = { KOMPLETACE: { cells: [Array(18).fill(""),
+    ...[7, 10, 20].map((box) => [...Array(16).fill(""), box, "0.8"])] } };
+  await page.locator("#reload").click();
+  await expect(page.locator("#print")).toBeEnabled();
+  await expect(page.locator(".priority-page-start")).toHaveCount(1);
+  await expect(page.locator(".priority-page-start")).toHaveText("OSTATNÍ KUSY – II. JAKOST");
 });
 
 test("produkty se oddělují podle kódu a Giny spárované z EXCEL", async ({ page }) => {

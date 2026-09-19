@@ -187,10 +187,12 @@
     els.rows.innerHTML = blocks.map((block, blockIndex) => {
       const section = `${block.priority}:${block.quality}`;
       const sectionStart = (priorityFirst || els.sort.value === "product") && section !== lastSection;
+      const pageStart = priorityMode === "split" && blockIndex > 0
+        && blocks[blockIndex - 1].priority && !block.priority;
       lastSection = section;
       const label = priorityFirst ? `${block.priority ? "PRIORITNÍ" : "OSTATNÍ"}${priorityMode === "split" ? " KUSY" : ""}${block.quality ? " – II. JAKOST" : ""}`
         : block.quality ? "II. JAKOST" : "BĚŽNÉ ZBOŽÍ";
-      const sectionHeading = sectionStart ? `<tr class="section-heading"><th colspan="5" scope="rowgroup">${escape(label)}</th></tr>` : "";
+      const sectionHeading = sectionStart ? `<tr class="section-heading${pageStart ? " priority-page-start" : ""}"><th colspan="5" scope="rowgroup">${escape(label)}</th></tr>` : "";
       const first = block.rows[0];
       const blockQuantity = block.rows.reduce((sum, row) => sum + quantity(row), 0);
       const productHeading = block.rows.length > 1 ? `<tr class="product-heading"><th colspan="5" scope="rowgroup"><span>${escape(displayProductName(first))}</span><small>${escape(block.group)} · ${block.rows.length} ${block.rows.length < 5 ? "varianty" : "variant"} · <strong class="product-total">Celkem ${escape(blockQuantity)} ks</strong></small></th></tr>` : "";
@@ -205,7 +207,7 @@
           <td><div class="allocations">${allocations(row).map((item) => `<span class="allocation${Number(item.quantity) > 1 ? " allocation-multiple" : ""}${state.redBoxes.has(Number(item.destination)) ? " allocation-red" : ""}"><b>${escape(item.quantity)} ks</b> → box <b>${escape(item.destination)}</b></span>`).join("")}</div></td>
         </tr>`;
       }).join("");
-      return `${blockIndex ? '<tr class="group-gap" aria-hidden="true"><td colspan="5"></td></tr>' : ""}${sectionHeading}${productHeading}${content}`;
+      return `${blockIndex && !pageStart ? '<tr class="group-gap" aria-hidden="true"><td colspan="5"></td></tr>' : ""}${sectionHeading}${productHeading}${content}`;
     }).join("");
   }
 

@@ -120,6 +120,7 @@ td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin:
   thead { display: table-header-group; }
   tr, .sheet-heading { break-inside: avoid; page-break-inside: avoid; }
   .product-heading, .section-heading, .group-gap { break-after: avoid; page-break-after: avoid; }
+  .priority-page-start { break-before: page; page-break-before: always; }
   .section-heading th { background: white; color: #182b27; }
   th { print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 }
