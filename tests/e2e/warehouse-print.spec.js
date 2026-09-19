@@ -4,6 +4,17 @@ const path = require("path");
 const { pathToFileURL } = require("url");
 const { execFileSync } = require("child_process");
 
+async function selectStandardModes(page) {
+  await page.getByText("Na šířku", { exact: true }).click();
+  await page.getByText("Běžné", { exact: true }).click();
+  await page.getByText("Běžné pořadí", { exact: true }).click();
+}
+
+async function openStandardPrint(page) {
+  await page.goto("/warehouse-print.html?dataset=71");
+  await selectStandardModes(page);
+}
+
 const fixture = () => process.env.WAREHOUSE_PRINT_FIXTURE
   ? JSON.parse(fs.readFileSync(process.env.WAREHOUSE_PRINT_FIXTURE, "utf8").replace(/^\uFEFF/, ""))
   : Array.from({ length: 45 }, (_, i) => ({
@@ -91,7 +102,7 @@ test("všechny prioritní řádky včetně II. jakosti předcházejí ostatním"
     helperSheets: { KOMPLETACE: { cells: [cell("Box", "Kód"), cell("2", "0,8"), cell("4", "0.8"), cell("8", "1")] } },
   } }));
   await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
-  await page.goto("/warehouse-print.html?dataset=71");
+  await openStandardPrint(page);
   await expect(page.locator("#print")).toBeEnabled();
   const normal = page.getByRole("radio", { name: "Běžné pořadí", exact: true });
   const priority = page.getByRole("radio", { name: "Prioritní zásilky první", exact: true });
@@ -153,7 +164,7 @@ test("prioritní kusy se oddělí i uvnitř varianty bez změny původních sou�
     dataset: { datasetKind: "warehouse_print" }, rows, helperSheets: helpers,
   } }));
   await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
-  await page.goto("/warehouse-print.html?dataset=71");
+  await openStandardPrint(page);
   await expect(page.locator("#print")).toBeEnabled();
   const readRows = () => page.locator(".item-row").evaluateAll((nodes) => nodes.map((node) => ({
     code: node.querySelector(".sku").textContent,
@@ -247,7 +258,7 @@ test("produkty se oddělují podle kódu a Giny spárované z EXCEL", async ({ p
     dataset: { datasetKind: "warehouse_print" }, rows, helperSheets: helpers,
   } }));
   await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
-  await page.goto("/warehouse-print.html?dataset=71");
+  await openStandardPrint(page);
   await expect(page.locator("#print")).toBeEnabled();
   // Group ordering must not be based on the old broad productCode (ZZZ/SKUPINA).
   await expect(page.locator(".sku").nth(0)).toHaveText(codes[1]);
@@ -300,7 +311,7 @@ test("rámečky, nadpisy, více kusů a přirozené velikosti zůstávají čite
     dataset: { datasetKind: "warehouse_print" }, rows, helperSheets: { KOMPLETACE: { cells: [header, completion] } },
   } }));
   await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
-  await page.goto("/warehouse-print.html?dataset=71");
+  await openStandardPrint(page);
   await expect(page.locator("#print")).toBeEnabled();
   const model = page.locator(".item-row").filter({ has: page.locator(".sku", { hasText: /^MODEL-BAMBOO-\d$/ }) });
   await expect(model.locator(".variant-value")).toHaveText([4, 2, 3, 1, 0, 8, 7, 6, 5].map((i) => variants[i]));
@@ -383,7 +394,7 @@ test("tisk skryje pouze přesnou frázi o pěti kusech, ostatní vícepacky zach
   })));
   await page.route("**/api/datasets/71", (route) => route.fulfill({ json: { dataset: { datasetKind: "warehouse_print" }, rows } }));
   await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
-  await page.goto("/warehouse-print.html?dataset=71");
+  await openStandardPrint(page);
   await expect(page.locator("#print")).toBeEnabled();
   await page.locator("#sort").selectOption("excel");
   await expect(page.locator(".product-name")).toHaveText(cases.flatMap(([, expected]) => [expected, expected]));
@@ -409,7 +420,7 @@ test("nadpis sčítá jen varianty a kusy vypsané v příslušném bloku", asyn
     helperSheets: { KOMPLETACE: { cells: [Array(18).fill(""), [...Array(16).fill(""), 7, "0,8"]] } },
   } }));
   await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
-  await page.goto("/warehouse-print.html?dataset=71");
+  await openStandardPrint(page);
   await expect(page.locator("#print")).toBeEnabled();
   for (const sort of ["product", "excel", "box"]) {
     await page.locator("#sort").selectOption(sort);
@@ -436,7 +447,7 @@ test("samostatná sestava tiskne všechny původní kusy na A4 na šířku", asy
   await page.route("**/api/datasets/71", (route) => route.fulfill({ json: { dataset: { id: 71, datasetKind: "warehouse_print", datasetDate: "2026-09-18", datasetTime: "08:30", worksheetName: "Vyskladnění" }, rows } }));
   await page.route("**/api/product-images", (route) => route.fulfill({ json: { ok: true, configured: true, images: {} } }));
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto("/warehouse-print.html?dataset=71");
+  await openStandardPrint(page);
   await expect(page.locator("#print")).toBeEnabled();
   await expect(page.locator("#rows .item-row")).toHaveCount(rows.length);
   await expect(page.locator("thead th")).toHaveText(["Produkt / kód varianty", "Foto", "Varianta", "Celkem", "Kolik a kam do boxů"]);
@@ -500,7 +511,7 @@ test("varianty nemají popisky a hodnoty jsou výrazné v obou orientacích", as
   const rows = variants.map(([variant], index) => ({ ...fixture()[0], rowNumber: index + 2, variantCode: `TEST-${index}`, variant }));
   await page.route("**/api/datasets/71", (route) => route.fulfill({ json: { dataset: { datasetKind: "warehouse_print" }, rows } }));
   await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
-  await page.goto("/warehouse-print.html?dataset=71");
+  await openStandardPrint(page);
   await expect(page.locator("#print")).toBeEnabled();
   await page.locator("#sort").selectOption("excel");
   for (const [label, size] of [["Na šířku", "16px"], ["Na výšku", "14px"]]) {
@@ -532,7 +543,7 @@ test("II. jakost je až na konci celé sestavy za všemi běžnými produkty", a
   }));
   await page.route("**/api/datasets/71", (route) => route.fulfill({ json: { dataset: { datasetKind: "warehouse_print" }, rows } }));
   await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
-  await page.goto("/warehouse-print.html?dataset=71");
+  await openStandardPrint(page);
   await expect(page.locator("#print")).toBeEnabled();
   const expected = [1, 2, 7, 5, 3, 4, 0, 6];
   await expect(page.locator(".sku")).toHaveText(expected.map((index) => items[index][1]));
@@ -570,7 +581,7 @@ test("celý text boxu s kódem 0,8 z KOMPLETACE je červený i v tisku", async (
   } }));
   await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
   await page.setViewportSize({ width: 1280, height: 900 });
-  await page.goto("/warehouse-print.html?dataset=71");
+  await openStandardPrint(page);
   await expect(page.locator("#print")).toBeEnabled();
   const red = page.locator(".allocation-red");
   for (const orientation of ["Na šířku", "Na výšku"]) {
@@ -614,7 +625,7 @@ test("odkaz z Excelu po přihlášení otevře stejnou sestavu", async ({ page }
     : route.fulfill({ status: 401, json: { error: "Přihlaste se" } }));
   await page.route("**/api/auth/login", (route) => { authenticated = true; return route.fulfill({ json: { ok: true } }); });
   await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
-  await page.goto("/warehouse-print.html?dataset=71");
+  await openStandardPrint(page);
   await expect(page.locator("#login")).toBeVisible();
   await page.locator('[name="username"]').fill("mock-user");
   await page.locator('[name="password"]').fill("mock-only-not-a-real-password");
@@ -668,6 +679,19 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
   await page.setViewportSize({ width: 1280, height: 900 });
   await page.goto(pathToFileURL(output).href);
   await expect(page.locator("#print")).toBeEnabled();
+  await expect(page.locator("#sort")).toHaveValue("product");
+  for (const label of ["Na výšku", "Kompaktní", "Prioritní kusy zvlášť"]) {
+    await expect(page.getByRole("radio", { name: label, exact: true })).toBeChecked();
+  }
+  await expect(page.locator("html")).toHaveAttribute("data-orientation", "portrait");
+  await expect(page.locator("html")).toHaveAttribute("data-density", "compact");
+  await expect(page.locator("#print")).toHaveText("Tisk A4 na výšku");
+  await expect(page.locator(".section-heading").first()).toContainText("PRIORITNÍ KUSY");
+  await page.screenshot({ path: "test-results/warehouse-defaults.png" });
+  const defaultPageSize = await page.evaluate(() => [...document.styleSheets].flatMap((sheet) => [...sheet.cssRules])
+    .filter((rule) => rule.type === CSSRule.PAGE_RULE).at(-1).style.getPropertyValue("size"));
+  expect(["a4", "a4 portrait"]).toContain(defaultPageSize.toLowerCase());
+  await selectStandardModes(page);
   await expect(page.locator("#login")).toBeHidden();
   await expect(page.locator("#rows .item-row")).toHaveCount(45);
   await expect(page.locator("#batch-report")).toBeVisible();

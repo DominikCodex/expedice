@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="cs">
+<html lang="cs" data-orientation="portrait" data-density="compact">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -19,21 +19,21 @@
       </label>
       <fieldset class="print-mode">
         <legend class="visually-hidden">Orientace papíru A4</legend>
-        <label><input type="radio" name="orientation" value="landscape" checked /><span>Na šířku</span></label>
-        <label><input type="radio" name="orientation" value="portrait" /><span>Na výšku</span></label>
+        <label><input type="radio" name="orientation" value="landscape" /><span>Na šířku</span></label>
+        <label><input type="radio" name="orientation" value="portrait" checked /><span>Na výšku</span></label>
       </fieldset>
       <fieldset class="print-mode">
         <legend class="visually-hidden">Hustota tiskové sestavy</legend>
-        <label><input type="radio" name="density" value="normal" checked /><span>Běžné</span></label>
-        <label><input type="radio" name="density" value="compact" /><span>Kompaktní</span></label>
+        <label><input type="radio" name="density" value="normal" /><span>Běžné</span></label>
+        <label><input type="radio" name="density" value="compact" checked /><span>Kompaktní</span></label>
       </fieldset>
       <fieldset class="print-mode">
         <legend class="visually-hidden">Priorita zásilek</legend>
-        <label><input type="radio" name="priority" value="normal" checked /><span>Běžné pořadí</span></label>
+        <label><input type="radio" name="priority" value="normal" /><span>Běžné pořadí</span></label>
         <label><input type="radio" name="priority" value="first" /><span>Prioritní zásilky první</span></label>
-        <label><input type="radio" name="priority" value="split" /><span>Prioritní kusy zvlášť</span></label>
+        <label><input type="radio" name="priority" value="split" checked /><span>Prioritní kusy zvlášť</span></label>
       </fieldset>
-      <button id="print" type="button" disabled>Tisk A4 na šířku</button>
+      <button id="print" type="button" disabled>Tisk A4 na výšku</button>
       <button id="reload" type="button">Načíst znovu</button>
       <button id="retry-images" type="button" disabled>Znovu načíst fotky</button>
     </nav>
