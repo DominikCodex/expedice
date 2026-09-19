@@ -107,6 +107,18 @@
     return match ? { quantity: Number(match[1]), destination: Number(match[2]) } : null;
   }).filter(Boolean);
 
+  function splitPriorityPieces(row) {
+    const items = allocations(row);
+    const priority = items.filter((item) => state.redBoxes.has(Number(item.destination)));
+    const other = items.filter((item) => !state.redBoxes.has(Number(item.destination)));
+    if (!priority.length || !other.length) return [row];
+    // Split only display rows. Source quantities and allocations remain unchanged.
+    return [priority, other].map((part) => {
+      const total = part.reduce((sum, item) => sum + Number(item.quantity), 0);
+      return { ...row, initialQuantity: total, quantity: total, raw: { ...row.raw, allocations: part } };
+    });
+  }
+
   function variantSortParts(row) {
     const value = displayVariant(row.variant);
     const [size, ...colour] = value.split(",");
@@ -133,11 +145,13 @@
 
   function render() {
     const collator = new Intl.Collator("cs", { numeric: true, sensitivity: "base" });
-    const priorityFirst = document.querySelector('input[name="priority"]:checked')?.value === "first";
-    const priorityRows = new Set(state.rows.filter((row) => allocations(row).some((item) => state.redBoxes.has(Number(item.destination)))));
-    const groups = new Map(state.rows.map((row) => [row, productGroup(row)]));
-    const variants = new Map(state.rows.map((row) => [row, variantSortParts(row)]));
-    const rows = [...state.rows].sort((a, b) => {
+    const priorityMode = document.querySelector('input[name="priority"]:checked')?.value;
+    const priorityFirst = priorityMode === "first" || priorityMode === "split";
+    const displayRows = priorityMode === "split" ? state.rows.flatMap(splitPriorityPieces) : [...state.rows];
+    const priorityRows = new Set(displayRows.filter((row) => allocations(row).some((item) => state.redBoxes.has(Number(item.destination)))));
+    const groups = new Map(displayRows.map((row) => [row, productGroup(row)]));
+    const variants = new Map(displayRows.map((row) => [row, variantSortParts(row)]));
+    const rows = displayRows.sort((a, b) => {
       if (priorityFirst) {
         const difference = Number(priorityRows.has(b)) - Number(priorityRows.has(a))
           || Number(secondQuality(a)) - Number(secondQuality(b));
@@ -172,7 +186,7 @@
       const section = `${block.priority}:${block.quality}`;
       const sectionStart = (priorityFirst || els.sort.value === "product") && section !== lastSection;
       lastSection = section;
-      const label = priorityFirst ? `${block.priority ? "PRIORITNÍ" : "OSTATNÍ"}${block.quality ? " – II. JAKOST" : ""}`
+      const label = priorityFirst ? `${block.priority ? "PRIORITNÍ" : "OSTATNÍ"}${priorityMode === "split" ? " KUSY" : ""}${block.quality ? " – II. JAKOST" : ""}`
         : block.quality ? "II. JAKOST" : "BĚŽNÉ ZBOŽÍ";
       const sectionHeading = sectionStart ? `<tr class="section-heading"><th colspan="5" scope="rowgroup">${escape(label)}</th></tr>` : "";
       const first = block.rows[0];
@@ -244,7 +258,7 @@
       const dataset = data.dataset;
       els.batch.textContent = [dataset.batchName || dataset.datasetDate, dataset.datasetTime, dataset.worksheetName].filter(Boolean).join(" · ");
       els.pieces.textContent = `${state.rows.reduce((sum, row) => sum + quantity(row), 0)} ks`;
-      els.summary.textContent = `${state.rows.length} variant · ${new Set(state.rows.flatMap((row) => allocations(row).map((item) => item.destination))).size} boxů`;
+      els.summary.textContent = `${state.rows.length} variant · ${new Set(state.rows.flatMap((row) => allocations(row).map((item) => Number(item.destination)))).size} boxů`;
       document.title = `Vyskladnění ${dataset.datasetDate || ""}`;
       render();
       els.sheet.hidden = false;

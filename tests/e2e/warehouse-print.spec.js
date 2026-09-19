@@ -81,6 +81,89 @@ test("všechny prioritní řádky včetně II. jakosti předcházejí ostatním"
   await page.pdf({ path: "test-results/warehouse-priority.pdf", preferCSSPageSize: true, printBackground: true });
 });
 
+test("prioritní kusy se oddělí i uvnitř varianty bez změny původních součtů", async ({ page }) => {
+  const rows = [
+    { variantCode: "MODEL-A-SM", sequence: "3×20; 2x7", initialQuantity: 5 },
+    { variantCode: "MODEL-A-ML-II-JAKOST", sequence: "9x99", initialQuantity: 5,
+      raw: { productName: "Český výrobek II. jakosti", allocations: [{ quantity: "1", destination: "7" }, { quantity: "4", destination: "30" }] } },
+    { variantCode: "MODEL-B-SM", sequence: "1x7", initialQuantity: 1 },
+    { variantCode: "MODEL-C-SM", sequence: "2x10", initialQuantity: 2 },
+    { variantCode: "MODEL-D-SM-II-JAKOST", sequence: "1x7", initialQuantity: 1 },
+    { variantCode: "MODEL-E-SM-II-JAKOST", sequence: "1x12", initialQuantity: 1 },
+  ].map((row, i) => ({ productCode: "MODEL", variant: "S/M, černá", info: "Testovací výrobek", rowNumber: i + 2, ...row }));
+  let helpers = { KOMPLETACE: { cells: [Array(18).fill(""), [...Array(16).fill(""), 7, "0,8"]] } };
+  await page.route("**/api/datasets/71", (route) => route.fulfill({ json: {
+    dataset: { datasetKind: "warehouse_print" }, rows, helperSheets: helpers,
+  } }));
+  await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
+  await page.goto("/warehouse-print.html?dataset=71");
+  await expect(page.locator("#print")).toBeEnabled();
+  const readRows = () => page.locator(".item-row").evaluateAll((nodes) => nodes.map((node) => ({
+    code: node.querySelector(".sku").textContent,
+    quantity: Number(node.querySelector(".quantity").textContent),
+    allocations: [...node.querySelectorAll(".allocation")].map((item) => ({
+      quantity: Number(item.querySelector("b").textContent.replace(" ks", "")),
+      box: Number(item.querySelector("b:last-child").textContent), red: item.classList.contains("allocation-red"),
+    })),
+  })));
+  for (const sort of ["product", "excel", "box"]) {
+    await page.locator("#sort").selectOption(sort);
+    const original = await readRows();
+    await page.getByText("Prioritní kusy zvlášť", { exact: true }).click();
+    await expect(page.locator(".item-row")).toHaveCount(8);
+    await expect(page.locator("#pieces")).toHaveText("15 ks");
+    await expect(page.locator("#summary")).toHaveText("6 variant · 5 boxů");
+    await expect(page.locator(".section-heading th")).toHaveText([
+      "PRIORITNÍ KUSY", "PRIORITNÍ KUSY – II. JAKOST", "OSTATNÍ KUSY", "OSTATNÍ KUSY – II. JAKOST",
+    ]);
+    const split = await readRows();
+    expect(split.reduce((sum, row) => sum + row.quantity, 0)).toBe(15);
+    expect(split.every((row) => row.quantity === row.allocations.reduce((sum, item) => sum + item.quantity, 0))).toBe(true);
+    expect(split.slice(0, 4).every((row) => row.allocations.every((item) => item.red))).toBe(true);
+    expect(split.slice(4).every((row) => row.allocations.every((item) => !item.red))).toBe(true);
+    for (const source of original) {
+      const parts = split.filter((row) => row.code === source.code);
+      expect(parts.reduce((sum, row) => sum + row.quantity, 0)).toBe(source.quantity);
+      expect(parts.flatMap((row) => row.allocations).sort((a, b) => a.box - b.box))
+        .toEqual([...source.allocations].sort((a, b) => a.box - b.box));
+    }
+    if (sort === "box") expect(split.slice(4).map((row) => row.code)).toEqual([
+      "MODEL-C-SM", "MODEL-A-SM", "MODEL-E-SM-II-JAKOST", "MODEL-A-ML-II-JAKOST",
+    ]);
+    await page.getByText("Prioritní zásilky první", { exact: true }).click();
+    await expect(page.locator(".item-row")).toHaveCount(6);
+    expect((await readRows()).find((row) => row.code === "MODEL-A-SM").quantity).toBe(5);
+    await page.getByText("Běžné pořadí", { exact: true }).click();
+    expect(await readRows()).toEqual(original);
+  }
+  await page.getByText("Prioritní kusy zvlášť", { exact: true }).click();
+  for (const [orientation, label] of [["portrait", "Na výšku"], ["landscape", "Na šířku"]]) {
+    await page.getByText(label, { exact: true }).click();
+    for (const [density, label] of [["normal", "Běžné"], ["compact", "Kompaktní"]]) {
+      await page.getByText(label, { exact: true }).click();
+      for (const [width, height] of [[1280, 720], [1366, 768], [1500, 800], [1600, 900], [1024, 576]]) {
+        await page.setViewportSize({ width, height });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      }
+      await page.setViewportSize({ width: 1280, height: 900 });
+      await page.screenshot({ path: `test-results/warehouse-split-${orientation}-${density}.png`, fullPage: true });
+      await page.emulateMedia({ media: "print" });
+      await expect(page.locator(".toolbar")).toBeHidden();
+      await page.pdf({ path: `test-results/warehouse-split-${orientation}-${density}.pdf`, preferCSSPageSize: true, printBackground: true });
+      await page.emulateMedia({ media: "screen" });
+    }
+  }
+  await page.locator("#reload").click();
+  await expect(page.locator("#print")).toBeEnabled();
+  await expect(page.locator(".item-row")).toHaveCount(8);
+  helpers = {};
+  await page.locator("#reload").click();
+  await expect(page.locator("#print")).toBeEnabled();
+  await expect(page.locator(".item-row")).toHaveCount(6);
+  await expect(page.locator(".allocation-red")).toHaveCount(0);
+  await expect(page.locator("#pieces")).toHaveText("15 ks");
+});
+
 test("produkty se oddělují podle kódu a Giny spárované z EXCEL", async ({ page }) => {
   const codes = [
     "03019-MBH-XLXXL-UPE", "03019-LBH-LXL-UPE",
@@ -521,6 +604,13 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
     await expect(page.locator("html")).toHaveAttribute("data-density", "normal");
     expect(await page.locator("table").evaluate((node) => node.getBoundingClientRect().height)).toBeCloseTo(normalHeight, 0);
   }
+  const originalRows = await page.locator(".item-row").allTextContents();
+  await page.getByText("Prioritní kusy zvlášť", { exact: true }).click();
+  await expect(page.locator("#print")).toBeEnabled();
+  await expect(page.locator("#pieces")).toHaveText(`${expectedTotal} ks`);
+  expect(await page.locator(".quantity").evaluateAll((nodes) => nodes.reduce((sum, node) => sum + Number(node.textContent), 0))).toBe(expectedTotal);
+  await page.getByText("Běžné pořadí", { exact: true }).click();
+  expect(await page.locator(".item-row").allTextContents()).toEqual(originalRows);
   expect(apiRequests).toEqual([]);
   expect(errors).toEqual([]);
 });
