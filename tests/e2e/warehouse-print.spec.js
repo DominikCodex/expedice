@@ -24,6 +24,43 @@ const fixture = () => process.env.WAREHOUSE_PRINT_FIXTURE
       initialQuantity: "3", quantity: "3", remaining: 0, sequence: "1x3, 2x14",
     }));
 
+test("hlavička uvádí typ sestavy v náhledu i tisku ve všech režimech", async ({ page }, testInfo) => {
+  await page.route("**/api/datasets/71", (route) => route.fulfill({ json: {
+    dataset: { datasetKind: "warehouse_print", datasetDate: "2026-09-19" }, rows: fixture().slice(0, 3),
+  } }));
+  await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
+  await page.goto("/warehouse-print.html?dataset=71");
+  await expect(page.locator("#print")).toBeEnabled();
+  const title = page.locator(".sheet-heading #report-type");
+  await expect(title).toHaveText("Sestava: Prioritní kusy zvlášť");
+  for (const [mode, label] of [["normal", "Běžné pořadí"], ["first", "Prioritní zásilky první"], ["split", "Prioritní kusy zvlášť"]]) {
+    await page.getByText(label, { exact: true }).click();
+    await expect(title).toHaveText(`Sestava: ${label}`);
+    await page.locator("#reload").click();
+    await expect(page.locator("#print")).toBeEnabled();
+    await expect(title).toHaveText(`Sestava: ${label}`);
+    for (const orientation of ["Na šířku", "Na výšku"]) {
+      await page.getByText(orientation, { exact: true }).click();
+      for (const density of ["Běžné", "Kompaktní"]) {
+        await page.getByText(density, { exact: true }).click();
+        await page.emulateMedia({ media: "print" });
+        await expect(title).toBeVisible();
+        await expect(title).toHaveText(`Sestava: ${label}`);
+        const bounds = await title.boundingBox();
+        const batch = await page.locator("#batch").boundingBox();
+        const totals = await page.locator(".totals").boundingBox();
+        expect(bounds.y + bounds.height).toBeLessThanOrEqual(batch.y);
+        expect(bounds.x + bounds.width).toBeLessThanOrEqual(totals.x);
+        await page.emulateMedia({ media: "screen" });
+      }
+    }
+    await page.locator("#sheet").screenshot({ path: testInfo.outputPath(`report-heading-${mode}.png`) });
+    await page.emulateMedia({ media: "print" });
+    await page.pdf({ path: testInfo.outputPath(`report-heading-${mode}.pdf`), preferCSSPageSize: true, printBackground: true });
+    await page.emulateMedia({ media: "screen" });
+  }
+});
+
 test("fotografie lze znovu načíst z místního HTML a výpadek neblokuje tisk", async ({ page }, testInfo) => {
   const output = testInfo.outputPath("retry-images.html");
   const localPython = path.resolve(process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python");

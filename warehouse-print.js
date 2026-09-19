@@ -1,7 +1,7 @@
 "use strict";
 
 (() => {
-  const els = Object.fromEntries(["sort", "print", "reload", "retry-images", "status", "login", "sheet", "batch", "pieces", "rows"].map((id) => [id, document.getElementById(id)]));
+  const els = Object.fromEntries(["sort", "print", "reload", "retry-images", "status", "login", "sheet", "batch", "report-type", "pieces", "rows"].map((id) => [id, document.getElementById(id)]));
   const datasetId = new URLSearchParams(location.search).get("dataset");
   const embeddedData = document.getElementById("warehouse-print-data");
   const standalone = embeddedData ? JSON.parse(embeddedData.textContent) : null;
@@ -148,6 +148,8 @@
   function render() {
     const collator = new Intl.Collator("cs", { numeric: true, sensitivity: "base" });
     const priorityMode = document.querySelector('input[name="priority"]:checked')?.value;
+    const reportType = { normal: "Běžné pořadí", first: "Prioritní zásilky první", split: "Prioritní kusy zvlášť" };
+    els["report-type"].textContent = `Sestava: ${reportType[priorityMode] || reportType.normal}`;
     const priorityFirst = priorityMode === "first" || priorityMode === "split";
     const displayRows = priorityMode === "split" ? state.rows.flatMap(splitPriorityPieces) : [...state.rows];
     const priorityRows = new Set(displayRows.filter((row) => allocations(row).some((item) => state.redBoxes.has(Number(item.destination)))));

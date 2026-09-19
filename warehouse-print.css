@@ -23,6 +23,8 @@ button:disabled { opacity: .5; cursor: wait; }
 #sheet { width: var(--paper-width); max-width: calc(100% - 24px); margin: 16px auto; padding: 10mm; background: white; }
 .sheet-heading { display: flex; justify-content: space-between; align-items: end; gap: 12px; margin-bottom: 5mm; }
 .sheet-heading p { margin: 0 0 4px; font-size: 10px; font-weight: 700; color: #426557; }
+.sheet-heading > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+#report-type { margin: 0 0 5px; font-size: 16px; line-height: 1.25; }
 h1 { margin: 0 0 5px; font-size: 24px; }
 .totals { display: grid; gap: 4px; text-align: right; white-space: nowrap; }
 .totals strong { font-size: 24px; }
