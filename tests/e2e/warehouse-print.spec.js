@@ -279,6 +279,21 @@ test("rámečky, nadpisy, více kusů a přirozené velikosti zůstávají čite
           noOverflow: badge.parentElement.scrollWidth <= badge.parentElement.clientWidth };
       });
       expect(badgeLayout).toEqual({ afterCode: true, insideCell: true, sharesLine: true, noOverflow: true });
+      if (density === "compact") {
+        const allocation = page.locator(".allocation-multiple");
+        const measure = () => allocation.evaluate((node) => ({
+          badge: node.getBoundingClientRect().height,
+          row: node.closest("tr").getBoundingClientRect().height,
+        }));
+        await expect(allocation).toHaveCSS("padding-top", "2px");
+        await expect(allocation).toHaveCSS("padding-bottom", "2px");
+        const current = await measure();
+        const previousStyle = await page.addStyleTag({ content: '[data-density="compact"] .allocation { padding-block: 1px; }' });
+        const previous = await measure();
+        await previousStyle.evaluate((node) => node.remove());
+        expect(current.badge - previous.badge).toBeCloseTo(2, 1);
+        expect(current.row).toBeCloseTo(previous.row, 1);
+      }
       await page.screenshot({ path: `test-results/warehouse-workflow-${orientation}-${density}.png`, fullPage: true });
       await page.emulateMedia({ media: "print" });
       await expect(page.locator(".section-heading th").first()).toHaveCSS("color", "rgb(24, 43, 39)");

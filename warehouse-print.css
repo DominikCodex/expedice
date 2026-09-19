@@ -82,7 +82,7 @@ td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin:
 [data-density="compact"][data-orientation="portrait"] .variant-value { font-size: 13px; }
 [data-density="compact"] .quantity { font-size: 17px; }
 [data-density="compact"] .allocations { gap: 2px 4px; }
-[data-density="compact"] .allocation { padding: 1px 4px; font-size: 11px; }
+[data-density="compact"] .allocation { padding: 2px 4px; font-size: 11px; }
 [data-density="compact"] .allocation b { font-size: 13px; }
 [data-density="compact"][data-orientation="portrait"] .allocation { padding-inline: 2px; }
 [data-density="compact"][data-orientation="portrait"] .allocations { column-gap: 3px; }
