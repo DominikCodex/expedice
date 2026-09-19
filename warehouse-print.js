@@ -182,7 +182,7 @@
         const image = state.images[key(row.variantCode)] || state.images[key(row.productCode)];
         const quality = secondQuality(row);
         return `<tr class="item-row${index === 0 ? " group-start" : ""}${index === block.rows.length - 1 ? " group-end" : ""}">
-          <td>${quality ? '<span class="quality-label">II. JAKOST</span>' : ""}<span class="product-name">${escape(name)}</span><span class="sku">${escape(row.variantCode)}</span></td>
+          <td><span class="product-name">${escape(name)}</span><span class="product-meta"><span class="sku">${escape(row.variantCode)}</span>${quality ? '<span class="quality-label">II. JAKOST</span>' : ""}</span></td>
           <td>${image ? `<img src="${escape(image)}" alt="${escape(name)}" />` : '<span class="no-photo">Bez fotky</span>'}</td>
           <td><span class="variant-value">${escape(displayVariant(row.variant))}</span></td><td class="quantity">${escape(quantity(row))}</td>
           <td><div class="allocations">${allocations(row).map((item) => `<span class="allocation${Number(item.quantity) > 1 ? " allocation-multiple" : ""}${state.redBoxes.has(Number(item.destination)) ? " allocation-red" : ""}"><b>${escape(item.quantity)} ks</b> → box <b>${escape(item.destination)}</b></span>`).join("")}</div></td>

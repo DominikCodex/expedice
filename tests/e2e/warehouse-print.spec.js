@@ -185,6 +185,16 @@ test("rámečky, nadpisy, více kusů a přirozené velikosti zůstávají čite
       await expect(page.locator(".item-row").first().locator("td").first()).toHaveCSS("border-left-width", "2px");
       await expect(page.locator(".item-row").first().locator("td").last()).toHaveCSS("border-right-width", "2px");
       await expect(page.locator(".group-end").first().locator("td").first()).toHaveCSS("border-bottom-width", "2px");
+      await expect(page.locator(".product-meta > .sku + .quality-label")).toHaveCount(1);
+      const badgeLayout = await page.locator(".quality-label").evaluate((badge) => {
+        const code = badge.previousElementSibling.getBoundingClientRect();
+        const rect = badge.getBoundingClientRect();
+        const cell = badge.closest("td").getBoundingClientRect();
+        return { afterCode: rect.left >= code.right, insideCell: rect.right <= cell.right,
+          sharesLine: rect.top < code.bottom && rect.bottom > code.top,
+          noOverflow: badge.parentElement.scrollWidth <= badge.parentElement.clientWidth };
+      });
+      expect(badgeLayout).toEqual({ afterCode: true, insideCell: true, sharesLine: true, noOverflow: true });
       await page.screenshot({ path: `test-results/warehouse-workflow-${orientation}-${density}.png`, fullPage: true });
       await page.emulateMedia({ media: "print" });
       await expect(page.locator(".section-heading th").first()).toHaveCSS("color", "rgb(24, 43, 39)");
