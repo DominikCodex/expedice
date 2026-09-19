@@ -1,10 +1,12 @@
 import os
+from io import BytesIO
 from unittest.mock import MagicMock
 
 import pytest
 
 import app
-from warehouse_pdf import allowed_image_url
+from PIL import Image
+from warehouse_pdf import allowed_image_url, thumbnail_jpeg
 
 
 def payload():
@@ -65,6 +67,21 @@ def test_pdf_browser_blocks_unrelated_and_local_resources(url):
 
 def test_pdf_browser_allows_product_cdn_images():
     assert allowed_image_url("https://cdn.myshoptet.com/usr/shop.test/user/shop/detail/a.jpg")
+
+
+def test_pdf_thumbnail_is_small_and_preserves_proportions():
+    source = BytesIO()
+    Image.new("RGBA", (1000, 1500), (20, 40, 80, 180)).save(source, format="PNG")
+    result = thumbnail_jpeg(source.getvalue())
+    with Image.open(BytesIO(result)) as thumbnail:
+        assert thumbnail.size == (267, 400)
+        assert thumbnail.mode == "RGB"
+    assert len(result) < 30000
+
+
+def test_pdf_rejects_non_image_response():
+    with pytest.raises(Exception):
+        thumbnail_jpeg(b"<html>Error</html>")
 
 
 @pytest.mark.skipif(os.environ.get("RUN_PDF_BROWSER_TESTS") != "1", reason="Requires installed Playwright Chromium")
