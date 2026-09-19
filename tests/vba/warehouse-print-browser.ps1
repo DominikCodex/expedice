@@ -75,12 +75,12 @@ try {
     $component.Name = 'PrintBrowserTest'
     $component.CodeModule.AddFromString($source + "`r`n" + $harness)
     $prefix = "'" + $book.Name.Replace("'", "''") + "'!PrintBrowserTest."
-    foreach ($size in @(0, 32768, 2097152)) {
+    foreach ($size in @(0, 32768, 2097153, 10485760)) {
         $failure = $excel.Run($prefix + 'TestPayloadLimit', $size)
         if ($failure -ne 0) { throw "Payload limit check failed for $size bytes with VBA error $failure." }
     }
-    if ($excel.Run($prefix + 'TestPayloadLimit', 2097153) -ne (-2147221504 + 811)) { throw 'Payload above 2 MB was not rejected with the intended error.' }
-    Write-Output 'PASS: actual payload guard accepts up to 2 MB without overflow and rejects one byte above the limit.'
+    if ($excel.Run($prefix + 'TestPayloadLimit', 10485761) -ne (-2147221504 + 811)) { throw 'Payload above 10 MB was not rejected with the intended error.' }
+    Write-Output 'PASS: actual payload guard accepts up to 10 MB without overflow and rejects one byte above the limit.'
     $cases = @(
         @{ Command = '"C:\Program Files\Google\Chrome\Application\chrome.exe" --single-argument %1'; Expected = 'C:\Program Files\Google\Chrome\Application\chrome.exe' },
         @{ Command = 'C:\Browser\firefox.exe -url "%1"'; Expected = 'C:\Browser\firefox.exe' },

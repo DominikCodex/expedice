@@ -114,9 +114,21 @@ def test_anonymous_render_rejects_invalid_table_before_image_lookup(monkeypatch,
 def test_anonymous_render_limits_request_size(monkeypatch):
     cache = MagicMock()
     monkeypatch.setattr(app, "product_image_cache", cache)
-    response = app.app.test_client().post("/api/warehouse/render-print", data=b" " * (2 * 1024 * 1024 + 1))
+    response = app.app.test_client().post("/api/warehouse/render-print", data=b" " * (10 * 1024 * 1024 + 1))
     assert response.status_code == 413
+    assert "10 MB" in response.text
     cache.assert_not_called()
+
+
+@pytest.mark.parametrize("size", [2 * 1024 * 1024 + 1, 10 * 1024 * 1024])
+def test_anonymous_render_accepts_payload_through_ten_mb(monkeypatch, size):
+    monkeypatch.setattr(app, "product_image_cache", lambda: {"configured": True, "images": {}})
+    payload = json.dumps({"rows": [print_row()]}).encode("ascii")
+    response = app.app.test_client().post(
+        "/api/warehouse/render-print", data=payload.ljust(size, b" "), content_type="application/json",
+    )
+    assert response.status_code == 200
+    assert rendered_data(response)["rows"][0]["variantCode"] == "SKU-ČERNÁ"
 
 
 def test_anonymous_render_survives_image_service_failure(monkeypatch):

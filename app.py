@@ -4501,9 +4501,10 @@ def normalize_warehouse_print_helpers(helpers):
 @app.route("/api/warehouse/render-print", methods=["POST"])
 def render_warehouse_print():
     # A stateless document generator: accepts only caller-supplied rows, never a dataset ID.
-    content = request.stream.read(2 * 1024 * 1024 + 1)
-    if len(content) > 2 * 1024 * 1024:
-        return Response("Tabulka je příliš velká (maximum 2 MB).", status=413, mimetype="text/plain")
+    max_payload_bytes = 10 * 1024 * 1024
+    content = request.stream.read(max_payload_bytes + 1)
+    if len(content) > max_payload_bytes:
+        return Response("Tabulka je příliš velká (maximum 10 MB).", status=413, mimetype="text/plain")
     try:
         payload = json.loads(content)
         if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):

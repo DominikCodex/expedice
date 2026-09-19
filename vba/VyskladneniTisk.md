@@ -47,7 +47,7 @@ Generování tiskové sestavy nevytváří žádnou databázovou dávku. Neměn�
 
 ## Pomocné listy pouze pro tisk
 
-Oba listy se odešlou ve stejném požadavku jako vyskladnění. Přenášejí se hodnoty buněk od A1 po poslední použitý řádek a sloupec, včetně hlaviček a prázdných pozic uvnitř tabulky. Vzorce se neposílají, pouze jejich aktuální výsledky. Číselné buňky se přenášejí jako podkladové hodnoty bez formátování (datum jako sériové číslo Excelu); kódy s úvodními nulami musí být uložené jako text. Chyba vzorce přeruší odeslání a uvede list a buňku. Každý list má limit 10000 řádků a 128 sloupců, dohromady nejvýše 200000 buněk. Celý požadavek má stále limit 2 MB, kontrolovaný před odesláním i na serveru.
+Oba listy se odešlou ve stejném požadavku jako vyskladnění. Přenášejí se hodnoty buněk od A1 po poslední použitý řádek a sloupec, včetně hlaviček a prázdných pozic uvnitř tabulky. Vzorce se neposílají, pouze jejich aktuální výsledky. Číselné buňky se přenášejí jako podkladové hodnoty bez formátování (datum jako sériové číslo Excelu); kódy s úvodními nulami musí být uložené jako text. Chyba vzorce přeruší odeslání a uvede list a buňku. Každý list má limit 10000 řádků a 128 sloupců, dohromady nejvýše 200000 buněk. Celý požadavek má limit 10 MB (10485760 bajtů), kontrolovaný před odesláním i na serveru. Pro využití vyššího limitu je potřeba aktualizovat modul `VyskladneniTisk.bas`; starší makro nadále odmítá požadavky nad 2 MB.
 
 Server pomocné listy validuje a vloží do datové části výsledného HTML. Nezobrazují se v tabulce ani v tisku a nezapisují se do databáze. Toto je přenos dat pro samostatný tisk, nikoli import kompletace nebo roztřídění. Automatické párování produktů z listu `EXCEL` zatím není zapojené; vyžaduje ověřit jeho skutečnou strukturu.
 
@@ -57,7 +57,7 @@ Z listu `KOMPLETACE` tisk používá sloupec Q (číslo boxu) a R (kód pořadí
 
 ## Technické rozhraní
 
-- `POST /api/warehouse/render-print` přijímá vlastní řádky v JSON a vrací hotové HTML bez autentizace. Limit je 2 MB a 1000 řádků; množství musí odpovídat součtu rozdělení do boxů.
+- `POST /api/warehouse/render-print` přijímá vlastní řádky v JSON a vrací hotové HTML bez autentizace. Limit je 10 MB a 1000 řádků; množství musí odpovídat součtu rozdělení do boxů.
 - Volitelný objekt `helperSheets` obsahuje klíče `EXCEL` a `KOMPLETACE`, každý s obdélníkovým polem `cells` (řádky a sloupce, všechny hodnoty jako řetězce). Starší makro bez pomocných listů zůstává na serveru podporované.
 - Z existujících dat používá pouze produktové fotografie k zaslaným kódům. Nelze jím načíst existující expediční dávku podle ID.
 - VBA zapíše odpověď binárně přes `ADODB.Stream`, aby zachovalo UTF-8.
