@@ -63,11 +63,17 @@ def build_print_report(rows, helpers, labels):
                            "priority": code == Decimal("0.8")})
     # The picking sheet contains stock pieces, including pieces in mixed orders.
     # Never infer this total from the expedition code or mutable sorting quantities.
+    # Match the red boxes in the printout; count allocations, not whole mixed rows.
+    priority_boxes = {_number(row[16]) for row in cells[1:]
+                      if valid_box(_number(row[16])) and _number(row[17]) == Decimal("0.8")}
+    priority_pieces = sum(int(item["quantity"]) for row in rows for item in row.get("allocations", [])
+                          if _number(item["destination"]) in priority_boxes)
     return {
         "orders": len(orders),
         "pieces": int(sum(quantities)) if valid_quantities else None,
         "stockOrders": sum(code < 2 for code in codes) if known_codes else None,
         "stockPieces": sum(int(row["initialQuantity"]) for row in rows),
+        "priorityPieces": priority_pieces if all("allocations" in row for row in rows) else None,
         "ranges": ranges,
         "warnings": warnings,
     }

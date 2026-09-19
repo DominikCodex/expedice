@@ -238,7 +238,8 @@
     target.innerHTML = "";
     if (!report) return;
     const metrics = [["Objednávek", report.orders], ["Kusů celkem", report.pieces],
-      ["Skladovek (objednávek)", report.stockOrders], ["Skladovky (kusů)", report.stockPieces]];
+      ["Skladovek (objednávek)", report.stockOrders], ["Skladovky (kusů)", report.stockPieces],
+      ["Prioritní kusy", report.priorityPieces]];
     target.innerHTML = `<h2>Souhrn expedice z Excelu</h2>
       <dl class="print-report-metrics">${metrics.map(([label, value]) => `<div><dt>${escape(label)}</dt><dd>${escape(value ?? "—")}</dd></div>`).join("")}</dl>
       <div class="print-report-ranges">${report.ranges.map((range) => `<div class="print-report-range${range.priority ? " priority" : ""}"><b>${escape(range.start === range.end ? range.start : `${range.start}–${range.end}`)}</b><span>${escape(range.label)}</span></div>`).join("")}</div>

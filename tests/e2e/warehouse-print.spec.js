@@ -697,7 +697,11 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
   await expect(page.locator("#batch-report")).toBeVisible();
   await expect(page.locator("#summary")).toHaveCount(0);
   const report = await page.locator("#warehouse-print-data").evaluate((node) => JSON.parse(node.textContent).printReport);
-  await expect(page.locator(".print-report-metrics dd")).toHaveText([report.orders, report.pieces, report.stockOrders, report.stockPieces].map(String));
+  await expect(page.locator(".print-report-metrics dd")).toHaveText([report.orders, report.pieces, report.stockOrders, report.stockPieces, report.priorityPieces].map(String));
+  const redPieces = await page.locator(".allocation-red b:first-child").evaluateAll((nodes) =>
+    nodes.reduce((sum, node) => sum + Number.parseInt(node.textContent, 10), 0));
+  expect(report.priorityPieces).toBe(redPieces);
+  await expect(page.locator(".print-report-metrics dt").last()).toHaveText("Prioritní kusy");
   await expect(page.locator(".print-report-range.priority b")).toHaveText("3");
   await expect(page.locator(".print-report-ranges")).toContainText("Komplet ze skladu Galantra.cz přes Zásilkovnu");
   const helpers = await page.locator("#warehouse-print-data").evaluate((node) => JSON.parse(node.textContent).helperSheets);
@@ -779,7 +783,7 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
   await page.getByText("Prioritní kusy zvlášť", { exact: true }).click();
   await expect(page.locator("#print")).toBeEnabled();
   await expect(page.locator("#pieces")).toHaveText(`${expectedTotal} ks`);
-  await expect(page.locator(".print-report-metrics dd")).toHaveText([report.orders, report.pieces, report.stockOrders, report.stockPieces].map(String));
+  await expect(page.locator(".print-report-metrics dd")).toHaveText([report.orders, report.pieces, report.stockOrders, report.stockPieces, report.priorityPieces].map(String));
   expect(await page.locator(".quantity").evaluateAll((nodes) => nodes.reduce((sum, node) => sum + Number(node.textContent), 0))).toBe(expectedTotal);
   await page.getByText("Běžné pořadí", { exact: true }).click();
   expect(await page.locator(".item-row").allTextContents()).toEqual(originalRows);

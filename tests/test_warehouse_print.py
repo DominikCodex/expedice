@@ -98,6 +98,26 @@ def test_print_report_uses_only_uploaded_completion_and_stock_pieces(monkeypatch
     assert [(r["start"], r["end"], r["priority"]) for r in report["ranges"]] == [(1, 2, True), (3, 3, False), (5, 5, False)]
     assert report["ranges"][0]["label"] == app.EXPEDITION_ORDER_CODE_LABELS_DEFAULT["0.8"]
     assert report["warnings"] == []
+    assert report["priorityPieces"] == 3
+
+
+def test_print_priority_pieces_count_only_red_allocations_including_second_quality():
+    rows = app.normalize_warehouse_print_rows([
+        {**print_row("5"), "sequence": "2x7, 3x8"},
+        {**print_row("5"), "variantCode": "SKU-II-JAKOST", "sequence": "4x7, 1x9"},
+    ])
+    helpers = completion_helpers([("7", "0,80", "6"), ("8", "1", "3"), ("9", "0.8", "1")])
+    report = app.build_print_report(rows, helpers, app.EXPEDITION_ORDER_CODE_LABELS_DEFAULT)
+    assert report["priorityPieces"] == 7
+    assert report["stockPieces"] == 10
+    assert app.build_print_report(rows, completion_helpers([("7", "1", "6")]),
+                                  app.EXPEDITION_ORDER_CODE_LABELS_DEFAULT)["priorityPieces"] == 0
+
+
+def test_print_priority_pieces_do_not_double_count_repeated_helper_box():
+    rows = app.normalize_warehouse_print_rows([print_row()])
+    helpers = completion_helpers([("3", "0.8", "1"), ("3", "0.8", "1"), ("14", "3", "2")])
+    assert app.build_print_report(rows, helpers, app.EXPEDITION_ORDER_CODE_LABELS_DEFAULT)["priorityPieces"] == 1
 
 
 @pytest.mark.parametrize("helpers", [{}, {"KOMPLETACE": {"cells": [["Něco"]]}}, completion_helpers([])])
