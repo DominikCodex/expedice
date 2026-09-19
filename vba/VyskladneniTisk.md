@@ -39,7 +39,7 @@ VyskladneniPDF/
   Prioritni-kusy-zvlast/
 ```
 
-Tři soubory z jednoho spuštění mají shodný název s časem a jedinečným označením várky, každý ve své složce. Opakované generování předchozí PDF nepřepisuje. Data se odešlou třikrát postupně, vždy se stejným obsahem listů; server neběží na třech PDF současně. Stavový řádek Excelu ukazuje právě vytvářenou variantu `1/3` až `3/3`. Na konci se zobrazí počet uložených souborů a případné chyby nebo chybějící fotografie zvlášť pro každou variantu. Chyba jedné varianty nezastaví pokus o zbývající varianty.
+Tři soubory z jednoho spuštění mají v názvu společný čas a jedinečné označení várky, za nimi typ sestavy: `-Bezne-poradi.pdf`, `-Prioritni-zasilky-prvni.pdf` nebo `-Prioritni-kusy-zvlast.pdf`. Každý zůstává ve své složce. Například `Vyskladneni-20260919-170223-rad7F065-Prioritni-kusy-zvlast.pdf`. Opakované generování předchozí PDF nepřepisuje. Data se odešlou třikrát postupně, vždy se stejným obsahem listů; server neběží na třech PDF současně. Stavový řádek Excelu ukazuje právě vytvářenou variantu `1/3` až `3/3`. Na konci se zobrazí počet uložených souborů a případné chyby nebo chybějící fotografie zvlášť pro každou variantu. Chyba jedné varianty nezastaví pokus o zbývající varianty.
 
 Nejdřív musí být nasazená serverová podpora parametru `priority` a hlavičky `X-Warehouse-Priority`. Makro kontroluje potvrzený režim v odpovědi, aby starší server nevytvořil tři stejné výchozí sestavy pod různými složkami.
 

@@ -185,7 +185,12 @@ try {
     foreach ($subfolder in @('Bezne-poradi', 'Prioritni-zasilky-prvni', 'Prioritni-kusy-zvlast')) {
         if (@(Get-ChildItem -LiteralPath (Join-Path $pdfRoot $subfolder) -Filter '*.pdf').Count -ne 1) { throw "Missing PDF in $subfolder" }
     }
-    if (@($pdfs.Name | Select-Object -Unique).Count -ne 1) { throw 'Batch filenames differ.' }
+    foreach ($file in $pdfs) {
+        if (-not $file.Name.EndsWith('-' + $file.Directory.Name + '.pdf')) { throw 'PDF filename does not identify its report type.' }
+    }
+    $batchNames = @($pdfs | ForEach-Object { $_.Name.Substring(0, $_.Name.Length - $_.Directory.Name.Length - 5) } | Select-Object -Unique)
+    if ($batchNames.Count -ne 1) { throw 'PDF filenames do not share a batch identifier.' }
+    if (@($pdfs.Name | Select-Object -Unique).Count -ne 3) { throw 'Report types have identical filenames.' }
     foreach ($mode in @('normal', 'first', 'split')) {
         if ($state[8] -notmatch "/render-pdf\?priority=$mode") { throw "Missing mode $mode" }
     }

@@ -90,10 +90,11 @@ Private Sub WhPrintRun(ByVal generatePdf As Boolean)
         Dim modes As Variant, folders As Variant, saved As Long, notice As String, batchFile As String
         modes = Array("normal", "first", "split")
         folders = Array("Bezne-poradi", "Prioritni-zasilky-prvni", "Prioritni-kusy-zvlast")
-        batchFile = "Vyskladneni-" & Format$(Now, "yyyymmdd-hhnnss") & "-" & files.GetBaseName(files.GetTempName) & ".pdf"
+        batchFile = "Vyskladneni-" & Format$(Now, "yyyymmdd-hhnnss") & "-" & files.GetBaseName(files.GetTempName)
         For index = 0 To 2
             Application.StatusBar = "Vytvarim PDF " & (index + 1) & "/3: " & folders(index)
-            notice = notice & vbCrLf & WhPrintPdfVariant(payload, pdfFolder, CStr(folders(index)), CStr(modes(index)), batchFile, saved, whPrintPdfPaths(index))
+            notice = notice & vbCrLf & WhPrintPdfVariant(payload, pdfFolder, CStr(folders(index)), CStr(modes(index)), _
+                batchFile & "-" & CStr(folders(index)) & ".pdf", saved, whPrintPdfPaths(index))
         Next index
         MsgBox "Ulozeno " & saved & "/3 PDF. Tisk nebyl spusten." & vbCrLf & notice & vbCrLf & _
             "Pro tisk spust makro pozadovane varianty sestavy.", IIf(saved = 3, vbInformation, vbExclamation)
