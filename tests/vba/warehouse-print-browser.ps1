@@ -15,6 +15,14 @@ Public Function TestPayloadLimit(ByVal size As Long) As Long
 Expected:
     TestPayloadLimit = Err.Number
 End Function
+Public Function TestPdfSignature(ByVal text As String) As Boolean
+    Dim bytes() As Byte
+    bytes = StrConv(text, vbFromUnicode)
+    TestPdfSignature = WhPrintIsPdf(bytes)
+End Function
+Public Function TestPdfFolder(ByVal folder As String) As String
+    TestPdfFolder = WhPrintPdfFolder(folder)
+End Function
 Public Function TestExecutable(ByVal command As String) As String
     TestExecutable = WhPrintExecutable(command)
 End Function
@@ -74,7 +82,24 @@ try {
     $component = $book.VBProject.VBComponents.Add(1)
     $component.Name = 'PrintBrowserTest'
     $component.CodeModule.AddFromString($source + "`r`n" + $harness)
+    $sumatraComponent = $book.VBProject.VBComponents.Add(1)
+    $sumatraComponent.Name = 'SumatraTest'
+    $sumatraSource = Get-Content -LiteralPath (Join-Path $root 'vba/ExpediceTiskPresSumatra.bas') -Raw
+    $sumatraHarness = @'
+Public Function TestDefaultCommand(ByVal exe As String, ByVal pdf As String) As String
+    TestDefaultCommand = ExpediceSumatraCommand(exe, pdf, "", 1)
+End Function
+'@
+    $sumatraComponent.CodeModule.AddFromString($sumatraSource + "`r`n" + $sumatraHarness)
     $prefix = "'" + $book.Name.Replace("'", "''") + "'!PrintBrowserTest."
+    if (-not $excel.Run($prefix + 'TestPdfSignature', '%PDF-1.7 test')) { throw 'Valid PDF signature rejected.' }
+    if ($excel.Run($prefix + 'TestPdfSignature', '<html>error')) { throw 'HTML accepted as PDF.' }
+    foreach ($folder in @('D:\Sklad\Sesit', '\\server\sklad\sesity')) {
+        if ($excel.Run($prefix + 'TestPdfFolder', $folder) -cne ($folder + '\VyskladneniPDF')) { throw 'PDF folder is not relative to workbook.' }
+    }
+    $command = $excel.Run("'" + $book.Name.Replace("'", "''") + "'!SumatraTest.TestDefaultCommand", 'D:\Sklad A\SumatraPDF.exe', 'D:\Sklad A\sestava.pdf')
+    if ($command -notmatch '-print-to-default' -or $command -match '-print-to ' -or $command -notmatch '"D:\\Sklad A\\sestava.pdf"') { throw 'Wrong default printer command.' }
+    Write-Output 'PASS: PDF signature, workbook-relative local/UNC paths, default-printer command. No physical print.'
     foreach ($size in @(0, 32768, 2097153, 10485760)) {
         $failure = $excel.Run($prefix + 'TestPayloadLimit', $size)
         if ($failure -ne 0) { throw "Payload limit check failed for $size bytes with VBA error $failure." }

@@ -12,7 +12,25 @@ Private Declare Function WhPrintShellExecute Lib "shell32.dll" Alias "ShellExecu
 #End If
 
 Public Sub VyskladneniNahratATisk()
+    WhPrintRun False
+End Sub
+
+Public Sub VyskladneniPdfATisk()
+    WhPrintRun True
+End Sub
+
+Private Sub WhPrintRun(ByVal automaticPdf As Boolean)
     On Error GoTo Failed
+    Static running As Boolean
+    If running Then Exit Sub
+    running = True
+    Dim macroPrefix As String, sumatraPath As String, pdfFolder As String
+    macroPrefix = "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!"
+    If automaticPdf Then
+        ' Resolve on this computer before uploading; the agent is never contacted.
+        sumatraPath = Application.Run(macroPrefix & "ExpediceCestaSumatraPDF")
+        pdfFolder = WhPrintPdfFolder(ThisWorkbook.Path)
+    End If
     Dim ws As Worksheet
     Set ws = WhPrintWarehouseSheet(ThisWorkbook)
     Dim lastRow As Long, r As Long, payload As String, rows As String, helperSheets As String
@@ -49,38 +67,78 @@ Public Sub VyskladneniNahratATisk()
     Application.StatusBar = "Nahravam vyskladneni k tisku..."
     Dim http As Object
     Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
-    http.setTimeouts 10000, 10000, 30000, 60000
-    http.Open "POST", WHPRINT_BASE_URL & "/api/warehouse/render-print", False
+    Dim endpoint As String
+    endpoint = "/api/warehouse/render-print"
+    If automaticPdf Then endpoint = "/api/warehouse/render-pdf"
+    http.setTimeouts 10000, 10000, 30000, IIf(automaticPdf, 180000, 60000)
+    http.Open "POST", WHPRINT_BASE_URL & endpoint, False
     http.setRequestHeader "Content-Type", "application/json; charset=utf-8"
     http.send payload
     If http.Status < 200 Or http.Status >= 300 Then
         Err.Raise vbObjectError + 805, , "HTTP " & http.Status & ": " & http.responseText
     End If
 
-    If InStr(1, http.getResponseHeader("Content-Type"), "text/html", vbTextCompare) = 0 Then
+    Dim expectedType As String
+    expectedType = IIf(automaticPdf, "application/pdf", "text/html")
+    If InStr(1, http.getResponseHeader("Content-Type"), expectedType, vbTextCompare) = 0 Then
         Err.Raise vbObjectError + 806, , "Server nevratil tiskovou sestavu."
+    End If
+    If automaticPdf Then
+        If Not WhPrintIsPdf(http.responseBody) Then Err.Raise vbObjectError + 816, , "Server nevratil platny PDF soubor. Nic nebylo vytisteno."
     End If
     Dim files As Object, outputFolder As String, printPath As String, stream As Object
     Set files = CreateObject("Scripting.FileSystemObject")
     outputFolder = files.BuildPath(files.GetSpecialFolder(2), "ExpediceVyskladneni")
+    If automaticPdf Then outputFolder = pdfFolder
     If Not files.FolderExists(outputFolder) Then files.CreateFolder outputFolder
     printPath = files.BuildPath(outputFolder, files.GetBaseName(files.GetTempName) & ".html")
+    If automaticPdf Then printPath = files.BuildPath(outputFolder, "Vyskladneni-" & Format$(Now, "yyyymmdd-hhnnss") & "-" & files.GetBaseName(files.GetTempName) & ".pdf")
     Set stream = CreateObject("ADODB.Stream")
     stream.Type = 1
     stream.Open
     stream.Write http.responseBody
     stream.SaveToFile printPath, 2
     stream.Close
+    If automaticPdf Then
+        Application.StatusBar = "Tisknu PDF na vychozi tiskarnu Windows..."
+        Application.Run macroPrefix & "ExpedicePrintPdfSouborPresSumatra", printPath, "", 1
+        Dim notice As String
+        notice = "PDF bylo predano k tisku na vychozi tiskarnu Windows." & vbCrLf & "Ulozeno: " & printPath
+        If Val(http.getResponseHeader("X-Warehouse-Missing-Images")) > 0 Then notice = notice & vbCrLf & "Pozor: pocet radku bez fotografie: " & http.getResponseHeader("X-Warehouse-Missing-Images")
+        MsgBox notice, vbInformation
+    Else
+        WhPrintOpenBrowser printPath
+    End If
     Application.StatusBar = False
-    WhPrintOpenBrowser printPath
+    running = False
     Exit Sub
 Failed:
     Application.StatusBar = False
+    running = False
     Dim failure As String
     failure = "Vyskladneni k tisku se nepodarilo:" & vbCrLf & Err.Description
     If Len(printPath) > 0 Then failure = failure & vbCrLf & vbCrLf & "Soubor sestavy: " & printPath
     MsgBox failure, vbExclamation
 End Sub
+
+Private Function WhPrintIsPdf(ByVal content As Variant) As Boolean
+    On Error GoTo Invalid
+    Dim first As Long, size As Long
+    first = LBound(content)
+    size = UBound(content) - first + 1
+    If size < 5 Or size > 33554432 Then Exit Function
+    WhPrintIsPdf = (content(first) = 37 And content(first + 1) = 80 And content(first + 2) = 68 And content(first + 3) = 70 And content(first + 4) = 45)
+Invalid:
+End Function
+
+Private Function WhPrintPdfFolder(ByVal workbookFolder As String) As String
+    Dim files As Object
+    Set files = CreateObject("Scripting.FileSystemObject")
+    If Len(workbookFolder) = 0 Or InStr(1, workbookFolder, "://", vbTextCompare) > 0 Then
+        Err.Raise vbObjectError + 817, , "Nejprve uloz sesit do mistni nebo sdilene slozky. PDF se uklada do podslozky VyskladneniPDF vedle sesitu."
+    End If
+    WhPrintPdfFolder = files.BuildPath(workbookFolder, "VyskladneniPDF")
+End Function
 
 Private Function WhPrintWarehouseSheet(ByVal book As Workbook) As Worksheet
     Dim ws As Worksheet, found As Worksheet, names As String, matches As Long
@@ -232,6 +290,20 @@ Public Sub VlozitTlacitkoVyskladneniTisk()
     End If
     button.TextFrame.Characters.Text = "Vyskladneni k tisku"
     button.OnAction = "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!VyskladneniNahratATisk"
+End Sub
+
+Public Sub VlozitTlacitkoVyskladneniPdfATisk()
+    Dim ws As Worksheet, button As Shape
+    Set ws = ActiveSheet
+    On Error Resume Next
+    Set button = ws.Shapes("VyskladneniPdfTiskButton")
+    On Error GoTo 0
+    If button Is Nothing Then
+        Set button = ws.Shapes.AddFormControl(xlButtonControl, ws.Range("H5").Left, ws.Range("H5").Top, 210, 32)
+        button.Name = "VyskladneniPdfTiskButton"
+    End If
+    button.TextFrame.Characters.Text = "Vyskladneni - PDF a tisk"
+    button.OnAction = "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!VyskladneniPdfATisk"
 End Sub
 
 Private Function WhPrintCell(ByVal cell As Range) As String

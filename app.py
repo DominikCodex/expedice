@@ -32,6 +32,7 @@ from werkzeug.utils import secure_filename
 
 from expedition_integrity import assess_integrity, build_batch_snapshot, compare_order_variants
 from warehouse_print_report import build_print_report
+from warehouse_pdf import generate_pdf
 
 
 def env_int(name, default, minimum=None, maximum=None):
@@ -128,6 +129,7 @@ PRODUCT_IMAGE_CACHE_SECONDS = 12 * 60 * 60
 PRODUCT_IMAGE_REQUEST_CODE_LIMIT = 10000
 WAREHOUSE_XLSX_MAX_BYTES = env_int("WAREHOUSE_XLSX_MAX_BYTES", 10 * 1024 * 1024, 1024, 50 * 1024 * 1024)
 PRODUCT_IMAGE_CACHE_LOCK = threading.Lock()
+WAREHOUSE_PDF_LOCK = threading.Lock()
 PRODUCT_IMAGE_CACHE = {
     "signature": "",
     "loadedAt": 0,
@@ -1355,7 +1357,7 @@ def enforce_api_auth():
     if not path.startswith("/api/"):
         return None
 
-    public_paths = {"/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/me", "/api/warehouse/render-print", "/api/warehouse/print-images"}
+    public_paths = {"/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/me", "/api/warehouse/render-print", "/api/warehouse/print-images", "/api/warehouse/render-pdf"}
     if path in public_paths:
         return None
 
@@ -4609,6 +4611,29 @@ def render_warehouse_print():
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
     return response
+
+
+@app.route("/api/warehouse/render-pdf", methods=["POST"])
+def render_warehouse_pdf():
+    if not WAREHOUSE_PDF_LOCK.acquire(blocking=False):
+        return Response("Právě se vytváří jiné PDF. Zkuste to za chvíli znovu.", status=503,
+                        headers={"Retry-After": "5"}, mimetype="text/plain")
+    try:
+        document = render_warehouse_print()
+        if document.status_code != 200:
+            return document
+        pdf, missing = generate_pdf(document.get_data(as_text=True))
+        return Response(pdf, mimetype="application/pdf", headers={
+            "Content-Disposition": 'attachment; filename="vyskladneni.pdf"',
+            "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
+            "X-Warehouse-Missing-Images": str(missing),
+        })
+    except Exception:
+        app.logger.warning("Warehouse PDF generation failed", exc_info=True)
+        return Response("PDF se nepodařilo vytvořit. Můžete použít původní ruční náhled a tisk.",
+                        status=503, mimetype="text/plain", headers={"Cache-Control": "no-store"})
+    finally:
+        WAREHOUSE_PDF_LOCK.release()
 
 
 @app.route("/api/warehouse/upload-xlsx", methods=["POST"])

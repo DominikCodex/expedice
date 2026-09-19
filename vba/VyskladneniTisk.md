@@ -16,6 +16,20 @@ Pro přidání pomocných listů `EXCEL` a `KOMPLETACE` přes `Alt+F11` otevři 
 
 ## Každodenní použití
 
+### Další tlačítko: PDF a automatický tisk
+
+Původní `VyskladneniNahratATisk` zůstává pro ruční náhled a tisk. Nové makro `VyskladneniPdfATisk` odešle stejné listy, stáhne serverem vytvořené PDF a předá jednu kopii Sumatře na **výchozí tiskárnu Windows daného počítače**. Nepoužívá tiskového agenta ani přihlášení. Server použije výchozí sestavu: produkt a varianta, A4 na výšku, kompaktní, prioritní kusy zvlášť na oddělených stránkách.
+
+1. Aktualizuj obsah modulu `VyskladneniTisk.bas`.
+2. Importuj také aktuální `ExpediceTiskPresSumatra.bas`; pokud jej již máš, aktualizuj jeho obsah, nevytvářej duplikát.
+3. Přes `Alt+F8` jednou spusť `VlozitTlacitkoVyskladneniPdfATisk`, které přidá nové tlačítko u H5 na aktivní list. Nebo vlastnímu tlačítku přiřaď `VyskladneniPdfATisk`. Funguje z libovolného listu sešitu s makrem.
+
+Cesty nejsou vázané na konkrétního uživatele: PDF se ukládá do `VyskladneniPDF` vedle sešitu, včetně síťové složky. Sešit musí být uložený v místní nebo sdílené složce s právem zápisu, nikoli otevřený pouze přes webovou URL. Sumatra se vyhledá relativně k sešitu, v připravené složce agenta nebo v běžných instalačních složkách aktuálního počítače. Lze ji mít i přímo vedle sešitu jako `SumatraPDF.exe`; není potřeba osobní absolutní cesta.
+
+PDF zůstává uložené i po chybě tisku. Makro kontroluje typ a signaturu staženého souboru a tisk samo neopakuje. Zpráva o předání k tisku neznamená potvrzení fyzického vytištění; při potížích nejprve zkontroluj frontu tiskárny, aby nevznikly duplikáty. Nedostupné fotografie neblokují tisk a jejich počet se ukáže po předání PDF. Pro ruční opakování načtení fotek použij původní HTML náhled.
+
+Server potřebuje Chromium z instalace Playwright; připravuje jej přiložený Dockerfile. Generátor spouští pouze vlastní tiskovou šablonu a dovoluje externě načítat pouze obrázky z HTTPS `cdn.myshoptet.com`. Ostatní zdroje z bezpečnostních důvodů přeskočí. Současně vytváří nejvýše jedno PDF na proces; při obsazení vrátí pokyn zkusit generování později.
+
 Ve stejném sešitu musí být neprázdné pomocné listy pojmenované `EXCEL` a `KOMPLETACE`. Makro je čte automaticky, není potřeba na ně přepínat. Pokud některý chybí, nic neodešle a vypíše jeho název.
 
 Makro lze spustit z kteréhokoli listu. Vyskladnění si najde podle hlaviček B1 (`variant`), D1 (`kam`) a E1 (`Celk`), bez ohledu na název listu. Prohledává pouze sešit, ve kterém je tiskové makro uložené; nepřepíná aktivní list a funguje i se skrytým listem vyskladnění. Listy `EXCEL` a `KOMPLETACE` jsou vždy jen pomocné. Pokud tiskovou tabulku nenajde nebo najde více odpovídajících listů, nic neodešle a vypíše chybu (u více listů jejich názvy).

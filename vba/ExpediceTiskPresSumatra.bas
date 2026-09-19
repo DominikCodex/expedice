@@ -44,6 +44,10 @@ ErrHandler:
     MsgBox "SumatraPDF se nepodarilo najit:" & vbCrLf & Err.Description, vbCritical
 End Sub
 
+Public Function ExpediceCestaSumatraPDF() As String
+    ExpediceCestaSumatraPDF = ExpediceNajdiSumatraPDF()
+End Function
+
 Private Sub ExpediceTiskObjektPresSumatra(ByVal sourceObject As Object, ByVal nameHint As String, ByVal printer As String)
     On Error GoTo ErrHandler
 

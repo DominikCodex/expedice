@@ -1,0 +1,23 @@
+.git
+.env
+.env.*
+.venv
+venv
+node_modules
+test-results
+playwright-report
+__pycache__
+**/__pycache__
+*.pyc
+.codex*
+.agents
+Master Soubor
+*conflicted copy*
+tests
+print-agent/build
+print-agent/dist
+print-agent/bin
+print-agent-dotnet/bin
+print-agent-dotnet/obj
+print-agent-dotnet/dist
+print-agent-dotnet/Resources
