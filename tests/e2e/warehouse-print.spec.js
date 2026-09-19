@@ -392,6 +392,10 @@ test("rámečky, nadpisy, více kusů a přirozené velikosti zůstávají čite
       await expect(page.locator(".item-row").first().locator("td").last()).toHaveCSS("border-right-width", "2px");
       await expect(page.locator(".group-end").first().locator("td").first()).toHaveCSS("border-bottom-width", "2px");
       await expect(page.locator(".product-meta > .sku + .quality-label")).toHaveCount(1);
+      await expect(page.locator(".sku").first()).toHaveCSS("font-family", "Arial, sans-serif");
+      await expect(page.locator(".sku").first()).toHaveCSS("font-weight", "700");
+      await expect(page.locator(".product-name").first()).toHaveCSS("font-weight", "400");
+      await expect(page.locator(".product-heading span").first()).toHaveCSS("font-weight", "700");
       const badgeLayout = await page.locator(".quality-label").evaluate((badge) => {
         const code = badge.previousElementSibling.getBoundingClientRect();
         const rect = badge.getBoundingClientRect();
@@ -420,6 +424,9 @@ test("rámečky, nadpisy, více kusů a přirozené velikosti zůstávají čite
       await page.emulateMedia({ media: "print" });
       await expect(page.locator(".section-heading th").first()).toHaveCSS("color", "rgb(24, 43, 39)");
       await expect(page.locator(".product-heading").first()).toHaveCSS("break-after", "avoid");
+      await expect(page.locator(".sku").first()).toHaveCSS("font-family", "Arial, sans-serif");
+      await expect(page.locator(".sku").first()).toHaveCSS("font-weight", "700");
+      await expect(page.locator(".product-name").first()).toHaveCSS("font-weight", "400");
       await page.pdf({ path: `test-results/warehouse-workflow-${orientation}-${density}.pdf`, preferCSSPageSize: true, printBackground: false });
       await page.emulateMedia({ media: "screen" });
     }

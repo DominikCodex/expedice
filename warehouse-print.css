@@ -62,8 +62,8 @@ tr.group-end td { border-bottom: 2px solid #53685d; }
 td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin: auto; }
 .no-photo { display: flex; align-items: center; justify-content: center; width: 14mm; height: 14mm; margin: auto; font-size: 9px; color: #6d7974; border: 1px dashed #bcc9c3; }
 .product-name, .sku { display: block; }
-.product-name { font-weight: 700; margin-bottom: 3px; }
-.sku { font-family: Consolas, monospace; font-size: 11px; }
+.product-name { font-weight: 400; margin-bottom: 3px; }
+.sku { font-family: Arial, sans-serif; font-size: 11px; font-weight: 700; }
 .product-meta { display: flex; align-items: center; gap: 5px; }
 .product-meta .sku { min-width: 0; overflow-wrap: anywhere; }
 .variant-value { display: block; font-size: 16px; font-weight: 700; line-height: 1.3; }
