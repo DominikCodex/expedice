@@ -232,6 +232,19 @@
     return missing;
   }
 
+  function renderPrintReport(report) {
+    const target = document.getElementById("batch-report");
+    target.hidden = !report;
+    target.innerHTML = "";
+    if (!report) return;
+    const metrics = [["Objednávek", report.orders], ["Kusů celkem", report.pieces],
+      ["Skladovek (objednávek)", report.stockOrders], ["Skladovky (kusů)", report.stockPieces]];
+    target.innerHTML = `<h2>Souhrn expedice z Excelu</h2>
+      <dl class="print-report-metrics">${metrics.map(([label, value]) => `<div><dt>${escape(label)}</dt><dd>${escape(value ?? "—")}</dd></div>`).join("")}</dl>
+      <div class="print-report-ranges">${report.ranges.map((range) => `<div class="print-report-range${range.priority ? " priority" : ""}"><b>${escape(range.start === range.end ? range.start : `${range.start}–${range.end}`)}</b><span>${escape(range.label)}</span></div>`).join("")}</div>
+      ${report.warnings.map((warning) => `<p class="print-report-warning">${escape(warning)}</p>`).join("")}`;
+  }
+
   async function load() {
     if (state.busy) return;
     state.busy = true;
@@ -245,6 +258,7 @@
       const data = standalone || await json(`/api/datasets/${datasetId}`);
       if (!["warehouse", "warehouse_print"].includes(data.dataset?.datasetKind)) throw new Error("Tato dávka není vyskladnění.");
       state.rows = data.rows || [];
+      renderPrintReport(data.printReport);
       state.redBoxes = completionRedBoxes(data);
       state.ginaVariants = excelGinaVariants(data);
       if (!state.rows.length) throw new Error("Tato sestava neobsahuje žádné položky.");

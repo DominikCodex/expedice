@@ -31,6 +31,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 from werkzeug.utils import secure_filename
 
 from expedition_integrity import assess_integrity, build_batch_snapshot, compare_order_variants
+from warehouse_print_report import build_print_report
 
 
 def env_int(name, default, minimum=None, maximum=None):
@@ -4539,6 +4540,7 @@ def render_warehouse_print():
         "images": images,
         "imageWarning": warning,
         "helperSheets": helper_sheets,
+        "printReport": build_print_report(rows, helper_sheets, EXPEDITION_ORDER_CODE_LABELS_DEFAULT),
     }
     # Escaping '<' prevents spreadsheet text from ending the JSON script element.
     serialized = json.dumps(document, ensure_ascii=True).replace("<", "\\u003c").replace(">", "\\u003e").replace("&", "\\u0026")

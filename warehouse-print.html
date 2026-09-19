@@ -4,8 +4,8 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Vyskladnění k tisku</title>
-    <link rel="stylesheet" href="warehouse-print.css?v=20260919-10" />
-    <script defer src="warehouse-print.js?v=20260919-9"></script>
+    <link rel="stylesheet" href="warehouse-print.css?v=20260919-11" />
+    <script defer src="warehouse-print.js?v=20260919-11"></script>
   </head>
   <body>
     <nav class="toolbar" aria-label="Tisková sestava">
@@ -48,6 +48,7 @@
         <div><p>SKLAD / VYCHYSTÁNÍ</p><h1>Vyskladnění zboží</h1><span id="batch"></span></div>
         <div class="totals"><strong id="pieces"></strong><span id="summary"></span></div>
       </header>
+      <section id="batch-report" class="print-report" aria-label="Souhrn expedice z Excelu" hidden></section>
       <table>
         <colgroup><col class="product-col" /><col class="photo-col" /><col class="variant-col" /><col class="quantity-col" /><col class="boxes-col" /></colgroup>
         <thead><tr><th>Produkt / kód varianty</th><th>Foto</th><th>Varianta</th><th>Celkem</th><th>Kolik a kam do boxů</th></tr></thead>

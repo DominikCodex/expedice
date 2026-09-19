@@ -613,6 +613,11 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
   await expect(page.locator("#print")).toBeEnabled();
   await expect(page.locator("#login")).toBeHidden();
   await expect(page.locator("#rows .item-row")).toHaveCount(45);
+  await expect(page.locator("#batch-report")).toBeVisible();
+  const report = await page.locator("#warehouse-print-data").evaluate((node) => JSON.parse(node.textContent).printReport);
+  await expect(page.locator(".print-report-metrics dd")).toHaveText([report.orders, report.pieces, report.stockOrders, report.stockPieces].map(String));
+  await expect(page.locator(".print-report-range.priority b")).toHaveText("3");
+  await expect(page.locator(".print-report-ranges")).toContainText("Komplet ze skladu Galantra.cz přes Zásilkovnu");
   const helpers = await page.locator("#warehouse-print-data").evaluate((node) => JSON.parse(node.textContent).helperSheets);
   expect(helpers.EXCEL.cells[1]).toEqual(["SKU-ČERNÁ", "TEST-POMOCNY-PRODUKT"]);
   expect(helpers.KOMPLETACE.cells[1][0]).toBe("00123");
@@ -692,6 +697,7 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
   await page.getByText("Prioritní kusy zvlášť", { exact: true }).click();
   await expect(page.locator("#print")).toBeEnabled();
   await expect(page.locator("#pieces")).toHaveText(`${expectedTotal} ks`);
+  await expect(page.locator(".print-report-metrics dd")).toHaveText([report.orders, report.pieces, report.stockOrders, report.stockPieces].map(String));
   expect(await page.locator(".quantity").evaluateAll((nodes) => nodes.reduce((sum, node) => sum + Number(node.textContent), 0))).toBe(expectedTotal);
   await page.getByText("Běžné pořadí", { exact: true }).click();
   expect(await page.locator(".item-row").allTextContents()).toEqual(originalRows);

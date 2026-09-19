@@ -17,16 +17,26 @@ rows = json.loads(Path(fixture).read_text(encoding="utf-8-sig")) if fixture else
 completion_header = [""] * 18
 completion_header[0:2] = ["Objednávka", "Poznámka"]
 completion_header[16:18] = ["Expediční číslo", "Kód pořadí expedice"]
-completion_row = [""] * 18
-completion_row[0:2] = ["00123", "TEST-NEZOBRAZOVAT-ľô</script><script>window.helperExecuted=true</script>"]
-completion_row[16:18] = ["3", "0,8"]
+completion_header[11], completion_header[14] = "Objednávka:", "Množství:"
+box_pieces = {}
+for row in app.normalize_warehouse_print_rows(rows):
+    for item in row["allocations"]:
+        box = item["destination"]
+        box_pieces[box] = box_pieces.get(box, 0) + item["quantity"]
+completion_rows = []
+for box, pieces in sorted(box_pieces.items()):
+    row = [""] * 18
+    row[0:2] = ["00123", "TEST-NEZOBRAZOVAT-ľô</script><script>window.helperExecuted=true</script>"]
+    row[11], row[14] = f"TEST-{box}", str(pieces)
+    row[16:18] = [str(box), "0,8" if box == 3 else "1" if box < 8 else "3" if box < 18 else "7"]
+    completion_rows.append(row)
 with patch.object(app, "product_image_cache", return_value={"configured": True, "images": {}}), \
      patch.object(app, "db_conn", side_effect=AssertionError("No database allowed")):
     response = app.app.test_client().post("/api/warehouse/render-print", json={
         "rows": rows, "worksheetName": "Vyskladnění", "datasetDate": "2026-09-18", "datasetTime": "08:30",
         "helperSheets": {
             "EXCEL": {"cells": [["Kód varianty", "Produkt"], ["SKU-ČERNÁ", "TEST-POMOCNY-PRODUKT"]]},
-            "KOMPLETACE": {"cells": [completion_header, completion_row]},
+            "KOMPLETACE": {"cells": [completion_header, *completion_rows]},
         },
     })
 assert response.status_code == 200, response.text

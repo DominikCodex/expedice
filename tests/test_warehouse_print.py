@@ -72,6 +72,51 @@ def rendered_data(response):
     return json.loads(re.search(r'<script id="warehouse-print-data" type="application/json">(.*?)</script>', response.text, re.S).group(1))
 
 
+def completion_helpers(items):
+    header = [""] * 18
+    header[11], header[14], header[16], header[17] = "Objednávka:", "Množství:", "Expediční číslo:", "Kód pořadí expedice:"
+    cells = [header]
+    for box, code, quantity in items:
+        row = [""] * 18
+        row[11], row[14], row[16], row[17] = f"ORDER-{len(cells)}", quantity, box, code
+        cells.append(row)
+    return {"KOMPLETACE": {"cells": cells}}
+
+
+def test_print_report_uses_only_uploaded_completion_and_stock_pieces(monkeypatch):
+    monkeypatch.setattr(app, "db_conn", MagicMock(side_effect=AssertionError("No database")))
+    monkeypatch.setattr(app, "product_image_cache", lambda: {"images": {}})
+    helpers = completion_helpers([("3", "3", "5"), ("1", "0,8", "1"), ("2", "0.80", "2"), ("5", "3", "6")])
+    row = print_row("4")
+    row["sequence"] = "1x1, 2x2, 1x3"
+    response = app.app.test_client().post("/api/warehouse/render-print", json={"rows": [row], "helperSheets": helpers})
+    assert response.status_code == 200
+    report = rendered_data(response)["printReport"]
+    assert {key: report[key] for key in ("orders", "pieces", "stockOrders", "stockPieces")} == {
+        "orders": 4, "pieces": 14, "stockOrders": 2, "stockPieces": 4,
+    }
+    assert [(r["start"], r["end"], r["priority"]) for r in report["ranges"]] == [(1, 2, True), (3, 3, False), (5, 5, False)]
+    assert report["ranges"][0]["label"] == app.EXPEDITION_ORDER_CODE_LABELS_DEFAULT["0.8"]
+    assert report["warnings"] == []
+
+
+@pytest.mark.parametrize("helpers", [{}, {"KOMPLETACE": {"cells": [["Něco"]]}}, completion_helpers([])])
+def test_print_report_missing_or_old_helpers_are_not_reported_as_zero(helpers):
+    assert app.build_print_report([], helpers, app.EXPEDITION_ORDER_CODE_LABELS_DEFAULT) is None
+
+
+def test_print_report_marks_incomplete_data_and_never_invents_validation_results():
+    helpers = completion_helpers([("1", "0.8", "2"), ("1", "1", ""), ("", "unknown", "1e999999"), ("4", "9", "-1")])
+    report = app.build_print_report([{"initialQuantity": "7"}], helpers, app.EXPEDITION_ORDER_CODE_LABELS_DEFAULT)
+    assert report["pieces"] is None
+    assert report["stockOrders"] is None
+    assert report["stockPieces"] == 7
+    assert len(report["warnings"]) == 4
+    assert [(r["start"], r["end"]) for r in report["ranges"]] == [(4, 4)]
+    assert report["ranges"][0]["label"] == "Neurčený způsob expedice"
+    assert "addressErrors" not in report and "paymentWarnings" not in report
+
+
 def test_anonymous_render_is_self_contained_and_does_not_access_datasets(monkeypatch):
     monkeypatch.setenv("UPLOAD_TOKEN", "private-token")
     database = MagicMock(side_effect=AssertionError("Dataset access is forbidden"))
