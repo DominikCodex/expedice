@@ -3,7 +3,18 @@ param([string]$ReportPath = '')
 $ErrorActionPreference = 'Stop'
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $source = Get-Content -LiteralPath (Join-Path $root 'vba/VyskladneniTisk.bas') -Raw
+$payloadGuard = [regex]::Match($source, '(?m)^\s*If Len\(payload\) >[^\r\n]+').Value.Trim()
+if (-not $payloadGuard) { throw 'Payload size guard not found in the production macro.' }
 $harness = @'
+Public Function TestPayloadLimit(ByVal size As Long) As Long
+    On Error GoTo Expected
+    Dim payload As String
+    payload = String$(size, "x")
+    __PAYLOAD_GUARD__
+    Exit Function
+Expected:
+    TestPayloadLimit = Err.Number
+End Function
 Public Function TestExecutable(ByVal command As String) As String
     TestExecutable = WhPrintExecutable(command)
 End Function
@@ -49,6 +60,7 @@ Expected:
     TestMissingReport = (Err.Number = vbObjectError + 808)
 End Function
 '@
+$harness = $harness.Replace('__PAYLOAD_GUARD__', $payloadGuard)
 $excel = $null
 $book = $null
 $component = $null
@@ -63,6 +75,12 @@ try {
     $component.Name = 'PrintBrowserTest'
     $component.CodeModule.AddFromString($source + "`r`n" + $harness)
     $prefix = "'" + $book.Name.Replace("'", "''") + "'!PrintBrowserTest."
+    foreach ($size in @(0, 32768, 2097152)) {
+        $failure = $excel.Run($prefix + 'TestPayloadLimit', $size)
+        if ($failure -ne 0) { throw "Payload limit check failed for $size bytes with VBA error $failure." }
+    }
+    if ($excel.Run($prefix + 'TestPayloadLimit', 2097153) -ne (-2147221504 + 811)) { throw 'Payload above 2 MB was not rejected with the intended error.' }
+    Write-Output 'PASS: actual payload guard accepts up to 2 MB without overflow and rejects one byte above the limit.'
     $cases = @(
         @{ Command = '"C:\Program Files\Google\Chrome\Application\chrome.exe" --single-argument %1'; Expected = 'C:\Program Files\Google\Chrome\Application\chrome.exe' },
         @{ Command = 'C:\Browser\firefox.exe -url "%1"'; Expected = 'C:\Browser\firefox.exe' },

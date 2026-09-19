@@ -1,4 +1,5 @@
 Private Const WHPRINT_BASE_URL As String = "https://expedice-production.up.railway.app"
+Private Const WHPRINT_MAX_PAYLOAD_BYTES As Long = 2097152
 
 #If VBA7 Then
 Private Declare PtrSafe Function WhPrintShellExecute Lib "shell32.dll" Alias "ShellExecuteW" ( _
@@ -43,7 +44,7 @@ Public Sub VyskladneniNahratATisk()
         """datasetTime"":" & WhPrintJson(Format$(Now, "hh:nn:ss")) & "," & _
         """rows"": [" & rows & "],""helperSheets"":" & helperSheets & "}"
     ' WhPrintJson emits ASCII, so character count equals the UTF-8 byte count.
-    If Len(payload) > 2 * 1024 * 1024 Then Err.Raise vbObjectError + 811, , "Tiskova data vcetne pomocnych listu presahuji limit 2 MB. Nic nebylo odeslano."
+    If Len(payload) > WHPRINT_MAX_PAYLOAD_BYTES Then Err.Raise vbObjectError + 811, , "Tiskova data vcetne pomocnych listu presahuji limit 2 MB. Nic nebylo odeslano."
 
     Application.StatusBar = "Nahravam vyskladneni k tisku..."
     Dim http As Object
