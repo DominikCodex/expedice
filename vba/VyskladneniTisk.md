@@ -18,6 +18,8 @@ Pro přidání pomocných listů `EXCEL` a `KOMPLETACE` přes `Alt+F11` otevři 
 
 ### Další tlačítko: PDF a automatický tisk
 
+Relativní hledání podporuje názvy `SumatraPDF.exe` i `SumatraPDF-3.6.1-64.exe`: vedle sešitu, v jeho `bin` a ve složkách `Expedice\Adresy` / `Adresy` hledaných od umístění sešitu směrem k nadřazeným složkám. Verzi 3.6.1 tedy není potřeba přejmenovávat ani zadávat cestu s osobním uživatelským jménem. Zachovej stejnou strukturu sdílených složek na ostatních počítačích.
+
 Původní `VyskladneniNahratATisk` zůstává pro ruční náhled a tisk. Nové makro `VyskladneniPdfATisk` odešle stejné listy, stáhne serverem vytvořené PDF a předá jednu kopii Sumatře na **výchozí tiskárnu Windows daného počítače**. Nepoužívá tiskového agenta ani přihlášení. Server použije výchozí sestavu: produkt a varianta, A4 na výšku, kompaktní, prioritní kusy zvlášť na oddělených stránkách.
 
 1. Aktualizuj obsah modulu `VyskladneniTisk.bas`.

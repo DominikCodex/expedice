@@ -105,8 +105,8 @@ Private Function ExpediceNajdiSumatraPDF() As String
 
     ExpediceAddCandidate candidates, EXPEDICE_SUMATRA_EXE
     ExpediceAddCandidate candidates, Environ$("SUMATRA_PDF_EXE")
-    ExpediceAddCandidate candidates, ThisWorkbook.Path & "\SumatraPDF.exe"
-    ExpediceAddCandidate candidates, ThisWorkbook.Path & "\bin\SumatraPDF.exe"
+    ExpediceAddSumatraFolderCandidates candidates, ThisWorkbook.Path
+    ExpediceAddSumatraFolderCandidates candidates, ThisWorkbook.Path & "\bin"
     ExpediceAddWorkbookTreeSumatraCandidates candidates
     ExpediceAddCandidate candidates, Environ$("LOCALAPPDATA") & "\ExpedicePrintAgentV2\bin\SumatraPDF.exe"
     ExpediceAddCandidate candidates, Environ$("LOCALAPPDATA") & "\ExpedicePrintAgent\bin\SumatraPDF.exe"
@@ -122,7 +122,7 @@ Private Function ExpediceNajdiSumatraPDF() As String
     Next candidate
 
     Err.Raise vbObjectError + 522, "ExpediceNajdiSumatraPDF", _
-        "SumatraPDF.exe nebyla nalezena. Dej ji do Expedice\Adresy, vedle sesitu, do podslozky bin, nebo vypln EXPEDICE_SUMATRA_EXE."
+        "SumatraPDF.exe ani SumatraPDF-3.6.1-64.exe nebyla nalezena. Dej ji do Expedice\Adresy, vedle sesitu, do podslozky bin, nebo vypln EXPEDICE_SUMATRA_EXE."
 End Function
 
 Private Sub ExpediceAddWorkbookTreeSumatraCandidates(ByVal candidates As Collection)
@@ -130,14 +130,21 @@ Private Sub ExpediceAddWorkbookTreeSumatraCandidates(ByVal candidates As Collect
     folderPath = ThisWorkbook.Path
 
     Do While Len(folderPath) > 0
-        ExpediceAddCandidate candidates, folderPath & "\Expedice\Adresy\SumatraPDF.exe"
-        ExpediceAddCandidate candidates, folderPath & "\Adresy\SumatraPDF.exe"
+        ExpediceAddSumatraFolderCandidates candidates, folderPath & "\Expedice\Adresy"
+        ExpediceAddSumatraFolderCandidates candidates, folderPath & "\Adresy"
 
         Dim parentPath As String
         parentPath = ExpediceParentFolder(folderPath)
         If Len(parentPath) = 0 Or parentPath = folderPath Then Exit Do
         folderPath = parentPath
     Loop
+End Sub
+
+Private Sub ExpediceAddSumatraFolderCandidates(ByVal candidates As Collection, ByVal folderPath As String)
+    If Len(folderPath) = 0 Then Exit Sub
+    ExpediceAddCandidate candidates, folderPath & "\SumatraPDF.exe"
+    ' Exact portable filename; do not accidentally pick an installer with a wildcard.
+    ExpediceAddCandidate candidates, folderPath & "\SumatraPDF-3.6.1-64.exe"
 End Sub
 
 Private Sub ExpediceAddCandidate(ByVal candidates As Collection, ByVal path As String)

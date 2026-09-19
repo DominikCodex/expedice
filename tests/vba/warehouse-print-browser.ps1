@@ -1,4 +1,4 @@
-param([string]$ReportPath = '')
+param([string]$ReportPath = '', [string]$SumatraFolder = '')
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
@@ -89,8 +89,36 @@ try {
 Public Function TestDefaultCommand(ByVal exe As String, ByVal pdf As String) As String
     TestDefaultCommand = ExpediceSumatraCommand(exe, pdf, "", 1)
 End Function
+Public Function TestSumatraFolderCandidates(ByVal folder As String) As String
+    Dim candidates As New Collection, candidate As Variant
+    ExpediceAddSumatraFolderCandidates candidates, folder
+    For Each candidate In candidates
+        TestSumatraFolderCandidates = TestSumatraFolderCandidates & CStr(candidate) & "|"
+    Next candidate
+End Function
+Public Function TestExistingSumatra(ByVal folder As String) As String
+    Dim candidates As New Collection, candidate As Variant
+    ExpediceAddSumatraFolderCandidates candidates, folder
+    For Each candidate In candidates
+        If ExpediceSouborExistuje(CStr(candidate)) Then
+            TestExistingSumatra = CStr(candidate)
+            Exit Function
+        End If
+    Next candidate
+End Function
 '@
     $sumatraComponent.CodeModule.AddFromString($sumatraSource + "`r`n" + $sumatraHarness)
+    $sumatraPrefix = "'" + $book.Name.Replace("'", "''") + "'!SumatraTest."
+    foreach ($folder in @('D:\Sklad\Expedice\Adresy', '\\server\sklad\Adresy')) {
+        $expected = $folder + '\SumatraPDF.exe|' + $folder + '\SumatraPDF-3.6.1-64.exe|'
+        if ($excel.Run($sumatraPrefix + 'TestSumatraFolderCandidates', $folder) -cne $expected) { throw 'Versioned Sumatra candidate missing or unsafe wildcard used.' }
+    }
+    if ($SumatraFolder) {
+        $resolved = $excel.Run($sumatraPrefix + 'TestExistingSumatra', $SumatraFolder)
+        if (-not $resolved) { throw 'Sumatra not found in supplied folder.' }
+        Write-Output "PASS: real Sumatra found without running it: $resolved"
+    }
+    Write-Output 'PASS: standard and exact versioned portable Sumatra candidates, local and UNC folders.'
     $prefix = "'" + $book.Name.Replace("'", "''") + "'!PrintBrowserTest."
     if (-not $excel.Run($prefix + 'TestPdfSignature', '%PDF-1.7 test')) { throw 'Valid PDF signature rejected.' }
     if ($excel.Run($prefix + 'TestPdfSignature', '<html>error')) { throw 'HTML accepted as PDF.' }
