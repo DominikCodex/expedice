@@ -49,6 +49,8 @@ Oba listy se odešlou ve stejném požadavku jako vyskladnění. Přenášejí s
 
 Server pomocné listy validuje a vloží do datové části výsledného HTML. Nezobrazují se v tabulce ani v tisku a nezapisují se do databáze. Toto je přenos dat pro samostatný tisk, nikoli import kompletace nebo roztřídění. Automatické párování produktů z listu `EXCEL` zatím není zapojené; vyžaduje ověřit jeho skutečnou strukturu.
 
+Z listu `KOMPLETACE` tisk používá sloupec Q (číslo boxu) a R (kód pořadí expedice). U boxů s kódem `0,8` nebo `0.8` je celý text rozdělení kusů červený, například `1 ks → box 7`, v náhledu i při barevném tisku. Ostatní boxy zůstávají beze změny. Sestavy bez tohoto pomocného listu nemají červené zvýraznění. Pro změnu vzhledu stačí sestavu znovu vygenerovat poslední verzí makra, která již pomocné listy odesílá.
+
 **Soukromí:** výsledný soubor HTML obsahuje i neveřejná data pomocných listů, včetně případných kontaktů zákazníků. Skrytí v tiskovém náhledu není šifrování. Soubor nesdílej veřejně; uložené sestavy zůstávají v `%TEMP%\ExpediceVyskladneni` až do odstranění. Vytištěný dokument ani PDF tyto pomocné tabulky neobsahují.
 
 ## Technické rozhraní

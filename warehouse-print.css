@@ -42,6 +42,7 @@ td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin:
 .allocations { display: flex; flex-wrap: wrap; gap: 4px 6px; }
 .allocation { display: inline-block; padding: 3px 6px; border: 1px solid #aabdb3; border-radius: 3px; white-space: nowrap; font-size: 12px; }
 .allocation b { font-size: 14px; }
+.allocation-red { color: #b42318; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
 [data-orientation="portrait"] .photo-col { width: 10%; }
 [data-orientation="portrait"] .product-col { width: 28%; }
 [data-orientation="portrait"] .boxes-col { width: 37%; }

@@ -128,6 +128,61 @@ test("II. jakost je až na konci celé sestavy za všemi běžnými produkty", a
   await expect(page.locator(".sku")).toHaveText(expected.map((index) => items[index][1]));
 });
 
+test("celý text boxu s kódem 0,8 z KOMPLETACE je červený i v tisku", async ({ page }) => {
+  const destinations = [7, 14, 18, 20, 27, 28, 52, 56, 62, 66, 67, 68, 74, 78];
+  const pairs = [["007", "0,8"], ["14", "0.8"], ["18", " 0,80 "], ["20", "1.8"], ["27", "8"], ["28", "0,81"], ["52", ""], ["56", "0,8x"], ["62", "0,8"], ["7", "0,8"], ["-66", "0,8"], ["67x", "0,8"], ["68.5", "0,8"], ["", "0,8"]];
+  const cells = [Array(18).fill("Hlavička"), ...pairs.map(([box, code]) => {
+    const row = Array(18).fill("");
+    row[11] = "78";
+    row[16] = box;
+    row[17] = code;
+    return row;
+  })];
+  let withHelpers = true;
+  await page.route("**/api/datasets/71", (route) => route.fulfill({ json: {
+    dataset: { datasetKind: "warehouse_print" },
+    rows: [{ ...fixture()[0], raw: null, quantity: 14, initialQuantity: 14, sequence: destinations.map((box) => `1x${box}`).join(",") }],
+    ...(withHelpers ? { helperSheets: { KOMPLETACE: { cells } } } : {}),
+  } }));
+  await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await page.goto("/warehouse-print.html?dataset=71");
+  await expect(page.locator("#print")).toBeEnabled();
+  const red = page.locator(".allocation-red");
+  for (const orientation of ["Na šířku", "Na výšku"]) {
+    await page.getByText(orientation, { exact: true }).click();
+    for (const density of ["Běžné", "Kompaktní"]) {
+      await page.getByText(density, { exact: true }).click();
+      for (const media of ["screen", "print"]) {
+        await page.emulateMedia({ media });
+        await expect(red).toHaveText([7, 14, 18, 62].map((box) => `1 ks → box ${box}`));
+        expect(await red.evaluateAll((nodes) => nodes.every((node) =>
+          [node, ...node.querySelectorAll("b")].every((el) => getComputedStyle(el).color === "rgb(180, 35, 24)")))).toBe(true);
+        await expect(page.locator(".allocation:not(.allocation-red)").first()).toHaveCSS("color", "rgb(24, 43, 39)");
+      }
+      await page.emulateMedia({ media: "screen" });
+    }
+  }
+  await page.getByText("Běžné", { exact: true }).click();
+  await page.screenshot({ path: "test-results/warehouse-red-boxes.png" });
+  await page.emulateMedia({ media: "print" });
+  await expect(page.locator(".toolbar")).toBeHidden();
+  await page.pdf({ path: "test-results/warehouse-red-boxes.pdf", preferCSSPageSize: true, printBackground: false });
+  await page.emulateMedia({ media: "screen" });
+  for (const sort of ["excel", "box", "product"]) {
+    await page.locator("#sort").selectOption(sort);
+    await expect(red).toHaveCount(4);
+  }
+  await page.locator("#reload").click();
+  await expect(page.locator("#print")).toBeEnabled();
+  await expect(red).toHaveCount(4);
+  withHelpers = false;
+  await page.locator("#reload").click();
+  await expect(page.locator("#print")).toBeEnabled();
+  await expect(red).toHaveCount(0);
+  await expect(page.locator(".allocation")).toHaveCount(14);
+});
+
 test("odkaz z Excelu po přihlášení otevře stejnou sestavu", async ({ page }) => {
   let authenticated = false;
   await page.route("**/api/datasets/71", (route) => authenticated
@@ -197,6 +252,9 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
   expect(await page.locator("body").innerText()).not.toContain("TEST-POMOCNY-PRODUKT");
   expect(await page.locator("body").innerText()).not.toContain("TEST-NEZOBRAZOVAT");
   expect(await page.evaluate(() => window.helperExecuted)).toBeUndefined();
+  const redBoxCount = await page.locator(".allocation-red").count();
+  expect(redBoxCount).toBeGreaterThan(0);
+  expect(await page.locator(".allocation-red b:last-child").allTextContents()).toEqual(Array(redBoxCount).fill("3"));
   await expect(page.locator("#batch")).toContainText("Vyskladnění");
   const expectedTotal = process.env.WAREHOUSE_PRINT_FIXTURE
     ? fixture().reduce((sum, row) => sum + Number(row.quantity), 0) : 135;

@@ -5,7 +5,7 @@
   const datasetId = new URLSearchParams(location.search).get("dataset");
   const embeddedData = document.getElementById("warehouse-print-data");
   const standalone = embeddedData ? JSON.parse(embeddedData.textContent) : null;
-  const state = { rows: [], images: {}, ready: false, busy: false };
+  const state = { rows: [], images: {}, redBoxes: new Set(), ready: false, busy: false };
   const pageStyle = document.createElement("style");
   document.head.append(pageStyle);
   function setOrientation(value) {
@@ -28,6 +28,22 @@
   const escape = (value) => String(value ?? "").replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
   const key = (value) => String(value || "").trim().toUpperCase();
   const quantity = (row) => Number(row.initialQuantity || row.quantity || 0);
+  function completionRedBoxes(data) {
+    const cells = data.helperSheets?.KOMPLETACE?.cells;
+    const boxes = new Set();
+    if (!Array.isArray(cells)) return boxes;
+    const decimal = (value) => {
+      const text = String(value ?? "").trim().replace(",", ".");
+      return /^\d+(?:\.\d+)?$/.test(text) ? Number(text) : NaN;
+    };
+    // Helper sheets preserve Excel coordinates: Q = box, R = expedition code.
+    for (const row of cells.slice(1)) {
+      if (!Array.isArray(row)) continue;
+      const box = decimal(row[16]);
+      if (Number.isSafeInteger(box) && box > 0 && decimal(row[17]) === 0.8) boxes.add(box);
+    }
+    return boxes;
+  }
   const secondQuality = (row) => [row.variantCode, row.productCode, row.raw?.productName, row.info].some((value) =>
     /(?:^|[^a-z0-9])(?:ii|2)[.\s_-]+(?:jakost|akost)(?:$|[^a-z0-9])/i.test(
       String(value ?? "").normalize("NFD").replace(/[\u0300-\u036f]/g, "")
@@ -99,7 +115,7 @@
         <td>${image ? `<img src="${escape(image)}" alt="${escape(name)}" />` : '<span class="no-photo">Bez fotky</span>'}</td>
         <td><span class="product-name">${escape(name)}</span><span class="sku">${escape(row.variantCode)}</span></td>
         <td><span class="variant-value">${escape(displayVariant(row.variant))}</span></td><td class="quantity">${escape(quantity(row))}</td>
-        <td><div class="allocations">${allocations(row).map((item) => `<span class="allocation"><b>${escape(item.quantity)} ks</b> → box <b>${escape(item.destination)}</b></span>`).join("")}</div></td>
+        <td><div class="allocations">${allocations(row).map((item) => `<span class="allocation${state.redBoxes.has(Number(item.destination)) ? " allocation-red" : ""}"><b>${escape(item.quantity)} ks</b> → box <b>${escape(item.destination)}</b></span>`).join("")}</div></td>
       </tr>`;
     }).join("");
   }
@@ -140,6 +156,7 @@
       const data = standalone || await json(`/api/datasets/${datasetId}`);
       if (!["warehouse", "warehouse_print"].includes(data.dataset?.datasetKind)) throw new Error("Tato dávka není vyskladnění.");
       state.rows = data.rows || [];
+      state.redBoxes = completionRedBoxes(data);
       if (!state.rows.length) throw new Error("Tato sestava neobsahuje žádné položky.");
       state.images = {};
       let imageWarning = standalone?.imageWarning || "";
