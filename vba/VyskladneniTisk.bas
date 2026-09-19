@@ -1,6 +1,5 @@
 Private Const WHPRINT_BASE_URL As String = "https://expedice-production.up.railway.app"
 Private Const WHPRINT_MAX_PAYLOAD_BYTES As Long = 10485760
-Private whPrintLastPdf As String
 
 #If VBA7 Then
 Private Declare PtrSafe Function WhPrintShellExecute Lib "shell32.dll" Alias "ShellExecuteW" ( _
@@ -32,7 +31,6 @@ Private Sub WhPrintRun(ByVal generatePdf As Boolean)
     running = True
     Dim pdfFolder As String
     If generatePdf Then
-        whPrintLastPdf = ""
         pdfFolder = WhPrintPdfFolder(ThisWorkbook.Path)
     End If
     Dim ws As Worksheet
@@ -68,12 +66,63 @@ Private Sub WhPrintRun(ByVal generatePdf As Boolean)
     ' WhPrintJson emits ASCII, so character count equals the UTF-8 byte count.
     If Len(payload) > WHPRINT_MAX_PAYLOAD_BYTES Then Err.Raise vbObjectError + 811, , "Tiskova data vcetne pomocnych listu presahuji limit 10 MB. Nic nebylo odeslano."
 
-    Application.StatusBar = "Nahravam vyskladneni k tisku..."
+    Dim files As Object, printPath As String, missing As Long
+    Set files = CreateObject("Scripting.FileSystemObject")
+    If generatePdf Then
+        If Not files.FolderExists(pdfFolder) Then files.CreateFolder pdfFolder
+        Dim modes As Variant, folders As Variant, index As Long, saved As Long, notice As String, batchFile As String
+        modes = Array("normal", "first", "split")
+        folders = Array("Bezne-poradi", "Prioritni-zasilky-prvni", "Prioritni-kusy-zvlast")
+        batchFile = "Vyskladneni-" & Format$(Now, "yyyymmdd-hhnnss") & "-" & files.GetBaseName(files.GetTempName) & ".pdf"
+        For index = 0 To 2
+            Application.StatusBar = "Vytvarim PDF " & (index + 1) & "/3: " & folders(index)
+            notice = notice & vbCrLf & WhPrintPdfVariant(payload, pdfFolder, CStr(folders(index)), CStr(modes(index)), batchFile, saved)
+        Next index
+        MsgBox "Ulozeno " & saved & "/3 PDF. Tisk nebyl spusten." & vbCrLf & notice & vbCrLf & _
+            "Pro tisk vyber konkretni PDF v makru VyskladneniPdfVytisknoutAdobe.", IIf(saved = 3, vbInformation, vbExclamation)
+    Else
+        Application.StatusBar = "Nahravam vyskladneni k tisku..."
+        printPath = WhPrintDownload(payload, files.BuildPath(files.GetSpecialFolder(2), "ExpediceVyskladneni"), _
+            files.GetBaseName(files.GetTempName) & ".html", "", missing)
+        WhPrintOpenBrowser printPath
+    End If
+    Application.StatusBar = False
+    running = False
+    Exit Sub
+Failed:
+    Application.StatusBar = False
+    running = False
+    MsgBox "Vyskladneni k tisku se nepodarilo:" & vbCrLf & Err.Description, vbExclamation
+End Sub
+
+Private Function WhPrintPdfVariant(ByVal payload As String, ByVal root As String, ByVal folder As String, _
+    ByVal mode As String, ByVal filename As String, ByRef saved As Long) As String
+    On Error GoTo Failed
+    Dim path As String, missing As Long, note As String
+    path = WhPrintDownload(payload, CreateObject("Scripting.FileSystemObject").BuildPath(root, folder), filename, mode, missing)
+    saved = saved + 1
+    note = folder & ": " & path
+    If missing > 0 Then note = note & vbCrLf & "Bez fotografie: " & missing & " radku."
+    WhPrintOpenBrowser path
+    WhPrintPdfVariant = note
+    Exit Function
+Failed:
+    If Len(path) > 0 Then
+        WhPrintPdfVariant = note & vbCrLf & "PDF je ulozene, ale nahled se nepodarilo otevrit: " & Err.Description
+    Else
+        WhPrintPdfVariant = folder & ": NEPODARILO SE - " & Err.Description
+    End If
+End Function
+
+Private Function WhPrintDownload(ByVal payload As String, ByVal outputFolder As String, ByVal filename As String, _
+    ByVal mode As String, ByRef missing As Long) As String
+    Dim generatePdf As Boolean
+    generatePdf = (Len(mode) > 0)
     Dim http As Object
     Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
     Dim endpoint As String
     endpoint = "/api/warehouse/render-print"
-    If generatePdf Then endpoint = "/api/warehouse/render-pdf"
+    If generatePdf Then endpoint = "/api/warehouse/render-pdf?priority=" & mode
     http.setTimeouts 10000, 10000, 30000, IIf(generatePdf, 180000, 60000)
     http.Open "POST", WHPRINT_BASE_URL & endpoint, False
     http.setRequestHeader "Content-Type", "application/json; charset=utf-8"
@@ -88,42 +137,22 @@ Private Sub WhPrintRun(ByVal generatePdf As Boolean)
         Err.Raise vbObjectError + 806, , "Server nevratil tiskovou sestavu."
     End If
     If generatePdf Then
+        If http.getResponseHeader("X-Warehouse-Priority") <> mode Then Err.Raise vbObjectError + 822, , "Server nepotvrdil zvoleny rezim PDF. Je potreba aktualni verze serveru."
         If Not WhPrintIsPdf(http.responseBody) Then Err.Raise vbObjectError + 816, , "Server nevratil platny PDF soubor. Nic nebylo vytisteno."
     End If
-    Dim files As Object, outputFolder As String, printPath As String, stream As Object
+    Dim files As Object, printPath As String, stream As Object
     Set files = CreateObject("Scripting.FileSystemObject")
-    outputFolder = files.BuildPath(files.GetSpecialFolder(2), "ExpediceVyskladneni")
-    If generatePdf Then outputFolder = pdfFolder
     If Not files.FolderExists(outputFolder) Then files.CreateFolder outputFolder
-    printPath = files.BuildPath(outputFolder, files.GetBaseName(files.GetTempName) & ".html")
-    If generatePdf Then printPath = files.BuildPath(outputFolder, "Vyskladneni-" & Format$(Now, "yyyymmdd-hhnnss") & "-" & files.GetBaseName(files.GetTempName) & ".pdf")
+    printPath = files.BuildPath(outputFolder, filename)
     Set stream = CreateObject("ADODB.Stream")
     stream.Type = 1
     stream.Open
     stream.Write http.responseBody
-    stream.SaveToFile printPath, 2
+    stream.SaveToFile printPath, 1
     stream.Close
-    If generatePdf Then
-        whPrintLastPdf = printPath
-        WhPrintOpenBrowser printPath
-        Dim notice As String
-        notice = "PDF bylo ulozeno a otevreno k nahledu. Tisk nebyl spusten." & vbCrLf & "Ulozeno: " & printPath & vbCrLf & "Pro tisk pouzij VyskladneniPdfVytisknoutAdobe."
-        If Val(http.getResponseHeader("X-Warehouse-Missing-Images")) > 0 Then notice = notice & vbCrLf & "Pozor: pocet radku bez fotografie: " & http.getResponseHeader("X-Warehouse-Missing-Images")
-        MsgBox notice, vbInformation
-    Else
-        WhPrintOpenBrowser printPath
-    End If
-    Application.StatusBar = False
-    running = False
-    Exit Sub
-Failed:
-    Application.StatusBar = False
-    running = False
-    Dim failure As String
-    failure = "Vyskladneni k tisku se nepodarilo:" & vbCrLf & Err.Description
-    If Len(printPath) > 0 Then failure = failure & vbCrLf & vbCrLf & "Soubor sestavy: " & printPath
-    MsgBox failure, vbExclamation
-End Sub
+    missing = Val(http.getResponseHeader("X-Warehouse-Missing-Images"))
+    WhPrintDownload = printPath
+End Function
 
 Public Sub VyskladneniPdfVytisknoutAdobe()
     On Error GoTo Failed
@@ -131,23 +160,8 @@ Public Sub VyskladneniPdfVytisknoutAdobe()
     If running Then Exit Sub
     running = True
     Dim pdfPath As String, adobe As String, printer As Variant, arguments As String
-    pdfPath = whPrintLastPdf
-    If Len(pdfPath) > 0 Then
-        If Not CreateObject("Scripting.FileSystemObject").FileExists(pdfPath) Then pdfPath = ""
-    End If
-    If Len(pdfPath) = 0 Then
-        Dim picker As Object
-        Set picker = Application.FileDialog(3)
-        picker.Title = "Vyber PDF vyskladneni k tisku pres Adobe"
-        picker.AllowMultiSelect = False
-        picker.Filters.Clear
-        picker.Filters.Add "PDF", "*.pdf"
-        If Len(ThisWorkbook.Path) > 0 And InStr(ThisWorkbook.Path, "://") = 0 Then
-            picker.InitialFileName = WhPrintPdfFolder(ThisWorkbook.Path) & "\"
-        End If
-        If picker.Show <> -1 Then GoTo Finished
-        pdfPath = picker.SelectedItems(1)
-    End If
+    pdfPath = WhPrintChoosePdf()
+    If Len(pdfPath) = 0 Then GoTo Finished
     pdfPath = WhPrintValidatedPdf(pdfPath)
     adobe = WhPrintAdobePath()
     If Len(adobe) = 0 Then Err.Raise vbObjectError + 818, , "Adobe Acrobat nebo Reader nebyl nalezen. PDF zustava ulozene; muzes je vytisknout rucne z nahledu."
@@ -157,7 +171,6 @@ Public Sub VyskladneniPdfVytisknoutAdobe()
         "Vychozi tiskarna: " & CStr(printer(0)) & vbCrLf & "Pred opakovanym tiskem zkontroluj tiskovou frontu.", _
         vbQuestion + vbYesNo + vbDefaultButton2, "Tisk vyskladneni") <> vbYes Then GoTo Finished
     WhPrintLaunchApplication adobe, arguments
-    whPrintLastPdf = pdfPath
     MsgBox "Pozadavek byl predan Adobe. To nepotvrzuje fyzicke vytisteni; zkontroluj tiskovou frontu." & vbCrLf & _
         "PDF zustava ulozene: " & pdfPath, vbInformation
 Finished:
@@ -167,6 +180,19 @@ Failed:
     running = False
     MsgBox "Tisk pres Adobe se nepodarilo spustit:" & vbCrLf & Err.Description, vbExclamation
 End Sub
+
+Private Function WhPrintChoosePdf() As String
+    Dim picker As Object
+    Set picker = Application.FileDialog(3)
+    picker.Title = "Vyber variantu PDF vyskladneni k tisku pres Adobe"
+    picker.AllowMultiSelect = False
+    picker.Filters.Clear
+    picker.Filters.Add "PDF", "*.pdf"
+    If Len(ThisWorkbook.Path) > 0 And InStr(ThisWorkbook.Path, "://") = 0 Then
+        picker.InitialFileName = WhPrintPdfFolder(ThisWorkbook.Path) & "\"
+    End If
+    If picker.Show = -1 Then WhPrintChoosePdf = picker.SelectedItems(1)
+End Function
 
 Private Function WhPrintValidatedPdf(ByVal path As String) As String
     Dim files As Object, stream As Object, content As Variant

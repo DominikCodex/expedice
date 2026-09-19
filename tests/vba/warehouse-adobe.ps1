@@ -11,6 +11,7 @@ $source = $source.Replace('CreateObject("MSXML2.ServerXMLHTTP.6.0")', 'New FakeH
 $source = $source.Replace('http.Open ', 'http.TestOpen ')
 $source = $source.Replace('printer = WhPrintDefaultPrinter()', 'printer = Array("Test Printer", "Test Driver", "WSD-TEST")')
 $source = $source.Replace('adobe = WhPrintAdobePath()', 'adobe = TestAdobeForPrint()')
+$source = $source.Replace('pdfPath = WhPrintChoosePdf()', 'pdfPath = testSelectedPdf')
 $source = [regex]::Replace($source, '\bMsgBox\b', 'TestMessage')
 if ($source -match '(?m)^\s*result = WhPrintShellExecute\(') { throw 'Unintercepted launch.' }
 $harness = @'
@@ -25,6 +26,17 @@ Public testConfirm As Boolean
 Public testMessageText As String
 Public testMissingAdobe As Boolean
 Public testInvalidPdf As Boolean
+Public testSelectedPdf As String
+Public testFailedMode As String
+Public testWrongMode As Boolean
+Public testUrls As String
+Public Sub TestSelectPdf(ByVal path As String)
+    testSelectedPdf = path
+End Sub
+Public Sub TestModeFailure(ByVal mode As String, Optional ByVal wrongMode As Boolean = False)
+    testFailedMode = mode
+    testWrongMode = wrongMode
+End Sub
 Public Function TestLaunch(ByVal exe As String, ByVal args As String) As Long
     testLaunchCount = testLaunchCount + 1
     testLastExe = exe
@@ -41,12 +53,14 @@ Public Sub TestConfigure(ByVal confirm As Boolean, ByVal status As Long, Optiona
     testHttpStatus = status
     testMissingAdobe = missingAdobe
     testInvalidPdf = invalidPdf
+    testFailedMode = ""
+    testWrongMode = False
 End Sub
 Public Function TestAdobeForPrint() As String
     If Not testMissingAdobe Then TestAdobeForPrint = WhPrintAdobePath()
 End Function
 Public Function TestState() As Variant
-    TestState = Array(testLaunchCount, testLastExe, testLastArguments, testRequests, whPrintLastPdf, testMessageText, testUrl, testPayload)
+    TestState = Array(testLaunchCount, testLastExe, testLastArguments, testRequests, testSelectedPdf, testMessageText, testUrl, testPayload, testUrls)
 End Function
 Public Function TestAdobePath() As String
     TestAdobePath = WhPrintAdobePath()
@@ -81,6 +95,7 @@ End Sub
 Public Sub TestOpen(ByVal method As String, ByVal url As String, ByVal asynchronous As Boolean)
     endpoint = url
     TestModule.testUrl = url
+    TestModule.testUrls = TestModule.testUrls & url & vbLf
 End Sub
 Public Sub setRequestHeader(ByVal name As String, ByVal value As String)
 End Sub
@@ -90,6 +105,7 @@ Public Sub send(ByVal payload As String)
 End Sub
 Public Property Get Status() As Long
     Status = TestModule.testHttpStatus
+    If Len(TestModule.testFailedMode) > 0 And InStr(endpoint, "priority=" & TestModule.testFailedMode) > 0 Then Status = 503
 End Property
 Public Property Get responseText() As String
     responseText = "Test server failure"
@@ -104,6 +120,8 @@ Public Function getResponseHeader(ByVal header As String) As String
     If header = "Content-Type" Then
         getResponseHeader = "text/html"
         If InStr(endpoint, "render-pdf") > 0 Then getResponseHeader = "application/pdf"
+    ElseIf header = "X-Warehouse-Priority" Then
+        If Not TestModule.testWrongMode Then getResponseHeader = Mid$(endpoint, InStr(endpoint, "priority=") + 9)
     Else
         getResponseHeader = "0"
     End If
@@ -151,24 +169,37 @@ try {
     $excel.Run($prefix + 'TestConfigure', $false, 200)
     $excel.Run($prefix + 'VyskladneniPdfVygenerovat')
     $state = $excel.Run($prefix + 'TestState')
-    if ($state[0] -ne 1 -or $state[3] -ne 1 -or -not $state[6].EndsWith('/render-pdf')) { throw ('Generation failed: ' + $state[5]) }
-    $pdf = $state[4]
-    if (-not (Test-Path -LiteralPath $pdf) -or (Split-Path $pdf -Parent) -ne (Join-Path $folder 'VyskladneniPDF')) { throw 'PDF was not saved beside workbook.' }
+    if ($state[0] -ne 3 -or $state[3] -ne 3 -or -not $state[6].EndsWith('/render-pdf?priority=split')) { throw ('Generation failed: ' + $state[5]) }
+    $pdfRoot = Join-Path $folder 'VyskladneniPDF'
+    $pdfs = @(Get-ChildItem -LiteralPath $pdfRoot -Recurse -Filter '*.pdf')
+    if ($pdfs.Count -ne 3) { throw 'Expected three saved PDFs.' }
+    foreach ($subfolder in @('Bezne-poradi', 'Prioritni-zasilky-prvni', 'Prioritni-kusy-zvlast')) {
+        if (@(Get-ChildItem -LiteralPath (Join-Path $pdfRoot $subfolder) -Filter '*.pdf').Count -ne 1) { throw "Missing PDF in $subfolder" }
+    }
+    if (@($pdfs.Name | Select-Object -Unique).Count -ne 1) { throw 'Batch filenames differ.' }
+    foreach ($mode in @('normal', 'first', 'split')) {
+        if ($state[8] -notmatch "/render-pdf\?priority=$mode") { throw "Missing mode $mode" }
+    }
+    $pdf = (Get-ChildItem -LiteralPath (Join-Path $pdfRoot 'Prioritni-kusy-zvlast') -Filter '*.pdf')[0].FullName
     if ($state[2] -ne ('"' + $pdf + '"') -or $state[1] -eq $adobe) { throw 'Generation must only request browser preview, not Adobe print.' }
     $sent = $state[7] | ConvertFrom-Json
     if ($sent.rows[0].variant -cne "L/XL, $([char]0x10d)ern$([char]0xe1)") { throw 'Czech text corrupted.' }
     $excel.Run($prefix + 'VyskladneniPdfVytisknoutAdobe')
     $state = $excel.Run($prefix + 'TestState')
-    if ($state[0] -ne 1) { throw 'Cancelled print launched application.' }
+    if ($state[0] -ne 3) { throw 'Cancelled file picker launched application.' }
+    $excel.Run($prefix + 'TestSelectPdf', $pdf)
+    $excel.Run($prefix + 'VyskladneniPdfVytisknoutAdobe')
+    $state = $excel.Run($prefix + 'TestState')
+    if ($state[0] -ne 3) { throw 'Cancelled print launched application.' }
     $excel.Run($prefix + 'TestConfigure', $true, 200, $true)
     $excel.Run($prefix + 'VyskladneniPdfVytisknoutAdobe')
     $state = $excel.Run($prefix + 'TestState')
-    if ($state[0] -ne 1 -or $state[5] -notmatch 'nebyl nalezen') { throw 'Missing Adobe did not stop safely.' }
+    if ($state[0] -ne 3 -or $state[5] -notmatch 'nebyl nalezen') { throw 'Missing Adobe did not stop safely.' }
     $excel.Run($prefix + 'TestConfigure', $true, 200)
     $excel.Run($prefix + 'VyskladneniPdfVytisknoutAdobe')
     $state = $excel.Run($prefix + 'TestState')
     $expected = '/t "' + $pdf + '" "Test Printer" "Test Driver" "WSD-TEST"'
-    if ($state[0] -ne 2 -or $state[1] -ne $adobe -or $state[2] -cne $expected -or $state[3] -ne 1) { throw 'Adobe print did not use saved PDF and explicit printer tuple.' }
+    if ($state[0] -ne 4 -or $state[1] -ne $adobe -or $state[2] -cne $expected -or $state[3] -ne 3) { throw 'Adobe print did not use selected PDF and explicit printer tuple.' }
     Write-Output 'PASS: generation only saves and previews; cancel is safe; separate Adobe print reuses PDF without upload.'
     foreach ($bad in @('', 'bad"quote', "bad`nline")) {
         if ($excel.Run($prefix + 'TestArgumentFailure', $bad) -ne 821) { throw 'Invalid command argument accepted.' }
@@ -183,24 +214,36 @@ try {
     if ($excel.Run($prefix + 'TestValidate', $badPdf) -ne 819) { throw 'HTML accepted as PDF.' }
     $excel.Run($prefix + 'VyskladneniPdfATisk')
     $state = $excel.Run($prefix + 'TestState')
-    if ($state[0] -ne 3 -or $state[2].StartsWith('/t')) { throw 'Legacy alias still prints.' }
+    if ($state[0] -ne 7 -or $state[2].StartsWith('/t')) { throw 'Legacy alias still prints.' }
+    if (@(Get-ChildItem -LiteralPath $pdfRoot -Recurse -Filter '*.pdf').Count -ne 6) { throw 'Regeneration overwrote previous PDFs.' }
     $excel.Run($prefix + 'TestConfigure', $false, 503)
     $excel.Run($prefix + 'VyskladneniPdfVygenerovat')
     $state = $excel.Run($prefix + 'TestState')
-    if ($state[4] -ne '' -or $state[0] -ne 3) { throw 'Failed generation retained stale PDF or launched an app.' }
+    if ($state[0] -ne 7 -or $state[5] -notmatch 'Ulozeno 0/3') { throw 'Failed generation launched an app or claimed success.' }
     $excel.Run($prefix + 'TestConfigure', $false, 200, $false, $true)
     $excel.Run($prefix + 'VyskladneniPdfVygenerovat')
     $state = $excel.Run($prefix + 'TestState')
-    if ($state[4] -ne '' -or $state[0] -ne 3 -or $state[5] -notmatch 'platny PDF') { throw 'Invalid server PDF accepted.' }
+    if ($state[0] -ne 7 -or $state[5] -notmatch 'platny PDF') { throw 'Invalid server PDF accepted.' }
+    $excel.Run($prefix + 'TestConfigure', $false, 200)
+    $excel.Run($prefix + 'TestModeFailure', '', $true)
+    $excel.Run($prefix + 'VyskladneniPdfVygenerovat')
+    $state = $excel.Run($prefix + 'TestState')
+    if ($state[0] -ne 7 -or $state[5] -notmatch 'nepotvrdil') { throw 'Old server mode mismatch accepted.' }
+    $excel.Run($prefix + 'TestConfigure', $false, 200)
+    $excel.Run($prefix + 'TestModeFailure', 'first')
+    $excel.Run($prefix + 'VyskladneniPdfVygenerovat')
+    $state = $excel.Run($prefix + 'TestState')
+    if ($state[0] -ne 9 -or $state[5] -notmatch 'Ulozeno 2/3' -or -not $state[6].EndsWith('priority=split')) { throw 'One failed mode prevented other modes or misreported success.' }
+    if (@(Get-ChildItem -LiteralPath $pdfRoot -Recurse -Filter '*.pdf').Count -ne 8) { throw 'Partial failure lost successful PDFs.' }
     $excel.Run($prefix + 'TestConfigure', $false, 200)
     $excel.Run($prefix + 'VyskladneniNahratATisk')
     $state = $excel.Run($prefix + 'TestState')
-    if (-not $state[6].EndsWith('/render-print') -or $state[0] -ne 4) { throw 'Original manual HTML workflow changed.' }
+    if (-not $state[6].EndsWith('/render-print') -or $state[0] -ne 10) { throw 'Original manual HTML workflow changed.' }
     foreach ($worksheet in $book.Worksheets) {
         if ($worksheet.Shapes.Count -ne 0) { throw 'A macro created a button or shape.' }
     }
     if ($source -match 'AddFormControl|Public Sub VlozitTlacit') { throw 'Automatic button helpers remain.' }
-    Write-Output 'PASS: Unicode/UNC quoting, PDF validation, safe legacy alias, failed-generation reset, manual HTML and no automatic buttons.'
+    Write-Output 'PASS: all three modes and folders, partial failures, old server rejection, Unicode/UNC quoting, PDF validation, manual HTML and no automatic buttons.'
     Write-Output 'No network requests, application launches or physical prints were performed.'
 } finally {
     if ($book) { $book.Close($false) }

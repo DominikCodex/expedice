@@ -39,6 +39,31 @@ def test_invalid_pdf_upload_never_launches_browser(monkeypatch):
     assert not app.WAREHOUSE_PDF_LOCK.locked()
 
 
+@pytest.mark.parametrize("mode", ["normal", "first", "split"])
+def test_pdf_selects_requested_priority_mode(monkeypatch, mode):
+    monkeypatch.setattr(app, "product_image_cache", lambda: {"images": {}})
+    render = MagicMock(return_value=(b"%PDF-test", 0))
+    monkeypatch.setattr(app, "generate_pdf", render)
+    response = app.app.test_client().post(f"/api/warehouse/render-pdf?priority={mode}", json=payload())
+    assert response.status_code == 200
+    assert response.headers["X-Warehouse-Priority"] == mode
+    html = render.call_args.args[0]
+    for candidate in ("normal", "first", "split"):
+        assert (f'name="priority" value="{candidate}" checked' in html) == (candidate == mode)
+    assert 'name="orientation" value="portrait" checked' in html
+    assert 'name="density" value="compact" checked' in html
+
+
+@pytest.mark.parametrize("mode", ["", "invalid", '<script>alert(1)</script>'])
+def test_invalid_priority_mode_is_rejected_before_rendering(monkeypatch, mode):
+    render = MagicMock()
+    monkeypatch.setattr(app, "generate_pdf", render)
+    response = app.app.test_client().post("/api/warehouse/render-pdf", query_string={"priority": mode}, json=payload())
+    assert response.status_code == 400
+    render.assert_not_called()
+    assert not app.WAREHOUSE_PDF_LOCK.locked()
+
+
 def test_pdf_failure_does_not_expose_internal_details_and_releases_lock(monkeypatch):
     monkeypatch.setattr(app, "product_image_cache", lambda: {"images": {}})
     monkeypatch.setattr(app, "generate_pdf", MagicMock(side_effect=RuntimeError("private-details")))
@@ -85,12 +110,14 @@ def test_pdf_rejects_non_image_response():
 
 
 @pytest.mark.skipif(os.environ.get("RUN_PDF_BROWSER_TESTS") != "1", reason="Requires installed Playwright Chromium")
-def test_real_pdf_renderer_without_images_or_database(monkeypatch, tmp_path):
+@pytest.mark.parametrize("mode", ["normal", "first", "split"])
+def test_real_pdf_renderer_without_images_or_database(monkeypatch, tmp_path, mode):
     monkeypatch.setattr(app, "product_image_cache", lambda: {"images": {}})
     monkeypatch.setattr(app, "db_conn", MagicMock(side_effect=AssertionError("No database")))
-    response = app.app.test_client().post("/api/warehouse/render-pdf", json=payload())
+    response = app.app.test_client().post(f"/api/warehouse/render-pdf?priority={mode}", json=payload())
     assert response.status_code == 200, response.text
     assert response.data.startswith(b"%PDF-")
     assert len(response.data) > 10000
     assert response.headers["X-Warehouse-Missing-Images"] == "1"
-    (tmp_path / "warehouse.pdf").write_bytes(response.data)
+    assert response.headers["X-Warehouse-Priority"] == mode
+    (tmp_path / f"warehouse-{mode}.pdf").write_bytes(response.data)

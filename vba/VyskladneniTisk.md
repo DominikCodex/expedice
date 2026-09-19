@@ -20,8 +20,21 @@ Pro přidání pomocných listů `EXCEL` a `KOMPLETACE` přes `Alt+F11` otevři 
 
 Původní `VyskladneniNahratATisk` zůstává pro ruční HTML náhled a tisk z prohlížeče. PDF workflow má nyní dvě oddělená makra, bez závislosti na Sumatře či tiskovém agentovi:
 
-- `VyskladneniPdfVygenerovat`: odešle stejné listy, vygeneruje PDF na serveru, uloží jej a otevře v prohlížeči k náhledu. **Nic netiskne.** Server použije výchozí sestavu: produkt a varianta, A4 na výšku, kompaktní, prioritní kusy zvlášť na oddělených stránkách.
-- `VyskladneniPdfVytisknoutAdobe`: použije PDF naposledy vytvořené tímto sešitem v aktuální relaci Excelu. Po restartu Excelu, resetu VBA nebo při chybějícím souboru nabídne výběr PDF. Nevybírá automaticky nejnovější soubor ve společné složce. Před předáním Adobe vyžádá potvrzení konkrétního souboru a výchozí tiskárny Windows.
+- `VyskladneniPdfVygenerovat`: jednou načte listy a postupně vygeneruje **všechny tři varianty PDF**, uloží je a otevře v prohlížeči k náhledu. **Nic netiskne.** Všechny mají řazení produkt a varianta, A4 na výšku a kompaktní vzhled. Liší se prioritou: běžné pořadí, prioritní zásilky první, prioritní kusy zvlášť na oddělených stránkách.
+- `VyskladneniPdfVytisknoutAdobe`: vždy nabídne výběr konkrétního PDF, počínaje složkou `VyskladneniPDF` vedle sešitu. Nevybírá automaticky poslední variantu ani nejnovější soubor ve společné složce. Před předáním Adobe vyžádá potvrzení vybraného souboru a výchozí tiskárny Windows.
+
+Soubory se ukládají vedle sešitu do tří podsložek:
+
+```text
+VyskladneniPDF/
+  Bezne-poradi/
+  Prioritni-zasilky-prvni/
+  Prioritni-kusy-zvlast/
+```
+
+Tři soubory z jednoho spuštění mají shodný název s časem a jedinečným označením várky, každý ve své složce. Opakované generování předchozí PDF nepřepisuje. Data se odešlou třikrát postupně, vždy se stejným obsahem listů; server neběží na třech PDF současně. Stavový řádek Excelu ukazuje právě vytvářenou variantu `1/3` až `3/3`. Na konci se zobrazí počet uložených souborů a případné chyby nebo chybějící fotografie zvlášť pro každou variantu. Chyba jedné varianty nezastaví pokus o zbývající varianty.
+
+Nejdřív musí být nasazená serverová podpora parametru `priority` a hlavičky `X-Warehouse-Priority`. Makro kontroluje potvrzený režim v odpovědi, aby starší server nevytvořil tři stejné výchozí sestavy pod různými složkami.
 
 1. Aktualizuj pouze obsah modulu `VyskladneniTisk.bas`, bez vytvoření duplicitního modulu.
 2. Vlastním tlačítkům přiřaď `VyskladneniPdfVygenerovat` a `VyskladneniPdfVytisknoutAdobe`, nebo je spouštěj přes `Alt+F8`. Obě makra fungují z libovolného listu sešitu s makrem. Tlačítka se automaticky nevytvářejí ani neupravují.
@@ -31,7 +44,7 @@ Cesty nejsou vázané na konkrétního uživatele: PDF se ukládá do `Vyskladne
 
 Adobe používáme příkazem `/t` s cestou PDF, názvem tiskárny, ovladačem a portem. Adobe jej popisuje, ale oficiálně negarantuje jeho podporu ve všech verzích: [Adobe SDK FAQ](https://opensource.adobe.com/dc-acrobat-sdk-docs/library/overview/apxDevFAQ.html#how-do-i-use-the-windows-command-line). Makro proto potvrzuje jen předání požadavku aplikaci, nikoli dokončený tisk. Adobe automaticky neukončujeme, nevypínáme jeho ochrany a nepřepínáme na jiný tiskový nástroj při chybě. Před opakováním zkontroluj frontu, aby nevznikly duplicitní kopie. Menší tisková úloha je možnost k ověření, nikoli záruka.
 
-PDF zůstává uložené i po chybě otevření či tisku. Makro kontroluje typ a signaturu staženého souboru a před tiskem také existenci, příponu a velikost vybraného PDF (nejvýše 32 MB). Neúspěšný nový pokus o generování ruší zapamatovaný odkaz na předchozí várku. Nedostupné fotografie neblokují vytvoření PDF; jejich počet se ukáže po otevření náhledu. Fotografie se pro PDF zmenšují na nejvýše 400 pixelů na delší straně. Pro ruční opakování načtení fotek použij původní HTML náhled.
+PDF zůstává uložené i po chybě otevření či tisku. Makro kontroluje typ a signaturu staženého souboru a před tiskem také existenci, příponu a velikost vybraného PDF (nejvýše 32 MB). Po neúspěšném generování se žádné starší PDF automaticky nenabízí k tisku. Nedostupné fotografie neblokují vytvoření PDF; jejich počet se ukáže po otevření náhledu. Fotografie se pro PDF zmenšují na nejvýše 400 pixelů na delší straně. Pro ruční opakování načtení fotek použij původní HTML náhled.
 
 Server potřebuje Chromium z instalace Playwright; připravuje jej přiložený Dockerfile. Generátor spouští pouze vlastní tiskovou šablonu a dovoluje externě načítat pouze obrázky z HTTPS `cdn.myshoptet.com`. Ostatní zdroje z bezpečnostních důvodů přeskočí. Současně vytváří nejvýše jedno PDF na proces; při obsazení vrátí pokyn zkusit generování později.
 
@@ -97,6 +110,7 @@ Z listu `KOMPLETACE` tisk používá sloupec Q (číslo boxu) a R (kód pořadí
 ## Technické rozhraní
 
 - `POST /api/warehouse/render-print` přijímá vlastní řádky v JSON a vrací hotové HTML bez autentizace. Limit je 10 MB a 1000 řádků; množství musí odpovídat součtu rozdělení do boxů.
+- `POST /api/warehouse/render-pdf?priority=normal|first|split` přijímá stejný JSON a vrací PDF. Bez parametru použije `split`; neplatnou hodnotu odmítne stavem 400. Hlavička `X-Warehouse-Priority` potvrzuje použitý režim. Ruční HTML náhled zůstává beze změny.
 - Volitelný objekt `helperSheets` obsahuje klíče `EXCEL` a `KOMPLETACE`, každý s obdélníkovým polem `cells` (řádky a sloupce, všechny hodnoty jako řetězce). Starší makro bez pomocných listů zůstává na serveru podporované.
 - Z existujících dat používá pouze produktové fotografie k zaslaným kódům. Nelze jím načíst existující expediční dávku podle ID.
 - `POST /api/warehouse/print-images` vrací pouze veřejné URL fotografií pro zaslané kódy (nejvýše 2000 kódů a 256 KiB). Jen tento čtecí endpoint povoluje CORS bez cookies pro sestavy otevřené z disku; ostatní chráněná API zůstávají beze změny.
@@ -107,3 +121,5 @@ Z listu `KOMPLETACE` tisk používá sloupec Q (číslo boxu) a R (kód pořadí
 ## Vývojářská kontrola otevření prohlížeče
 
 `tests/vba/warehouse-print-browser.ps1` kompiluje skutečný VBA modul v nové instanci Excelu a prázdném neukládaném sešitu. Ověří čtení příkazu prohlížeče, nalezení prohlížeče a chybu při neexistujícím souboru. Volitelný parametr `-ReportPath` otevře již existující sestavu. Test nenahrává žádná data. Vyžaduje Excel a již povolený přístup k VBA projektu; nastavení zabezpečení test sám nemění.
+
+`tests/vba/warehouse-adobe.ps1` v izolovaném testovacím sešitu ověřuje všechny tři PDF varianty a složky, výpadek jedné varianty, odmítnutí staršího serveru, opakované generování bez přepisování, ruční výběr PDF k tisku a příkaz pro Adobe. Síťové odpovědi, dialogy a spouštění aplikací jsou v testu nahrazené, takže nic neuploaduje ani netiskne. Parametr `-ReadDefaultPrinter` pouze přečte výchozí tiskárnu.

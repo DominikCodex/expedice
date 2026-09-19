@@ -4615,6 +4615,9 @@ def render_warehouse_print():
 
 @app.route("/api/warehouse/render-pdf", methods=["POST"])
 def render_warehouse_pdf():
+    priority = request.args.get("priority", "split")
+    if priority not in ("normal", "first", "split"):
+        return Response("Neplatný režim řazení PDF.", status=400, mimetype="text/plain")
     if not WAREHOUSE_PDF_LOCK.acquire(blocking=False):
         return Response("Právě se vytváří jiné PDF. Zkuste to za chvíli znovu.", status=503,
                         headers={"Retry-After": "5"}, mimetype="text/plain")
@@ -4622,11 +4625,18 @@ def render_warehouse_pdf():
         document = render_warehouse_print()
         if document.status_code != 200:
             return document
-        pdf, missing = generate_pdf(document.get_data(as_text=True))
+        html = document.get_data(as_text=True)
+        for mode in ("normal", "first", "split"):
+            radio = f'name="priority" value="{mode}"'
+            html = html.replace(radio + " checked", radio)
+            if mode == priority:
+                html = html.replace(radio, radio + " checked")
+        pdf, missing = generate_pdf(html)
         return Response(pdf, mimetype="application/pdf", headers={
             "Content-Disposition": 'attachment; filename="vyskladneni.pdf"',
             "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
             "X-Warehouse-Missing-Images": str(missing),
+            "X-Warehouse-Priority": priority,
         })
     except Exception:
         app.logger.warning("Warehouse PDF generation failed", exc_info=True)
