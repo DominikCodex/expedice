@@ -16,12 +16,19 @@ Pro přidání pomocných listů `EXCEL` a `KOMPLETACE` přes `Alt+F11` otevři 
 
 ## Každodenní použití
 
-### Dvě makra: vytvoření PDF a tisk přes Adobe
+### Stažení všech PDF a tisk konkrétní varianty
 
-Původní `VyskladneniNahratATisk` zůstává pro ruční HTML náhled a tisk z prohlížeče. PDF workflow má nyní dvě oddělená makra, bez závislosti na Sumatře či tiskovém agentovi:
+Původní `VyskladneniNahratATisk` zůstává pro ruční HTML náhled a tisk z prohlížeče. Stahování PDF je oddělené od tisku a nepotřebuje Sumatru ani tiskového agenta:
 
-- `VyskladneniPdfVygenerovat`: jednou načte listy a postupně vygeneruje **všechny tři varianty PDF**, uloží je a otevře v prohlížeči k náhledu. **Nic netiskne.** Všechny mají řazení produkt a varianta, A4 na výšku a kompaktní vzhled. Liší se prioritou: běžné pořadí, prioritní zásilky první, prioritní kusy zvlášť na oddělených stránkách.
+- `VyskladneniPdfVygenerovat`: jednou načte listy a postupně vygeneruje **všechny tři varianty PDF**, uloží každou do její podsložky. **Nic netiskne ani neotevírá prohlížeč.** Všechny mají řazení produkt a varianta, A4 na výšku a kompaktní vzhled. Liší se prioritou: běžné pořadí, prioritní zásilky první, prioritní kusy zvlášť na oddělených stránkách.
+- `VyskladneniTiskBeznePoradi`: vytiskne již stažené PDF běžného pořadí z posledního generování.
+- `VyskladneniTiskPrioritniZasilky`: vytiskne již stažené PDF s prioritními zásilkami prvními.
+- `VyskladneniTiskPrioritniKusy`: vytiskne již stažené PDF s prioritními kusy zvlášť.
 - `VyskladneniPdfVytisknoutAdobe`: vždy nabídne výběr konkrétního PDF, počínaje složkou `VyskladneniPDF` vedle sešitu. Nevybírá automaticky poslední variantu ani nejnovější soubor ve společné složce. Před předáním Adobe vyžádá potvrzení vybraného souboru a výchozí tiskárny Windows.
+
+Tři přímá tisková makra neuploadují data, negenerují nové PDF, neotevírají prohlížeč a nevyžadují výběr souboru ani potvrzení před tiskem. Předají právě danou variantu Adobe na aktuální výchozí tiskárnu Windows. Spustit je lze například `Call VyskladneniTiskBeznePoradi`. Opakované zavolání znamená další tiskový požadavek.
+
+Zapamatované soubory patří jen poslednímu generování v tomto sešitu během aktuální relace Excelu. Každé nové generování nejprve zruší všechny předchozí odkazy. Pokud některá varianta selže nebo její soubor chybí, její tiskové makro skončí s upozorněním a nikdy nevybere starší várku ze složky. Po zavření sešitu nebo resetu VBA znovu vygeneruj všechny tři PDF, případně starší soubor vytiskni přes výběrové `VyskladneniPdfVytisknoutAdobe`.
 
 Soubory se ukládají vedle sešitu do tří podsložek:
 
@@ -37,14 +44,14 @@ Tři soubory z jednoho spuštění mají shodný název s časem a jedinečným 
 Nejdřív musí být nasazená serverová podpora parametru `priority` a hlavičky `X-Warehouse-Priority`. Makro kontroluje potvrzený režim v odpovědi, aby starší server nevytvořil tři stejné výchozí sestavy pod různými složkami.
 
 1. Aktualizuj pouze obsah modulu `VyskladneniTisk.bas`, bez vytvoření duplicitního modulu.
-2. Vlastním tlačítkům přiřaď `VyskladneniPdfVygenerovat` a `VyskladneniPdfVytisknoutAdobe`, nebo je spouštěj přes `Alt+F8`. Obě makra fungují z libovolného listu sešitu s makrem. Tlačítka se automaticky nevytvářejí ani neupravují.
-3. Starší název `VyskladneniPdfATisk` zůstává kvůli existujícím přiřazením, ale nyní **jen generuje a otevírá PDF**. Modul `ExpediceTiskPresSumatra.bas` tento postup už nepoužívá.
+2. Vlastním tlačítkům přiřaď generovací makro a požadovaná tisková makra, nebo je spouštěj přes `Alt+F8` či `Call`. Fungují z libovolného listu sešitu s makrem. Tlačítka se automaticky nevytvářejí ani neupravují.
+3. Starší název `VyskladneniPdfATisk` zůstává kvůli existujícím přiřazením, ale nyní **jen generuje a ukládá všechny tři PDF**. Modul `ExpediceTiskPresSumatra.bas` tento postup už nepoužívá.
 
 Cesty nejsou vázané na konkrétního uživatele: PDF se ukládá do `VyskladneniPDF` vedle sešitu, včetně síťové složky. Sešit musí být uložený v místní nebo sdílené složce s právem zápisu, nikoli otevřený pouze přes webovou URL. Adobe se hledá podle registrace Acrobat/Reader a instalačních složek daného počítače. Výchozí tiskárna, ovladač a port se načtou z Windows až při požadavku na tisk. Nastavení tiskárny se nemění.
 
 Adobe používáme příkazem `/t` s cestou PDF, názvem tiskárny, ovladačem a portem. Adobe jej popisuje, ale oficiálně negarantuje jeho podporu ve všech verzích: [Adobe SDK FAQ](https://opensource.adobe.com/dc-acrobat-sdk-docs/library/overview/apxDevFAQ.html#how-do-i-use-the-windows-command-line). Makro proto potvrzuje jen předání požadavku aplikaci, nikoli dokončený tisk. Adobe automaticky neukončujeme, nevypínáme jeho ochrany a nepřepínáme na jiný tiskový nástroj při chybě. Před opakováním zkontroluj frontu, aby nevznikly duplicitní kopie. Menší tisková úloha je možnost k ověření, nikoli záruka.
 
-PDF zůstává uložené i po chybě otevření či tisku. Makro kontroluje typ a signaturu staženého souboru a před tiskem také existenci, příponu a velikost vybraného PDF (nejvýše 32 MB). Po neúspěšném generování se žádné starší PDF automaticky nenabízí k tisku. Nedostupné fotografie neblokují vytvoření PDF; jejich počet se ukáže po otevření náhledu. Fotografie se pro PDF zmenšují na nejvýše 400 pixelů na delší straně. Pro ruční opakování načtení fotek použij původní HTML náhled.
+PDF zůstává uložené i po chybě tisku. Makro kontroluje typ a signaturu staženého souboru a před tiskem také existenci, příponu a velikost PDF (nejvýše 32 MB). Po neúspěšném generování se žádné starší PDF automaticky nenabízí k tisku. Nedostupné fotografie neblokují vytvoření PDF; jejich počet se ukáže v závěrečném souhrnu stahování. Fotografie se pro PDF zmenšují na nejvýše 400 pixelů na delší straně. Pro ruční opakování načtení fotek použij původní HTML náhled.
 
 Server potřebuje Chromium z instalace Playwright; připravuje jej přiložený Dockerfile. Generátor spouští pouze vlastní tiskovou šablonu a dovoluje externě načítat pouze obrázky z HTTPS `cdn.myshoptet.com`. Ostatní zdroje z bezpečnostních důvodů přeskočí. Současně vytváří nejvýše jedno PDF na proces; při obsazení vrátí pokyn zkusit generování později.
 

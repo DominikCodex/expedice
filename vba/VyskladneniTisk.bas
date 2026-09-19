@@ -1,5 +1,6 @@
 Private Const WHPRINT_BASE_URL As String = "https://expedice-production.up.railway.app"
 Private Const WHPRINT_MAX_PAYLOAD_BYTES As Long = 10485760
+Private whPrintPdfPaths(0 To 2) As String
 
 #If VBA7 Then
 Private Declare PtrSafe Function WhPrintShellExecute Lib "shell32.dll" Alias "ShellExecuteW" ( _
@@ -16,7 +17,7 @@ Public Sub VyskladneniNahratATisk()
 End Sub
 
 Public Sub VyskladneniPdfATisk()
-    ' Compatibility with existing buttons: generation no longer starts printing.
+    ' Compatibility with existing buttons: download only, no preview or printing.
     VyskladneniPdfVygenerovat
 End Sub
 
@@ -24,13 +25,29 @@ Public Sub VyskladneniPdfVygenerovat()
     WhPrintRun True
 End Sub
 
+Public Sub VyskladneniTiskBeznePoradi()
+    WhPrintSavedPdf 0
+End Sub
+
+Public Sub VyskladneniTiskPrioritniZasilky()
+    WhPrintSavedPdf 1
+End Sub
+
+Public Sub VyskladneniTiskPrioritniKusy()
+    WhPrintSavedPdf 2
+End Sub
+
 Private Sub WhPrintRun(ByVal generatePdf As Boolean)
     On Error GoTo Failed
     Static running As Boolean
     If running Then Exit Sub
     running = True
-    Dim pdfFolder As String
+    Dim pdfFolder As String, index As Long
     If generatePdf Then
+        ' Never reuse a previous batch after a failed or partial generation.
+        For index = 0 To 2
+            whPrintPdfPaths(index) = ""
+        Next index
         pdfFolder = WhPrintPdfFolder(ThisWorkbook.Path)
     End If
     Dim ws As Worksheet
@@ -70,16 +87,16 @@ Private Sub WhPrintRun(ByVal generatePdf As Boolean)
     Set files = CreateObject("Scripting.FileSystemObject")
     If generatePdf Then
         If Not files.FolderExists(pdfFolder) Then files.CreateFolder pdfFolder
-        Dim modes As Variant, folders As Variant, index As Long, saved As Long, notice As String, batchFile As String
+        Dim modes As Variant, folders As Variant, saved As Long, notice As String, batchFile As String
         modes = Array("normal", "first", "split")
         folders = Array("Bezne-poradi", "Prioritni-zasilky-prvni", "Prioritni-kusy-zvlast")
         batchFile = "Vyskladneni-" & Format$(Now, "yyyymmdd-hhnnss") & "-" & files.GetBaseName(files.GetTempName) & ".pdf"
         For index = 0 To 2
             Application.StatusBar = "Vytvarim PDF " & (index + 1) & "/3: " & folders(index)
-            notice = notice & vbCrLf & WhPrintPdfVariant(payload, pdfFolder, CStr(folders(index)), CStr(modes(index)), batchFile, saved)
+            notice = notice & vbCrLf & WhPrintPdfVariant(payload, pdfFolder, CStr(folders(index)), CStr(modes(index)), batchFile, saved, whPrintPdfPaths(index))
         Next index
         MsgBox "Ulozeno " & saved & "/3 PDF. Tisk nebyl spusten." & vbCrLf & notice & vbCrLf & _
-            "Pro tisk vyber konkretni PDF v makru VyskladneniPdfVytisknoutAdobe.", IIf(saved = 3, vbInformation, vbExclamation)
+            "Pro tisk spust makro pozadovane varianty sestavy.", IIf(saved = 3, vbInformation, vbExclamation)
     Else
         Application.StatusBar = "Nahravam vyskladneni k tisku..."
         printPath = WhPrintDownload(payload, files.BuildPath(files.GetSpecialFolder(2), "ExpediceVyskladneni"), _
@@ -96,23 +113,43 @@ Failed:
 End Sub
 
 Private Function WhPrintPdfVariant(ByVal payload As String, ByVal root As String, ByVal folder As String, _
-    ByVal mode As String, ByVal filename As String, ByRef saved As Long) As String
+    ByVal mode As String, ByVal filename As String, ByRef saved As Long, ByRef generatedPath As String) As String
     On Error GoTo Failed
     Dim path As String, missing As Long, note As String
     path = WhPrintDownload(payload, CreateObject("Scripting.FileSystemObject").BuildPath(root, folder), filename, mode, missing)
+    generatedPath = path
     saved = saved + 1
     note = folder & ": " & path
     If missing > 0 Then note = note & vbCrLf & "Bez fotografie: " & missing & " radku."
-    WhPrintOpenBrowser path
     WhPrintPdfVariant = note
     Exit Function
 Failed:
-    If Len(path) > 0 Then
-        WhPrintPdfVariant = note & vbCrLf & "PDF je ulozene, ale nahled se nepodarilo otevrit: " & Err.Description
-    Else
-        WhPrintPdfVariant = folder & ": NEPODARILO SE - " & Err.Description
-    End If
+    WhPrintPdfVariant = folder & ": NEPODARILO SE - " & Err.Description
 End Function
+
+Private Sub WhPrintSavedPdf(ByVal variantIndex As Long)
+    On Error GoTo Failed
+    Static running As Boolean
+    If running Then Exit Sub
+    running = True
+    Dim pdfPath As String, adobe As String, printer As Variant, arguments As String
+    pdfPath = whPrintPdfPaths(variantIndex)
+    If Len(pdfPath) = 0 Then Err.Raise vbObjectError + 823, , _
+        "Tato varianta PDF z posledniho generovani neni k dispozici. Nejprve spust VyskladneniPdfVygenerovat. Po restartu Excelu je potreba PDF znovu vygenerovat nebo vybrat pres VyskladneniPdfVytisknoutAdobe."
+    pdfPath = WhPrintValidatedPdf(pdfPath)
+    adobe = WhPrintAdobePath()
+    If Len(adobe) = 0 Then Err.Raise vbObjectError + 818, , "Adobe Acrobat nebo Reader nebyl nalezen. PDF zustava ulozene."
+    printer = WhPrintDefaultPrinter()
+    arguments = WhPrintAdobeArguments(pdfPath, CStr(printer(0)), CStr(printer(1)), CStr(printer(2)))
+    WhPrintLaunchApplication adobe, arguments
+    MsgBox "Pozadavek byl predan Adobe na tiskarnu " & CStr(printer(0)) & "." & vbCrLf & _
+        "PDF: " & pdfPath & vbCrLf & "Pred opakovanim zkontroluj tiskovou frontu. Predani nepotvrzuje fyzicke vytisteni.", vbInformation
+    running = False
+    Exit Sub
+Failed:
+    running = False
+    MsgBox "Tisk pres Adobe se nepodarilo spustit:" & vbCrLf & Err.Description, vbExclamation
+End Sub
 
 Private Function WhPrintDownload(ByVal payload As String, ByVal outputFolder As String, ByVal filename As String, _
     ByVal mode As String, ByRef missing As Long) As String
