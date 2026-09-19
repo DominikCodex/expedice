@@ -5,7 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Vyskladnění k tisku</title>
     <link rel="stylesheet" href="warehouse-print.css?v=20260919-1" />
-    <script defer src="warehouse-print.js?v=20260919-1"></script>
+    <script defer src="warehouse-print.js?v=20260919-2"></script>
   </head>
   <body>
     <nav class="toolbar" aria-label="Tisková sestava">
@@ -26,6 +26,11 @@
         <legend class="visually-hidden">Hustota tiskové sestavy</legend>
         <label><input type="radio" name="density" value="normal" checked /><span>Běžné</span></label>
         <label><input type="radio" name="density" value="compact" /><span>Kompaktní</span></label>
+      </fieldset>
+      <fieldset class="print-mode">
+        <legend class="visually-hidden">Priorita zásilek</legend>
+        <label><input type="radio" name="priority" value="normal" checked /><span>Běžné pořadí</span></label>
+        <label><input type="radio" name="priority" value="first" /><span>Prioritní zásilky první</span></label>
       </fieldset>
       <button id="print" type="button" disabled>Tisk A4 na šířku</button>
       <button id="reload" type="button">Načíst znovu</button>

@@ -92,7 +92,14 @@
 
   function render() {
     const collator = new Intl.Collator("cs", { numeric: true, sensitivity: "base" });
+    const priorityFirst = document.querySelector('input[name="priority"]:checked')?.value === "first";
+    const priorityRows = new Set(state.rows.filter((row) => allocations(row).some((item) => state.redBoxes.has(Number(item.destination)))));
     const rows = [...state.rows].sort((a, b) => {
+      if (priorityFirst) {
+        const difference = Number(priorityRows.has(b)) - Number(priorityRows.has(a))
+          || Number(secondQuality(a)) - Number(secondQuality(b));
+        if (difference) return difference;
+      }
       if (els.sort.value === "excel") return Number(a.rowNumber) - Number(b.rowNumber);
       if (els.sort.value === "box") {
         const difference = Math.min(...allocations(a).map((item) => item.destination)) - Math.min(...allocations(b).map((item) => item.destination));
@@ -104,13 +111,18 @@
     });
     let lastProduct = null;
     let lastQuality = null;
+    let lastPriority = null;
     els.rows.innerHTML = rows.map((row) => {
       const name = row.raw?.productName || row.info || row.productCode;
       const image = state.images[key(row.variantCode)] || state.images[key(row.productCode)];
       const quality = secondQuality(row);
-      const groupStart = lastProduct !== row.productCode || (els.sort.value === "product" && lastQuality !== quality);
+      const priority = priorityRows.has(row);
+      const groupStart = lastProduct !== row.productCode
+        || ((els.sort.value === "product" || priorityFirst) && lastQuality !== quality)
+        || (priorityFirst && lastPriority !== priority);
       lastProduct = row.productCode;
       lastQuality = quality;
+      lastPriority = priority;
       return `<tr class="${groupStart ? "group-start" : ""}">
         <td>${image ? `<img src="${escape(image)}" alt="${escape(name)}" />` : '<span class="no-photo">Bez fotky</span>'}</td>
         <td><span class="product-name">${escape(name)}</span><span class="sku">${escape(row.variantCode)}</span></td>
@@ -186,12 +198,15 @@
     finally { state.busy = false; }
   }
 
-  els.sort.addEventListener("change", async () => {
+  async function rerender() {
+    if (!state.ready) return;
     els.print.disabled = true;
     render();
     await settleImages();
     els.print.disabled = !state.ready;
-  });
+  }
+  els.sort.addEventListener("change", rerender);
+  document.querySelectorAll('input[name="priority"]').forEach((input) => input.addEventListener("change", rerender));
   els.print.addEventListener("click", async () => {
     if (!state.ready) return;
     els.print.disabled = true;

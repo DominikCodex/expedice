@@ -13,6 +13,72 @@ const fixture = () => process.env.WAREHOUSE_PRINT_FIXTURE
       initialQuantity: "3", quantity: "3", remaining: 0, sequence: "1x3, 2x14",
     }));
 
+test("všechny prioritní řádky včetně II. jakosti předcházejí ostatním", async ({ page }) => {
+  const items = [
+    ["B", "B-N", "1x8"],
+    ["A", "A-II-JAKOST-N", "1x6"],
+    ["B", "B-II-JAKOST-P", "1x2"],
+    ["A", "A-N", "1x5"],
+    ["B", "B-P", "1x2, 1x8"],
+    ["A", "A-P", "1x4"],
+    ["A", "A-II-JAKOST-P", "1x4"],
+    ["B", "B-II-JAKOST-N", "1x7"],
+  ];
+  const rows = items.map(([productCode, variantCode, sequence], i) => ({
+    productCode, variantCode, sequence, rowNumber: i + 2,
+    variant: "M/L, červená", info: "Testovací výrobek", initialQuantity: i === 4 ? 2 : 1,
+  }));
+  const cell = (box, code) => [...Array(16).fill(""), box, code];
+  await page.route("**/api/datasets/71", (route) => route.fulfill({ json: {
+    dataset: { datasetKind: "warehouse_print" }, rows,
+    helperSheets: { KOMPLETACE: { cells: [cell("Box", "Kód"), cell("2", "0,8"), cell("4", "0.8"), cell("8", "1")] } },
+  } }));
+  await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
+  await page.goto("/warehouse-print.html?dataset=71");
+  await expect(page.locator("#print")).toBeEnabled();
+  const normal = page.getByRole("radio", { name: "Běžné pořadí", exact: true });
+  const priority = page.getByRole("radio", { name: "Prioritní zásilky první", exact: true });
+  await expect(normal).toBeChecked();
+  const orders = {
+    product: ["A-P", "B-P", "A-II-JAKOST-P", "B-II-JAKOST-P", "A-N", "B-N", "A-II-JAKOST-N", "B-II-JAKOST-N"],
+    excel: ["B-P", "A-P", "B-II-JAKOST-P", "A-II-JAKOST-P", "B-N", "A-N", "A-II-JAKOST-N", "B-II-JAKOST-N"],
+    box: ["B-P", "A-P", "B-II-JAKOST-P", "A-II-JAKOST-P", "A-N", "B-N", "A-II-JAKOST-N", "B-II-JAKOST-N"],
+  };
+  for (const sort of Object.keys(orders)) {
+    await page.locator("#sort").selectOption(sort);
+    const original = await page.locator(".sku").allTextContents();
+    await page.getByText("Prioritní zásilky první", { exact: true }).click();
+    await expect(page.locator(".sku")).toHaveText(orders[sort]);
+    await expect(page.locator("#pieces")).toHaveText("9 ks");
+    await expect(page.locator(".allocation")).toHaveCount(9);
+    await expect(page.locator(".allocation-red")).toHaveCount(4);
+    const mixed = page.locator("#rows tr").filter({ has: page.locator(".sku", { hasText: /^B-P$/ }) });
+    await expect(mixed.locator(".allocation")).toHaveCount(2);
+    await page.getByText("Běžné pořadí", { exact: true }).click();
+    await expect(page.locator(".sku")).toHaveText(original);
+  }
+  await page.getByText("Prioritní zásilky první", { exact: true }).click();
+  for (const orientation of ["Na šířku", "Na výšku"]) {
+    await page.getByText(orientation, { exact: true }).click();
+    for (const density of ["Běžné", "Kompaktní"]) {
+      await page.getByText(density, { exact: true }).click();
+      await expect(page.locator(".sku")).toHaveText(orders.box);
+      for (const width of [1280, 1024]) {
+        await page.setViewportSize({ width, height: 900 });
+        expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
+      }
+    }
+  }
+  await page.locator("#reload").click();
+  await expect(page.locator("#print")).toBeEnabled();
+  await expect(priority).toBeChecked();
+  await expect(page.locator(".sku")).toHaveText(orders.box);
+  await page.screenshot({ path: "test-results/warehouse-priority-preview.png", fullPage: true });
+  await page.emulateMedia({ media: "print" });
+  await expect(page.locator(".toolbar")).toBeHidden();
+  await page.pdf({ path: "test-results/warehouse-priority.pdf", preferCSSPageSize: true, printBackground: true });
+});
+
 test("samostatná sestava tiskne všechny původní kusy na A4 na šířku", async ({ page }) => {
   const rows = fixture();
   await page.route("**/api/datasets/71", (route) => route.fulfill({ json: { dataset: { id: 71, datasetKind: "warehouse_print", datasetDate: "2026-09-18", datasetTime: "08:30", worksheetName: "Vyskladnění" }, rows } }));
