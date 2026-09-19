@@ -3138,7 +3138,18 @@ def parse_product_image_feed(settings):
 
 
 def product_image_cache():
-    settings = normalize_product_feed_settings(read_settings(include_secrets=True).get("productFeed", {}))
+    # Settings can be temporarily unavailable while PostgreSQL starts after an idle period.
+    for attempt in range(4):
+        try:
+            settings = normalize_product_feed_settings(read_settings(include_secrets=True).get("productFeed", {}))
+            break
+        except (psycopg2.OperationalError, psycopg2.InterfaceError) as exc:
+            with PRODUCT_IMAGE_CACHE_LOCK:
+                if PRODUCT_IMAGE_CACHE["images"]:
+                    return {**PRODUCT_IMAGE_CACHE, "configured": True, "stale": True}
+            if attempt == 3:
+                raise ProductFeedError("Nastavení produktových fotografií je dočasně nedostupné.") from exc
+            time.sleep(2 ** attempt)
     if not clean_text(settings.get("url")).strip():
         return {
             "configured": False,
@@ -4529,7 +4540,15 @@ def render_warehouse_print():
             warning = "Produktové fotografie nejsou nastavené. "
     except Exception:
         app.logger.warning("Warehouse print image lookup failed", exc_info=True)
-        warning = "Produktové fotografie se nepodařilo načíst. "
+        # A standalone HTML cannot recover an empty embedded image map by reloading.
+        response = Response(
+            "Produktové fotografie se nepodařilo načíst. Sestava nebyla vytvořena, "
+            "aby nechyběly fotografie. Zkuste za chvíli znovu spustit tisk vyskladnění z Excelu.",
+            status=503, mimetype="text/plain",
+        )
+        response.headers["Retry-After"] = "5"
+        response.headers["Cache-Control"] = "no-store"
+        return response
 
     document = {
         "dataset": {"datasetKind": "warehouse_print", **{

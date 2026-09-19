@@ -176,13 +176,15 @@ def test_anonymous_render_accepts_payload_through_ten_mb(monkeypatch, size):
     assert rendered_data(response)["rows"][0]["variantCode"] == "SKU-ČERNÁ"
 
 
-def test_anonymous_render_survives_image_service_failure(monkeypatch):
+def test_anonymous_render_does_not_create_incomplete_document_on_image_service_failure(monkeypatch):
     monkeypatch.setattr(app, "product_image_cache", MagicMock(side_effect=RuntimeError("private-details")))
     response = app.app.test_client().post("/api/warehouse/render-print", json={"rows": [print_row()]})
-    assert response.status_code == 200
-    data = rendered_data(response)
-    assert data["images"] == {}
-    assert data["imageWarning"]
+    assert response.status_code == 503
+    assert response.mimetype == "text/plain"
+    assert response.headers["Retry-After"] == "5"
+    assert response.headers["Cache-Control"] == "no-store"
+    assert "Sestava nebyla vytvořena" in response.text
+    assert "warehouse-print-data" not in response.text
     assert "private-details" not in response.text
 
 
