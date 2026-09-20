@@ -24,6 +24,11 @@ Public testPayload As String
 Public testHttpStatus As Long
 Public testConfirm As Boolean
 Public testMessageText As String
+Public testMessageCount As Long
+Public testMissingImages As Long
+Public Sub TestMissingPhotos(ByVal count As Long)
+    testMissingImages = count
+End Sub
 Public testMissingAdobe As Boolean
 Public testInvalidPdf As Boolean
 Public testSelectedPdf As String
@@ -54,6 +59,7 @@ Public Function TestLaunch(ByVal exe As String, ByVal args As String) As Long
 End Function
 Public Function TestMessage(ByVal prompt As String, Optional ByVal buttons As Long = 0, Optional ByVal title As String = "") As Long
     testMessageText = prompt
+    testMessageCount = testMessageCount + 1
     TestMessage = vbNo
     If testConfirm Then TestMessage = vbYes
 End Function
@@ -64,12 +70,15 @@ Public Sub TestConfigure(ByVal confirm As Boolean, ByVal status As Long, Optiona
     testInvalidPdf = invalidPdf
     testFailedMode = ""
     testWrongMode = False
+    testMessageCount = 0
+    testMessageText = ""
+    testMissingImages = 0
 End Sub
 Public Function TestAdobeForPrint() As String
     If Not testMissingAdobe Then TestAdobeForPrint = WhPrintAdobePath()
 End Function
 Public Function TestState() As Variant
-    TestState = Array(testLaunchCount, testLastExe, testLastArguments, testRequests, testSelectedPdf, testMessageText, testUrl, testPayload, testUrls)
+    TestState = Array(testLaunchCount, testLastExe, testLastArguments, testRequests, testSelectedPdf, testMessageText, testUrl, testPayload, testUrls, testMessageCount)
 End Function
 Public Function TestAdobePath() As String
     TestAdobePath = WhPrintAdobePath()
@@ -131,6 +140,8 @@ Public Function getResponseHeader(ByVal header As String) As String
         If InStr(endpoint, "render-pdf") > 0 Then getResponseHeader = "application/pdf"
     ElseIf header = "X-Warehouse-Priority" Then
         If Not TestModule.testWrongMode Then getResponseHeader = Mid$(endpoint, InStr(endpoint, "priority=") + 9)
+    ElseIf header = "X-Warehouse-Missing-Images" Then
+        getResponseHeader = CStr(TestModule.testMissingImages)
     Else
         getResponseHeader = "0"
     End If
@@ -179,6 +190,7 @@ try {
     $excel.Run($prefix + 'VyskladneniPdfVygenerovat')
     $state = $excel.Run($prefix + 'TestState')
     if ($state[0] -ne 0 -or $state[3] -ne 3 -or -not $state[6].EndsWith('/render-pdf?priority=split')) { throw ('Generation failed: ' + $state[5]) }
+    if ($state[9] -ne 0) { throw 'Successful generation showed a message box.' }
     $pdfRoot = Join-Path $folder 'VyskladneniPDF'
     $pdfs = @(Get-ChildItem -LiteralPath $pdfRoot -Recurse -Filter '*.pdf')
     if ($pdfs.Count -ne 3) { throw 'Expected three saved PDFs.' }
@@ -204,16 +216,15 @@ try {
         $state = $excel.Run($prefix + 'TestState')
         $expected = '/t "' + $savedPdf + '" "Test Printer" "Test Driver" "WSD-TEST"'
         if ($state[0] -ne ($i + 1) -or $state[3] -ne 3 -or $state[1] -ne $adobe -or $state[2] -cne $expected) { throw 'Variant macro printed wrong PDF, opened browser or uploaded again.' }
+        if ($state[9] -ne 0) { throw 'Successful direct print showed a message box.' }
     }
     $sent = $state[7] | ConvertFrom-Json
     if ($sent.rows[0].variant -cne "L/XL, $([char]0x10d)ern$([char]0xe1)") { throw 'Czech text corrupted.' }
     $excel.Run($prefix + 'VyskladneniPdfVytisknoutAdobe')
     $state = $excel.Run($prefix + 'TestState')
     if ($state[0] -ne 3) { throw 'Cancelled file picker launched application.' }
+    if ($state[9] -ne 0) { throw 'Cancelled file picker showed a message box.' }
     $excel.Run($prefix + 'TestSelectPdf', $pdf)
-    $excel.Run($prefix + 'VyskladneniPdfVytisknoutAdobe')
-    $state = $excel.Run($prefix + 'TestState')
-    if ($state[0] -ne 3) { throw 'Cancelled print launched application.' }
     $excel.Run($prefix + 'TestConfigure', $true, 200, $true)
     $excel.Run($prefix + 'VyskladneniPdfVytisknoutAdobe')
     $state = $excel.Run($prefix + 'TestState')
@@ -223,6 +234,7 @@ try {
     $state = $excel.Run($prefix + 'TestState')
     $expected = '/t "' + $pdf + '" "Test Printer" "Test Driver" "WSD-TEST"'
     if ($state[0] -ne 4 -or $state[1] -ne $adobe -or $state[2] -cne $expected -or $state[3] -ne 3) { throw 'Adobe print did not use selected PDF and explicit printer tuple.' }
+    if ($state[9] -ne 0) { throw 'Successful selected-file print showed a message box.' }
     Write-Output 'PASS: generation saves all three without preview; three direct macros print their own saved PDF without upload or picker.'
     foreach ($bad in @('', 'bad"quote', "bad`nline")) {
         if ($excel.Run($prefix + 'TestArgumentFailure', $bad) -ne 821) { throw 'Invalid command argument accepted.' }
@@ -238,11 +250,13 @@ try {
     $excel.Run($prefix + 'VyskladneniPdfATisk')
     $state = $excel.Run($prefix + 'TestState')
     if ($state[0] -ne 4) { throw 'Legacy alias prints or opens a browser.' }
+    if ($state[9] -ne 0) { throw 'Successful legacy generation showed a message box.' }
     if (@(Get-ChildItem -LiteralPath $pdfRoot -Recurse -Filter '*.pdf').Count -ne 6) { throw 'Regeneration overwrote previous PDFs.' }
     $excel.Run($prefix + 'TestConfigure', $false, 503)
     $excel.Run($prefix + 'VyskladneniPdfVygenerovat')
     $state = $excel.Run($prefix + 'TestState')
     if ($state[0] -ne 4 -or $state[5] -notmatch 'Ulozeno 0/3') { throw 'Failed generation launched an app or claimed success.' }
+    if ($state[9] -ne 1) { throw 'Failed generation must show one consolidated error.' }
     foreach ($macro in $printMacros) { $excel.Run($prefix + $macro) }
     $state = $excel.Run($prefix + 'TestState')
     if ($state[0] -ne 4 -or $state[5] -notmatch 'neni k dispozici') { throw 'Failed generation reused previous batch for printing.' }
@@ -281,6 +295,13 @@ try {
     $excel.Run($prefix + 'VyskladneniNahratATisk')
     $state = $excel.Run($prefix + 'TestState')
     if (-not $state[6].EndsWith('/render-print') -or $state[0] -ne 6) { throw 'Original manual HTML workflow changed.' }
+    if ($state[9] -ne 0) { throw 'Successful HTML generation showed a message box.' }
+    $excel.Run($prefix + 'TestConfigure', $false, 200)
+    $excel.Run($prefix + 'TestMissingPhotos', 2)
+    $excel.Run($prefix + 'VyskladneniPdfVygenerovat')
+    $state = $excel.Run($prefix + 'TestState')
+    if ($state[9] -ne 1 -or $state[5] -notmatch 'Bez fotografie: 2' -or $state[5] -notmatch 'Ulozeno 3/3') { throw 'Missing photos were not reported in one warning.' }
+    Write-Output 'PASS: successful generation and printing are silent; errors and incomplete photos remain visible.'
     foreach ($worksheet in $book.Worksheets) {
         if ($worksheet.Shapes.Count -ne 0) { throw 'A macro created a button or shape.' }
     }

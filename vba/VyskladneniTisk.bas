@@ -87,17 +87,17 @@ Private Sub WhPrintRun(ByVal generatePdf As Boolean)
     Set files = CreateObject("Scripting.FileSystemObject")
     If generatePdf Then
         If Not files.FolderExists(pdfFolder) Then files.CreateFolder pdfFolder
-        Dim modes As Variant, folders As Variant, saved As Long, notice As String, batchFile As String
+        Dim modes As Variant, folders As Variant, saved As Long, notice As String, batchFile As String, variantNotice As String
         modes = Array("normal", "first", "split")
         folders = Array("Bezne-poradi", "Prioritni-zasilky-prvni", "Prioritni-kusy-zvlast")
         batchFile = "Vyskladneni-" & Format$(Now, "yyyymmdd-hhnnss") & "-" & files.GetBaseName(files.GetTempName)
         For index = 0 To 2
             Application.StatusBar = "Vytvarim PDF " & (index + 1) & "/3: " & folders(index)
-            notice = notice & vbCrLf & WhPrintPdfVariant(payload, pdfFolder, CStr(folders(index)), CStr(modes(index)), _
+            variantNotice = WhPrintPdfVariant(payload, pdfFolder, CStr(folders(index)), CStr(modes(index)), _
                 batchFile & "-" & CStr(folders(index)) & ".pdf", saved, whPrintPdfPaths(index))
+            If Len(variantNotice) > 0 Then notice = notice & vbCrLf & variantNotice
         Next index
-        MsgBox "Ulozeno " & saved & "/3 PDF. Tisk nebyl spusten." & vbCrLf & notice & vbCrLf & _
-            "Pro tisk spust makro pozadovane varianty sestavy.", IIf(saved = 3, vbInformation, vbExclamation)
+        If Len(notice) > 0 Then MsgBox "Ulozeno " & saved & "/3 PDF. Pri generovani nastaly problemy:" & vbCrLf & notice, vbExclamation
     Else
         Application.StatusBar = "Nahravam vyskladneni k tisku..."
         printPath = WhPrintDownload(payload, files.BuildPath(files.GetSpecialFolder(2), "ExpediceVyskladneni"), _
@@ -116,13 +116,11 @@ End Sub
 Private Function WhPrintPdfVariant(ByVal payload As String, ByVal root As String, ByVal folder As String, _
     ByVal mode As String, ByVal filename As String, ByRef saved As Long, ByRef generatedPath As String) As String
     On Error GoTo Failed
-    Dim path As String, missing As Long, note As String
+    Dim path As String, missing As Long
     path = WhPrintDownload(payload, CreateObject("Scripting.FileSystemObject").BuildPath(root, folder), filename, mode, missing)
     generatedPath = path
     saved = saved + 1
-    note = folder & ": " & path
-    If missing > 0 Then note = note & vbCrLf & "Bez fotografie: " & missing & " radku."
-    WhPrintPdfVariant = note
+    If missing > 0 Then WhPrintPdfVariant = folder & ": Bez fotografie: " & missing & " radku." & vbCrLf & path
     Exit Function
 Failed:
     WhPrintPdfVariant = folder & ": NEPODARILO SE - " & Err.Description
@@ -143,8 +141,6 @@ Private Sub WhPrintSavedPdf(ByVal variantIndex As Long)
     printer = WhPrintDefaultPrinter()
     arguments = WhPrintAdobeArguments(pdfPath, CStr(printer(0)), CStr(printer(1)), CStr(printer(2)))
     WhPrintLaunchApplication adobe, arguments
-    MsgBox "Pozadavek byl predan Adobe na tiskarnu " & CStr(printer(0)) & "." & vbCrLf & _
-        "PDF: " & pdfPath & vbCrLf & "Pred opakovanim zkontroluj tiskovou frontu. Predani nepotvrzuje fyzicke vytisteni.", vbInformation
     running = False
     Exit Sub
 Failed:
@@ -205,12 +201,7 @@ Public Sub VyskladneniPdfVytisknoutAdobe()
     If Len(adobe) = 0 Then Err.Raise vbObjectError + 818, , "Adobe Acrobat nebo Reader nebyl nalezen. PDF zustava ulozene; muzes je vytisknout rucne z nahledu."
     printer = WhPrintDefaultPrinter()
     arguments = WhPrintAdobeArguments(pdfPath, CStr(printer(0)), CStr(printer(1)), CStr(printer(2)))
-    If MsgBox("Odeslat PDF k tisku pres Adobe?" & vbCrLf & vbCrLf & pdfPath & vbCrLf & vbCrLf & _
-        "Vychozi tiskarna: " & CStr(printer(0)) & vbCrLf & "Pred opakovanym tiskem zkontroluj tiskovou frontu.", _
-        vbQuestion + vbYesNo + vbDefaultButton2, "Tisk vyskladneni") <> vbYes Then GoTo Finished
     WhPrintLaunchApplication adobe, arguments
-    MsgBox "Pozadavek byl predan Adobe. To nepotvrzuje fyzicke vytisteni; zkontroluj tiskovou frontu." & vbCrLf & _
-        "PDF zustava ulozene: " & pdfPath, vbInformation
 Finished:
     running = False
     Exit Sub

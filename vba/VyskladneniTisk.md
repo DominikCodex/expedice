@@ -24,9 +24,11 @@ Původní `VyskladneniNahratATisk` zůstává pro ruční HTML náhled a tisk z 
 - `VyskladneniTiskBeznePoradi`: vytiskne již stažené PDF běžného pořadí z posledního generování.
 - `VyskladneniTiskPrioritniZasilky`: vytiskne již stažené PDF s prioritními zásilkami prvními.
 - `VyskladneniTiskPrioritniKusy`: vytiskne již stažené PDF s prioritními kusy zvlášť.
-- `VyskladneniPdfVytisknoutAdobe`: vždy nabídne výběr konkrétního PDF, počínaje složkou `VyskladneniPDF` vedle sešitu. Nevybírá automaticky poslední variantu ani nejnovější soubor ve společné složce. Před předáním Adobe vyžádá potvrzení vybraného souboru a výchozí tiskárny Windows.
+- `VyskladneniPdfVytisknoutAdobe`: vždy nabídne výběr konkrétního PDF, počínaje složkou `VyskladneniPDF` vedle sešitu. Nevybírá automaticky poslední variantu ani nejnovější soubor ve společné složce. Potvrzením výběru souboru jej rovnou předá Adobe k tisku na výchozí tiskárnu Windows, bez dalšího potvrzovacího MsgBoxu. Zrušení výběru nic nevytiskne.
 
 Tři přímá tisková makra neuploadují data, negenerují nové PDF, neotevírají prohlížeč a nevyžadují výběr souboru ani potvrzení před tiskem. Předají právě danou variantu Adobe na aktuální výchozí tiskárnu Windows. Spustit je lze například `Call VyskladneniTiskBeznePoradi`. Opakované zavolání znamená další tiskový požadavek.
+
+Úspěšné stažení ani předání PDF k tisku nezobrazuje MsgBox. Dialog se zobrazí pouze při chybě nebo neúplné sestavě (například chybějící fotografie). Průběh stahování zůstává ve stavovém řádku Excelu; názvy maker ani umístění souborů se nemění.
 
 Zapamatované soubory patří jen poslednímu generování v tomto sešitu během aktuální relace Excelu. Každé nové generování nejprve zruší všechny předchozí odkazy. Pokud některá varianta selže nebo její soubor chybí, její tiskové makro skončí s upozorněním a nikdy nevybere starší várku ze složky. Po zavření sešitu nebo resetu VBA znovu vygeneruj všechny tři PDF, případně starší soubor vytiskni přes výběrové `VyskladneniPdfVytisknoutAdobe`.
 
@@ -39,7 +41,7 @@ VyskladneniPDF/
   Prioritni-kusy-zvlast/
 ```
 
-Tři soubory z jednoho spuštění mají v názvu společný čas a jedinečné označení várky, za nimi typ sestavy: `-Bezne-poradi.pdf`, `-Prioritni-zasilky-prvni.pdf` nebo `-Prioritni-kusy-zvlast.pdf`. Každý zůstává ve své složce. Například `Vyskladneni-20260919-170223-rad7F065-Prioritni-kusy-zvlast.pdf`. Opakované generování předchozí PDF nepřepisuje. Data se odešlou třikrát postupně, vždy se stejným obsahem listů; server neběží na třech PDF současně. Stavový řádek Excelu ukazuje právě vytvářenou variantu `1/3` až `3/3`. Na konci se zobrazí počet uložených souborů a případné chyby nebo chybějící fotografie zvlášť pro každou variantu. Chyba jedné varianty nezastaví pokus o zbývající varianty.
+Tři soubory z jednoho spuštění mají v názvu společný čas a jedinečné označení várky, za nimi typ sestavy: `-Bezne-poradi.pdf`, `-Prioritni-zasilky-prvni.pdf` nebo `-Prioritni-kusy-zvlast.pdf`. Každý zůstává ve své složce. Například `Vyskladneni-20260919-170223-rad7F065-Prioritni-kusy-zvlast.pdf`. Opakované generování předchozí PDF nepřepisuje. Data se odešlou třikrát postupně, vždy se stejným obsahem listů; server neběží na třech PDF současně. Stavový řádek Excelu ukazuje právě vytvářenou variantu `1/3` až `3/3`. Pokud nastane chyba nebo chybí fotografie, na konci se zobrazí jedno společné upozornění s počtem uložených PDF a problémy jednotlivých variant. Úplný úspěch je bez dialogu. Chyba jedné varianty nezastaví pokus o zbývající varianty.
 
 Nejdřív musí být nasazená serverová podpora parametru `priority` a hlavičky `X-Warehouse-Priority`. Makro kontroluje potvrzený režim v odpovědi, aby starší server nevytvořil tři stejné výchozí sestavy pod různými složkami.
 
@@ -49,7 +51,7 @@ Nejdřív musí být nasazená serverová podpora parametru `priority` a hlavič
 
 Cesty nejsou vázané na konkrétního uživatele: PDF se ukládá do `VyskladneniPDF` vedle sešitu, včetně síťové složky. Sešit musí být uložený v místní nebo sdílené složce s právem zápisu, nikoli otevřený pouze přes webovou URL. Adobe se hledá podle registrace Acrobat/Reader a instalačních složek daného počítače. Výchozí tiskárna, ovladač a port se načtou z Windows až při požadavku na tisk. Nastavení tiskárny se nemění.
 
-Adobe používáme příkazem `/t` s cestou PDF, názvem tiskárny, ovladačem a portem. Adobe jej popisuje, ale oficiálně negarantuje jeho podporu ve všech verzích: [Adobe SDK FAQ](https://opensource.adobe.com/dc-acrobat-sdk-docs/library/overview/apxDevFAQ.html#how-do-i-use-the-windows-command-line). Makro proto potvrzuje jen předání požadavku aplikaci, nikoli dokončený tisk. Adobe automaticky neukončujeme, nevypínáme jeho ochrany a nepřepínáme na jiný tiskový nástroj při chybě. Před opakováním zkontroluj frontu, aby nevznikly duplicitní kopie. Menší tisková úloha je možnost k ověření, nikoli záruka.
+Adobe používáme příkazem `/t` s cestou PDF, názvem tiskárny, ovladačem a portem. Adobe jej popisuje, ale oficiálně negarantuje jeho podporu ve všech verzích: [Adobe SDK FAQ](https://opensource.adobe.com/dc-acrobat-sdk-docs/library/overview/apxDevFAQ.html#how-do-i-use-the-windows-command-line). Úspěšný návrat makra znamená jen předání požadavku aplikaci, nikoli dokončený tisk. Adobe automaticky neukončujeme, nevypínáme jeho ochrany a nepřepínáme na jiný tiskový nástroj při chybě. Před opakováním zkontroluj frontu, aby nevznikly duplicitní kopie. Menší tisková úloha je možnost k ověření, nikoli záruka.
 
 PDF zůstává uložené i po chybě tisku. Makro kontroluje typ a signaturu staženého souboru a před tiskem také existenci, příponu a velikost PDF (nejvýše 32 MB). Po neúspěšném generování se žádné starší PDF automaticky nenabízí k tisku. Nedostupné fotografie neblokují vytvoření PDF; jejich počet se ukáže v závěrečném souhrnu stahování. Fotografie se pro PDF zmenšují na nejvýše 400 pixelů na delší straně. Pro ruční opakování načtení fotek použij původní HTML náhled.
 
