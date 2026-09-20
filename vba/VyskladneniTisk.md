@@ -32,6 +32,8 @@ Tři přímá tisková makra neuploadují data, negenerují nové PDF, neotevír
 
 Zapamatované soubory patří jen poslednímu generování v tomto sešitu během aktuální relace Excelu. Každé nové generování nejprve zruší všechny předchozí odkazy. Pokud některá varianta selže nebo její soubor chybí, její tiskové makro skončí s upozorněním a nikdy nevybere starší várku ze složky. Po zavření sešitu nebo resetu VBA znovu vygeneruj všechny tři PDF, případně starší soubor vytiskni přes výběrové `VyskladneniPdfVytisknoutAdobe`.
 
+Hlavička PDF i ručního náhledu uvádí název složky **zdrojového Excelu** a text `Skladovky k vyskladnění` místo data, času a technického názvu listu. Například `Neděle 20. 9. 2026 · Skladovky k vyskladnění`. Makro posílá pole `workbookFolderName` obsahující jen poslední část cesty, nikoli celou lokální nebo síťovou cestu. Pro tuto funkci aktualizuj modul a sestavy znovu vygeneruj. U staršího makra, neuloženého sešitu nebo webové cesty se bez názvu složky zobrazí pouze `Skladovky k vyskladnění`; název se neodhaduje z data ani výstupní podsložky.
+
 Soubory se ukládají vedle sešitu do tří podsložek:
 
 ```text

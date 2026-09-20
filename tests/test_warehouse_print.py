@@ -151,6 +151,7 @@ def test_anonymous_render_is_self_contained_and_does_not_access_datasets(monkeyp
     row["info"] = '</script><img src=x onerror=alert(1)> České a slovenské: čřž ľô'
     response = app.app.test_client().post("/api/warehouse/render-print", json={
         "rows": [row], "worksheetName": "Vyskladnění", "datasetId": 123,
+        "workbookFolderName": 'Neděle ľô </script><img src=x onerror=alert(1)>',
     })
     assert response.status_code == 200
     assert response.mimetype == "text/html"
@@ -158,6 +159,7 @@ def test_anonymous_render_is_self_contained_and_does_not_access_datasets(monkeyp
     data = rendered_data(response)
     assert data["rows"][0]["info"] == row["info"]
     assert data["dataset"]["worksheetName"] == "Vyskladnění"
+    assert data["dataset"]["workbookFolderName"] == 'Neděle ľô </script><img src=x onerror=alert(1)>'
     assert data["images"] == {"SKU-ČERNÁ": "https://example.invalid/product.jpg"}
     assert '<script defer src=' not in response.text
     assert '<link rel="stylesheet"' not in response.text

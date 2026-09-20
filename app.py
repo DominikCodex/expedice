@@ -4585,7 +4585,7 @@ def render_warehouse_print():
     document = {
         "dataset": {"datasetKind": "warehouse_print", **{
             field: warehouse_cell_text(payload.get(field))[:200]
-            for field in ("datasetDate", "datasetTime", "worksheetName")
+            for field in ("datasetDate", "datasetTime", "worksheetName", "workbookFolderName")
         }},
         "rows": rows,
         "images": images,

@@ -76,6 +76,7 @@ Private Sub WhPrintRun(ByVal generatePdf As Boolean)
     payload = "{""datasetKind"":""warehouse"",""source"":""excel-vba-print""," & _
         """shopCode"":""unknown"",""shopName"":""Sklad""," & _
         """workbookName"":" & WhPrintJson(ws.Parent.Name) & "," & _
+        """workbookFolderName"":" & WhPrintJson(WhPrintWorkbookFolderName(ws.Parent.Path)) & "," & _
         """worksheetName"":" & WhPrintJson(ws.Name) & "," & _
         """datasetDate"":" & WhPrintJson(Format$(Date, "yyyy-mm-dd")) & "," & _
         """datasetTime"":" & WhPrintJson(Format$(Now, "hh:nn:ss")) & "," & _
@@ -298,6 +299,12 @@ Private Function WhPrintIsPdf(ByVal content As Variant) As Boolean
     If size < 5 Or size > 33554432 Then Exit Function
     WhPrintIsPdf = (content(first) = 37 And content(first + 1) = 80 And content(first + 2) = 68 And content(first + 3) = 70 And content(first + 4) = 45)
 Invalid:
+End Function
+
+Private Function WhPrintWorkbookFolderName(ByVal workbookFolder As String) As String
+    ' Send only the folder name, never the full local or network path.
+    If Len(workbookFolder) = 0 Or InStr(1, workbookFolder, "://", vbTextCompare) > 0 Then Exit Function
+    WhPrintWorkbookFolderName = CreateObject("Scripting.FileSystemObject").GetFileName(workbookFolder)
 End Function
 
 Private Function WhPrintPdfFolder(ByVal workbookFolder As String) As String

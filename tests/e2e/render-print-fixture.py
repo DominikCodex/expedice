@@ -34,6 +34,7 @@ with patch.object(app, "product_image_cache", return_value={"configured": True, 
      patch.object(app, "db_conn", side_effect=AssertionError("No database allowed")):
     response = app.app.test_client().post("/api/warehouse/render-print", json={
         "rows": rows, "worksheetName": "Vyskladnění", "datasetDate": "2026-09-18", "datasetTime": "08:30",
+        "workbookFolderName": "Neděle 20. 9. 2026 - ľô",
         "helperSheets": {
             "EXCEL": {"cells": [["Kód varianty", "Produkt"], ["SKU-ČERNÁ", "TEST-POMOCNY-PRODUKT"]]},
             "KOMPLETACE": {"cells": [completion_header, *completion_rows]},

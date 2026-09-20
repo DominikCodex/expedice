@@ -26,13 +26,15 @@ const fixture = () => process.env.WAREHOUSE_PRINT_FIXTURE
 
 test("hlavička uvádí typ sestavy v náhledu i tisku ve všech režimech", async ({ page }, testInfo) => {
   await page.route("**/api/datasets/71", (route) => route.fulfill({ json: {
-    dataset: { datasetKind: "warehouse_print", datasetDate: "2026-09-19" }, rows: fixture().slice(0, 3),
+    dataset: { datasetKind: "warehouse_print", datasetDate: "2026-09-19", datasetTime: "12:31:49", worksheetName: "VYSKLADNI",
+      workbookFolderName: "Neděle 20. 9. 2026 - české a slovenské ľô" }, rows: fixture().slice(0, 3),
   } }));
   await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
   await page.goto("/warehouse-print.html?dataset=71");
   await expect(page.locator("#print")).toBeEnabled();
   const title = page.locator(".sheet-heading #report-type");
   await expect(title).toHaveText("Sestava: Prioritní kusy zvlášť");
+  await expect(page.locator("#batch")).toHaveText("Neděle 20. 9. 2026 - české a slovenské ľô · Skladovky k vyskladnění");
   for (const [mode, label] of [["normal", "Běžné pořadí"], ["first", "Prioritní zásilky první"], ["split", "Prioritní kusy zvlášť"]]) {
     await page.getByText(label, { exact: true }).click();
     await expect(title).toHaveText(`Sestava: ${label}`);
@@ -511,6 +513,7 @@ test("samostatná sestava tiskne všechny původní kusy na A4 na šířku", asy
   await openStandardPrint(page);
   await expect(page.locator("#print")).toBeEnabled();
   await expect(page.locator("#rows .item-row")).toHaveCount(rows.length);
+  await expect(page.locator("#batch")).toHaveText("Skladovky k vyskladnění");
   await expect(page.locator("thead th")).toHaveText(["Produkt / kód varianty", "Foto", "Varianta", "Celkem", "Kolik a kam do boxů"]);
   const firstCells = page.locator("#rows .item-row").first().locator("td");
   await expect(firstCells.nth(0).locator(".sku")).toHaveCount(1);
@@ -774,7 +777,7 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
   const redBoxCount = await page.locator(".allocation-red").count();
   expect(redBoxCount).toBeGreaterThan(0);
   expect(await page.locator(".allocation-red b:last-child").allTextContents()).toEqual(Array(redBoxCount).fill("3"));
-  await expect(page.locator("#batch")).toContainText("Vyskladnění");
+  await expect(page.locator("#batch")).toHaveText("Neděle 20. 9. 2026 - ľô · Skladovky k vyskladnění");
   const expectedTotal = process.env.WAREHOUSE_PRINT_FIXTURE
     ? fixture().reduce((sum, row) => sum + Number(row.quantity), 0) : 135;
   await expect(page.locator("#pieces")).toHaveText(`${expectedTotal} ks`);

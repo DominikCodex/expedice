@@ -41,6 +41,9 @@ End Sub
 Public Function TestSavedPdf(ByVal index As Long) As String
     TestSavedPdf = whPrintPdfPaths(index)
 End Function
+Public Function TestFolderName(ByVal path As String) As String
+    TestFolderName = WhPrintWorkbookFolderName(path)
+End Function
 Public Sub TestForgetPdfs()
     Dim index As Long
     For index = 0 To 2
@@ -219,6 +222,14 @@ try {
         if ($state[9] -ne 0) { throw 'Successful direct print showed a message box.' }
     }
     $sent = $state[7] | ConvertFrom-Json
+    if ($sent.workbookFolderName -cne (Split-Path $folder -Leaf)) { throw 'Workbook folder name missing or full path exposed.' }
+    $czechFolder = 'Ned' + [char]0x11b + 'le - ' + [char]0x10d + 'erven' + [char]0xe1
+    foreach ($base in @('C:\sklad\', '\\server\sdilene\')) {
+        if ($excel.Run($prefix + 'TestFolderName', ($base + $czechFolder)) -cne $czechFolder) { throw 'Unicode/local/UNC folder name changed.' }
+    }
+    foreach ($unsupported in @('', 'https://example.test/secret/path')) {
+        if ([string]$excel.Run($prefix + 'TestFolderName', $unsupported) -ne '') { throw 'Unsupported workbook location exposed.' }
+    }
     if ($sent.rows[0].variant -cne "L/XL, $([char]0x10d)ern$([char]0xe1)") { throw 'Czech text corrupted.' }
     $excel.Run($prefix + 'VyskladneniPdfVytisknoutAdobe')
     $state = $excel.Run($prefix + 'TestState')

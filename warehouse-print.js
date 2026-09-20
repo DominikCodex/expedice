@@ -279,7 +279,7 @@
         if (images.ok === false || images.configured === false) imageWarning = "Produktové fotografie nejsou dostupné. ";
       } catch (_) { imageWarning = "Produktové fotografie se nepodařilo načíst. "; }
       const dataset = data.dataset;
-      els.batch.textContent = [dataset.batchName || dataset.datasetDate, dataset.datasetTime, dataset.worksheetName].filter(Boolean).join(" · ");
+      els.batch.textContent = [String(dataset.workbookFolderName || "").trim(), "Skladovky k vyskladnění"].filter(Boolean).join(" · ");
       els.pieces.textContent = `${state.rows.reduce((sum, row) => sum + quantity(row), 0)} ks`;
       document.title = `Vyskladnění ${dataset.datasetDate || ""}`;
       render();
