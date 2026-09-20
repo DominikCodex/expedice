@@ -81,6 +81,18 @@ vba/ExpediceUploadJedenSkript.bas
 
 Obsahuje upload roztřídění i kompletace v jednom paste-in skriptu.
 
+Aktuální společný modul (v Excelu může být pojmenovaný `UPLOADRAILWAY`):
+
+- `UploadRoztrideniAktualniTabulky` nahrává list `EXCEL`.
+- `UploadKompletaceAktualniTabulky` nahrává list `KOMPLETACE`.
+- Obě makra lze spustit z libovolného listu. Chybějící zdrojový list je chyba, nenahrazuje se aktivním listem.
+- Úspěch je bez MsgBoxu; průběh je pouze ve stavovém řádku Excelu. Okno se zobrazí jen při chybě.
+- Před uploadem se ověří `/api/health`: nejvýše 5 pokusů při dočasných chybách, s prodlevami 5, 10, 15 a 20 sekund. Čekání na odpověď při probouzení je 60 sekund, při uploadu 180 sekund (navíc jsou samostatné síťové limity připojení a odesílání).
+- POST s daty se automaticky neopakuje: po ztracené odpovědi už může být dávka uložená. Chyba upozorní, že je před ručním opakováním potřeba zkontrolovat dávku na serveru.
+- Pro tento společný modul se token nastavuje v `EXPEDICE_UPLOAD_TOKEN`. Při aktualizaci zachovej vlastní token. Nahraď obsah stávajícího modulu, nevkládej druhou kopii stejných veřejných maker.
+
+Izolovaný test v Excelu: `powershell -NoProfile -ExecutionPolicy Bypass -File tests/vba/upload-railway.ps1`. Test nahrazuje síť i dialogy; neodesílá data na server.
+
 V horní části modulu můžeš nastavit:
 
 - `UPLOAD_TOKEN`, pokud bude Railway proměnná `UPLOAD_TOKEN` aktivní

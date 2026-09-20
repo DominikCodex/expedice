@@ -1,5 +1,8 @@
 Private Const EXPEDICE_UPLOAD_URL As String = "https://expedice-production.up.railway.app/api/datasets/upload"
 Private Const EXPEDICE_UPLOAD_TOKEN As String = ""
+Private Const EXPEDICE_WAKE_ATTEMPTS As Long = 5
+Private Const EXPEDICE_WAKE_TIMEOUT_MS As Long = 60000
+Private Const EXPEDICE_UPLOAD_TIMEOUT_MS As Long = 180000
 
 Public Sub UploadRoztrideniAktualniTabulky()
     ExpediceUploadSheet "sorting", "EXCEL"
@@ -10,6 +13,11 @@ Public Sub UploadKompletaceAktualniTabulky()
 End Sub
 
 Private Sub ExpediceUploadSheet(ByVal datasetKind As String, ByVal sheetName As String)
+    Static running As Boolean
+    If running Then Exit Sub
+    Dim previousStatus As Variant
+    previousStatus = Application.StatusBar
+    running = True
     On Error GoTo ErrHandler
 
     Dim ws As Worksheet
@@ -18,8 +26,7 @@ Private Sub ExpediceUploadSheet(ByVal datasetKind As String, ByVal sheetName As 
     Dim lastRow As Long
     lastRow = ExpediceLastDataRow(ws, datasetKind)
     If lastRow < 2 Then
-        MsgBox "Na listu " & ws.Name & " nejsou zadne radky k uploadu.", vbExclamation
-        Exit Sub
+        Err.Raise vbObjectError + 304, , "Na listu " & ws.Name & " nejsou zadne radky k uploadu."
     End If
 
     Dim lastCol As Long
@@ -33,11 +40,14 @@ Private Sub ExpediceUploadSheet(ByVal datasetKind As String, ByVal sheetName As 
     Dim responseText As String
     responseText = ExpedicePostJson(EXPEDICE_UPLOAD_URL, EXPEDICE_UPLOAD_TOKEN, payload)
 
-    MsgBox "Upload hotovy: " & sheetName & vbCrLf & ExpediceUploadSummary(responseText), vbInformation
+Done:
+    Application.StatusBar = previousStatus
+    running = False
     Exit Sub
 
 ErrHandler:
     MsgBox "Upload se nepodaril: " & sheetName & vbCrLf & Err.Description, vbCritical
+    Resume Done
 End Sub
 
 Private Function ExpediceResolveSheet(ByVal sheetName As String) As Worksheet
@@ -46,7 +56,7 @@ Private Function ExpediceResolveSheet(ByVal sheetName As String) As Worksheet
     On Error GoTo 0
 
     If ExpediceResolveSheet Is Nothing Then
-        Set ExpediceResolveSheet = ActiveSheet
+        Err.Raise vbObjectError + 305, , "V sesitu chybi list " & sheetName & ". Data nebyla odeslana."
     End If
 End Function
 
@@ -131,20 +141,6 @@ Private Function ExpediceDatasetKindLabel(ByVal datasetKind As String) As String
     Else
         ExpediceDatasetKindLabel = "Roztřídění"
     End If
-End Function
-
-Private Function ExpediceUploadSummary(ByVal responseText As String) As String
-    Dim message As String
-
-    If InStr(1, responseText, """replacedDatasets"":[]", vbTextCompare) > 0 Then
-        message = "Vznikla nova aktivni davka."
-    ElseIf InStr(1, responseText, """replacedDatasets"":", vbTextCompare) > 0 Then
-        message = "Predchozi aktivni davka pro stejny den byla oznacena jako nahrazena."
-    Else
-        message = "Server upload prijal."
-    End If
-
-    ExpediceUploadSummary = message & vbCrLf & responseText
 End Function
 
 Private Function ExpediceShouldUploadRow(ByVal ws As Worksheet, ByVal datasetKind As String, ByVal r As Long) As Boolean
@@ -256,21 +252,87 @@ Private Function ExpediceBuildCellArray(ByVal ws As Worksheet, ByVal r As Long, 
 End Function
 
 Private Function ExpedicePostJson(ByVal url As String, ByVal token As String, ByVal payload As String) As String
+    ExpediceWakeServer url
+    Application.StatusBar = "Expedice: odesilam data, cekam na potvrzeni serveru..."
     Dim http As Object
     Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
 
+    http.setTimeouts 15000, 30000, 60000, EXPEDICE_UPLOAD_TIMEOUT_MS
     http.Open "POST", url, False
-    http.setTimeouts 10000, 10000, 30000, 30000
     http.setRequestHeader "Content-Type", "application/json; charset=utf-8"
     If Len(token) > 0 Then http.setRequestHeader "X-Upload-Token", token
+    ' A lost POST response does not mean the transaction failed. Never resend blindly.
+    On Error GoTo Unconfirmed
     http.send ExpediceUtf8Bytes(payload)
 
     If http.Status < 200 Or http.Status >= 300 Then
-        Err.Raise vbObjectError + 303, , "Server vratil HTTP " & http.Status & ": " & http.responseText
+        Err.Raise vbObjectError + 303, , "Server vratil HTTP " & http.Status & ": " & Left$(http.responseText, 600)
     End If
 
+    If Not ExpediceResponseOk(http) Then Err.Raise vbObjectError + 306, , "Server nevratil platne potvrzeni uploadu."
     ExpedicePostJson = http.responseText
+    Exit Function
+Unconfirmed:
+    Dim detail As String
+    detail = Err.Description
+    Err.Raise vbObjectError + 307, , detail & vbCrLf & _
+        "Upload nebyl automaticky opakovan. Pred dalsim spustenim overte davku na serveru; data uz mohou byt ulozena."
 End Function
+
+Private Sub ExpediceWakeServer(ByVal uploadUrl As String)
+    Dim healthUrl As String, attempt As Long, status As Long, detail As String
+    Dim retryable As Boolean
+    healthUrl = Left$(uploadUrl, InStr(9, uploadUrl, "/") - 1) & "/api/health"
+    For attempt = 1 To EXPEDICE_WAKE_ATTEMPTS
+        Application.StatusBar = "Expedice: probouzim server (" & attempt & "/" & EXPEDICE_WAKE_ATTEMPTS & ")..."
+        If ExpediceProbeServer(healthUrl, status, detail, retryable) Then Exit Sub
+        If Not retryable Or attempt = EXPEDICE_WAKE_ATTEMPTS Then Exit For
+        ExpediceRetryPause attempt * 5
+    Next attempt
+    Err.Raise vbObjectError + 308, , "Server neni pripraven po " & attempt & " pokusech. " & detail & vbCrLf & _
+        "Data nebyla odeslana. Zkuste upload pozdeji."
+End Sub
+
+Private Function ExpediceProbeServer(ByVal url As String, ByRef status As Long, ByRef detail As String, ByRef retryable As Boolean) As Boolean
+    On Error GoTo NetworkError
+    Dim http As Object
+    status = 0
+    retryable = False
+    Set http = CreateObject("MSXML2.ServerXMLHTTP.6.0")
+    http.setTimeouts 15000, 15000, 15000, EXPEDICE_WAKE_TIMEOUT_MS
+    http.Open "GET", url, False
+    http.setRequestHeader "Cache-Control", "no-cache"
+    http.send
+    status = http.Status
+    If status = 200 And ExpediceResponseOk(http) Then
+        ExpediceProbeServer = True
+        Exit Function
+    End If
+    detail = "Kontrola dostupnosti: HTTP " & status & ". " & Left$(http.responseText, 300)
+    Select Case status
+        Case 408, 429, 500, 502, 503, 504
+            retryable = True
+    End Select
+    Exit Function
+NetworkError:
+    detail = "Sitova chyba " & Err.Number & ": " & Err.Description
+    Select Case (Err.Number And &HFFFF&)
+        Case 12002, 12007, 12029, 12030, 12031
+            retryable = True
+    End Select
+End Function
+
+Private Function ExpediceResponseOk(ByVal http As Object) As Boolean
+    If InStr(1, http.getResponseHeader("Content-Type"), "application/json", vbTextCompare) = 0 Then Exit Function
+    Dim pattern As Object
+    Set pattern = CreateObject("VBScript.RegExp")
+    pattern.Pattern = """ok""\s*:\s*true\s*[,}]"
+    ExpediceResponseOk = pattern.Test(http.responseText)
+End Function
+
+Private Sub ExpediceRetryPause(ByVal seconds As Long)
+    Application.Wait DateAdd("s", seconds, Now)
+End Sub
 
 Private Function ExpediceUtf8Bytes(ByVal text As String) As Variant
     Dim stream As Object
