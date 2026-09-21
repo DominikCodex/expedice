@@ -1,6 +1,9 @@
 Private Const WHPRINT_BASE_URL As String = "https://expedice-production.up.railway.app"
 Private Const WHPRINT_MAX_PAYLOAD_BYTES As Long = 10485760
 Private whPrintPdfPaths(0 To 2) As String
+Private whPrintPdfRoot As String
+Private whPrintPdfSelectionKnown As Boolean
+Private Const WHPRINT_PDF_INDEX As String = "posledni-sestava.xml"
 
 #If VBA7 Then
 Private Declare PtrSafe Function WhPrintShellExecute Lib "shell32.dll" Alias "ShellExecuteW" ( _
@@ -49,6 +52,8 @@ Private Sub WhPrintRun(ByVal generatePdf As Boolean, Optional ByVal destination 
     Dim pdfFolder As String, index As Long, outputRoot As String
     If generatePdf Then
         ' Never reuse a previous batch after a failed or partial generation.
+        whPrintPdfSelectionKnown = True
+        whPrintPdfRoot = ""
         For index = 0 To 2
             whPrintPdfPaths(index) = ""
         Next index
@@ -60,6 +65,12 @@ Private Sub WhPrintRun(ByVal generatePdf As Boolean, Optional ByVal destination 
                 Err.Raise vbObjectError + 824, , "Cilova slozka expedicniho dne neexistuje. Nejprve uloz kopii sesitu."
         End If
         pdfFolder = WhPrintPdfFolder(outputRoot)
+        Dim indexFiles As Object
+        Set indexFiles = CreateObject("Scripting.FileSystemObject")
+        If Not indexFiles.FolderExists(pdfFolder) Then indexFiles.CreateFolder pdfFolder
+        ' Invalidate old entries before uploading, including across Excel sessions.
+        WhPrintWritePdfIndex pdfFolder
+        whPrintPdfRoot = pdfFolder
     End If
     If expeditionDay = 0 Then expeditionDay = WhPrintExpeditionDay(ThisWorkbook.Path)
     If Year(expeditionDay) < 1900 Or Year(expeditionDay) > 9999 Then _
@@ -112,6 +123,7 @@ Private Sub WhPrintRun(ByVal generatePdf As Boolean, Optional ByVal destination 
                 batchFile & "-" & CStr(folders(index)) & ".pdf", saved, whPrintPdfPaths(index))
             If Len(variantNotice) > 0 Then notice = notice & vbCrLf & variantNotice
         Next index
+        WhPrintWritePdfIndex pdfFolder
         If Len(notice) > 0 Then MsgBox "Ulozeno " & saved & "/3 PDF. Pri generovani nastaly problemy:" & vbCrLf & notice, vbExclamation
     Else
         Application.StatusBar = "Nahravam vyskladneni k tisku..."
@@ -147,9 +159,9 @@ Private Sub WhPrintSavedPdf(ByVal variantIndex As Long)
     If running Then Exit Sub
     running = True
     Dim pdfPath As String, adobe As String, printer As Variant, arguments As String
-    pdfPath = whPrintPdfPaths(variantIndex)
+    pdfPath = WhPrintResolveSavedPdf(variantIndex, ThisWorkbook.Path)
     If Len(pdfPath) = 0 Then Err.Raise vbObjectError + 823, , _
-        "Tato varianta PDF z posledniho generovani neni k dispozici. Nejprve spust VyskladneniPdfVygenerovat. Po restartu Excelu je potreba PDF znovu vygenerovat nebo vybrat pres VyskladneniPdfVytisknoutAdobe."
+        "Tato varianta PDF z posledniho generovani neni k dispozici. Overte dokonceni generovani a synchronizaci slozky VyskladneniPDF pro tento expedicni den."
     pdfPath = WhPrintValidatedPdf(pdfPath)
     adobe = WhPrintAdobePath()
     If Len(adobe) = 0 Then Err.Raise vbObjectError + 818, , "Adobe Acrobat nebo Reader nebyl nalezen. PDF zustava ulozene."
@@ -162,6 +174,101 @@ Failed:
     running = False
     MsgBox "Tisk pres Adobe se nepodarilo spustit:" & vbCrLf & Err.Description, vbExclamation
 End Sub
+
+Private Sub WhPrintWritePdfIndex(ByVal root As String)
+    Dim document As Object, entry As Object, files As Object, folders As Variant, modes As Variant, index As Long
+    Set files = CreateObject("Scripting.FileSystemObject")
+    Set document = CreateObject("MSXML2.DOMDocument.6.0")
+    document.LoadXML "<warehousePrint version=""1""/>"
+    folders = Array("Bezne-poradi", "Prioritni-zasilky-prvni", "Prioritni-kusy-zvlast")
+    modes = Array("normal", "first", "split")
+    For index = 0 To 2
+        Set entry = document.createElement("pdf")
+        entry.setAttribute "mode", modes(index)
+        entry.setAttribute "path", ""
+        If Len(whPrintPdfPaths(index)) > 0 Then _
+            entry.setAttribute "path", CStr(folders(index)) & "\" & files.GetFileName(whPrintPdfPaths(index))
+        document.documentElement.appendChild entry
+    Next index
+    document.Save files.BuildPath(root, WHPRINT_PDF_INDEX)
+End Sub
+
+Private Function WhPrintResolveSavedPdf(ByVal variantIndex As Long, ByVal workbookFolder As String) As String
+    Dim root As String, files As Object, document As Object, entries As Object, relative As String
+    Dim folders As Variant, modes As Variant, indexPath As String, parts As Variant
+    Set files = CreateObject("Scripting.FileSystemObject")
+    folders = Array("Bezne-poradi", "Prioritni-zasilky-prvni", "Prioritni-kusy-zvlast")
+    modes = Array("normal", "first", "split")
+    If whPrintPdfSelectionKnown Then
+        root = whPrintPdfRoot
+        If Len(root) = 0 Then Exit Function
+    Else
+        root = WhPrintPdfFolder(workbookFolder)
+        If Not files.FolderExists(root) Then
+            If StrComp(files.GetFileName(workbookFolder), "Samostatn" & ChrW(233) & " skladovky", vbTextCompare) = 0 Then _
+                root = WhPrintPdfFolder(files.GetParentFolderName(workbookFolder))
+        End If
+    End If
+    If Not files.FolderExists(root) Then Exit Function
+    indexPath = files.BuildPath(root, WHPRINT_PDF_INDEX)
+    If Not files.FileExists(indexPath) Then
+        ' Older generated sets have no index: select one whole batch, never one latest file per mode.
+        WhPrintResolveSavedPdf = WhPrintLegacyPdf(root, variantIndex)
+        Exit Function
+    End If
+    If files.GetFile(indexPath).Size > 32768 Then Err.Raise vbObjectError + 826, , "Neplatny seznam PDF sestav."
+    Set document = CreateObject("MSXML2.DOMDocument.6.0")
+    document.async = False
+    document.resolveExternals = False
+    document.setProperty "ProhibitDTD", True
+    If Not document.Load(indexPath) Then Err.Raise vbObjectError + 826, , "Seznam PDF nelze nacist. Pockejte na dokonceni synchronizace."
+    If document.selectNodes("/warehousePrint[@version='1']").Length <> 1 Then _
+        Err.Raise vbObjectError + 826, , "Neznama verze seznamu PDF."
+    Set entries = document.selectNodes("/warehousePrint/pdf[@mode='" & modes(variantIndex) & "']")
+    If entries.Length <> 1 Then Err.Raise vbObjectError + 826, , "Neplatny seznam variant PDF."
+    relative = CStr(entries(0).getAttribute("path"))
+    If Len(relative) = 0 Then Exit Function
+    parts = Split(relative, "\")
+    If UBound(parts) <> 1 Then Err.Raise vbObjectError + 826, , "Neplatna relativni cesta PDF."
+    If parts(0) <> folders(variantIndex) Or InStr(parts(1), ":") > 0 Or InStr(parts(1), "/") > 0 Or _
+        files.GetFileName(parts(1)) <> parts(1) Or LCase$(files.GetExtensionName(parts(1))) <> "pdf" Then _
+        Err.Raise vbObjectError + 826, , "Neplatna relativni cesta PDF."
+    WhPrintResolveSavedPdf = files.BuildPath(root, relative)
+End Function
+
+Private Function WhPrintLegacyPdf(ByVal root As String, ByVal variantIndex As Long) As String
+    Dim files As Object, folders As Variant, index As Long, folder As String, file As Object
+    Dim suffix As String, candidate As String, newest As String, pattern As Object
+    Dim ambiguous As Boolean, timeOrder As Long
+    Set files = CreateObject("Scripting.FileSystemObject")
+    Set pattern = CreateObject("VBScript.RegExp")
+    pattern.Pattern = "^Vyskladneni-[0-9]{8}-[0-9]{6}-[A-Za-z0-9]+$"
+    folders = Array("Bezne-poradi", "Prioritni-zasilky-prvni", "Prioritni-kusy-zvlast")
+    For index = 0 To 2
+        folder = files.BuildPath(root, folders(index))
+        suffix = "-" & folders(index) & ".pdf"
+        If files.FolderExists(folder) Then
+            For Each file In files.GetFolder(folder).Files
+                If Right$(file.Name, Len(suffix)) = suffix Then
+                    candidate = Left$(file.Name, Len(file.Name) - Len(suffix))
+                    If pattern.Test(candidate) Then
+                        timeOrder = StrComp(Left$(candidate, 27), Left$(newest, 27), vbBinaryCompare)
+                        If timeOrder > 0 Then
+                            newest = candidate
+                            ambiguous = False
+                        ElseIf timeOrder = 0 And candidate <> newest Then
+                            ambiguous = True
+                        End If
+                    End If
+                End If
+            Next file
+        End If
+    Next index
+    If Len(newest) = 0 Then Exit Function
+    If ambiguous Then Err.Raise vbObjectError + 826, , "Vice starsich PDF sad ma stejny cas. Vyberte PDF rucne pres VyskladneniPdfVytisknoutAdobe."
+    candidate = files.BuildPath(files.BuildPath(root, folders(variantIndex)), newest & "-" & folders(variantIndex) & ".pdf")
+    If files.FileExists(candidate) Then WhPrintLegacyPdf = candidate
+End Function
 
 Private Function WhPrintDownload(ByVal payload As String, ByVal outputFolder As String, ByVal filename As String, _
     ByVal mode As String, ByRef missing As Long) As String

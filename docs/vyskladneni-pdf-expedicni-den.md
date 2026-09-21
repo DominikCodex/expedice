@@ -53,3 +53,23 @@ Hlavička všech tří sestav používá datum expedičního dne: `21.09.2026 ·
 Původní bezparametrická makra zůstávají funkční. Při spuštění z uložené denní kopie rozpoznají datum z názvu složky `dd.mm.rrrr`, `d. m. rrrr` nebo `datum OBJEDNÁVKA`; podporovaná je také jejich přímá podsložka (například `Samostatné skladovky`). Při spuštění z masteru bez datované složky použijí dnešek. Pro jiné pojmenování složek předávej datum novou funkcí výslovně.
 
 Stávající tři tisková makra následně použijí právě vygenerovaná PDF z nové cílové složky, bez dalšího uploadu. Automatický tisk přes Adobe tato změna nijak neupravuje.
+
+## Tisk kolegyní na jiném počítači
+
+Generování ukládá do `VyskladneniPDF\posledni-sestava.xml` trvalý seznam poslední sady. Obsahuje pouze relativní cesty, takže se může celý expediční den přenést na jiný počítač nebo do jiné složky Dropboxu. Sešit není potřeba po generování znovu ukládat: seznam leží vedle PDF a denní kopie může vzniknout před nimi.
+
+Kolegyně otevře denní kopii a použije původní makra:
+
+```vb
+VyskladneniTiskBeznePoradi
+VyskladneniTiskPrioritniZasilky
+VyskladneniTiskPrioritniKusy
+```
+
+Makra načtou seznam z `VyskladneniPDF` vedle otevřeného sešitu. U kopie ve složce `Samostatné skladovky` použijí nadřazený den, pokud vlastní složka s PDF neexistuje. Nic negenerují, neuploadují ani automaticky nenabízejí výběr souboru. Tisk jde nadále přes Adobe na výchozí tiskárnu daného počítače.
+
+Je nutné synchronizovat **celou složku dne včetně PDF a XML**, nejen XLSM. Při chybě synchronizace, chybějícím PDF nebo neúplném generování se zobrazí chyba; makro nepoužije místo chybějící varianty starší soubor. Seznam se na začátku generování vyprázdní, takže po selhání celé nové sady nelze nechtěně tisknout předchozí.
+
+Starší PDF bez XML se dohledají podle nejnovějšího časového označení v názvech vygenerovaných souborů. Vybere se vždy jedna společná sada všech variant, nikoli nejnovější soubor v každé složce zvlášť. Pokud jsou dvě různé sady označené stejnou sekundou, makro požádá o ruční výběr. Poškozené nebo prázdné XML se nikdy neobchází tímto dohledáváním.
+
+Nový modul musí být i v kopii, kterou používá kolegyně. Aktualizace masteru nezmění již dříve vytvořené XLSM kopie. U nové denní kopie vytvořené z aktualizovaného masteru není potřeba žádná další úprava tlačítek.

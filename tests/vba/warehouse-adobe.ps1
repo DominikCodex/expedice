@@ -55,11 +55,20 @@ Public Sub TestArchive(ByVal path As String)
     VyskladneniPdfDoSlozky path, DateSerial(2026, 9, 17)
 End Sub
 Public Sub TestForgetPdfs()
+    whPrintPdfRoot = ""
+    whPrintPdfSelectionKnown = False
     Dim index As Long
     For index = 0 To 2
         whPrintPdfPaths(index) = ""
     Next index
 End Sub
+Public Function TestResolvePdf(ByVal path As String, ByVal index As Long) As String
+    On Error GoTo Failed
+    TestResolvePdf = WhPrintResolveSavedPdf(index, path)
+    Exit Function
+Failed:
+    TestResolvePdf = "ERROR: " & Err.Description
+End Function
 Public Sub TestModeFailure(ByVal mode As String, Optional ByVal wrongMode As Boolean = False)
     testFailedMode = mode
     testWrongMode = wrongMode
@@ -309,7 +318,7 @@ try {
     $state = $excel.Run($prefix + 'TestState')
     if ($state[0] -ne 5 -or $state[5] -notmatch 'nebyl nalezen') { throw 'Direct print ignored missing Adobe.' }
     $excel.Run($prefix + 'TestForgetPdfs')
-    $excel.Run($prefix + 'VyskladneniTiskBeznePoradi')
+    $excel.Run($prefix + 'VyskladneniTiskPrioritniZasilky')
     $state = $excel.Run($prefix + 'TestState')
     if ($state[0] -ne 5 -or $state[5] -notmatch 'neni k dispozici') { throw 'Reset selected an old PDF automatically.' }
     $excel.Run($prefix + 'TestConfigure', $false, 200)
@@ -329,6 +338,8 @@ try {
     if ($excel.Run($prefix + 'TestExpeditionDate', 'C:\sklad\31.02.2026') -ne 'ERROR') { throw 'Invalid folder date accepted.' }
     $archive = Join-Path $folder ('Bal' + [char]0xed + [char]0x10d + 'ky - Expedice\Expedice\17.09.2026')
     [void](New-Item -ItemType Directory -Path $archive)
+    # The daily workbook copy is created BEFORE generation, just like the user's master.
+    $book.SaveCopyAs((Join-Path $archive 'daily.xlsm'))
     $excel.Run($prefix + 'TestConfigure', $false, 200)
     $before = $excel.Run($prefix + 'TestState')
     $excel.Run($prefix + 'TestArchive', $archive)
@@ -341,6 +352,56 @@ try {
         $saved = $excel.Run($prefix + 'TestSavedPdf', $i)
         if (-not $saved.StartsWith($archive + '\')) { throw 'Print macro still points at master folder.' }
     }
+    $indexPath = Join-Path $archive 'VyskladneniPDF/posledni-sestava.xml'
+    $indexText = Get-Content -LiteralPath $indexPath -Raw
+    if ($indexText.Contains($folder) -or $indexText -notmatch 'Bezne-poradi\\Vyskladneni-') { throw 'Index is missing or contains machine-specific paths.' }
+    $moved = Join-Path $root ('test-results/mv-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    Copy-Item -LiteralPath $archive -Destination $moved -Recurse
+    $colleague = $null
+    try {
+        $colleague = $excel.Workbooks.Open((Join-Path $moved 'daily.xlsm'))
+        $colleaguePrefix = "'" + $colleague.Name + "'!TestModule."
+        for ($i = 0; $i -lt 3; $i++) {
+            $excel.Run($colleaguePrefix + $printMacros[$i])
+            $state = $excel.Run($colleaguePrefix + 'TestState')
+            if ($state[0] -ne ($i + 1) -or $state[3] -ne 0 -or $state[9] -ne 0) { throw ('Reopened daily copy failed to print without upload: ' + $state[5]) }
+            if (-not $state[2].Contains($moved + '\VyskladneniPDF\')) { throw 'Reopened copy still prints from original computer path.' }
+        }
+        $nested = Join-Path $moved ('Samostatn' + [char]0xe9 + ' skladovky')
+        [void](New-Item -ItemType Directory -Path $nested)
+        $resolved = $excel.Run($colleaguePrefix + 'TestResolvePdf', $nested, 0)
+        if (-not $resolved.StartsWith($moved + '\VyskladneniPDF\')) { throw 'Nested daily copy did not find parent day PDFs.' }
+        $movedIndex = Join-Path $moved 'VyskladneniPDF/posledni-sestava.xml'
+        $resolved = $excel.Run($colleaguePrefix + 'TestResolvePdf', $moved, 0)
+        # Simulate sync lag without destroying the test fixture.
+        Move-Item -LiteralPath $resolved -Destination ($resolved + '.pending')
+        $excel.Run($colleaguePrefix + 'TestConfigure', $false, 200)
+        $excel.Run($colleaguePrefix + 'VyskladneniTiskBeznePoradi')
+        $state = $excel.Run($colleaguePrefix + 'TestState')
+        if ($state[0] -ne 3 -or $state[3] -ne 0 -or $state[9] -ne 1) { throw 'Missing synchronized PDF printed a fallback or uploaded.' }
+        Move-Item -LiteralPath ($resolved + '.pending') -Destination $resolved
+        foreach ($badIndex in @('<broken', '<warehousePrint version="1"><pdf mode="normal" path="..\outside.pdf"/></warehousePrint>', '<warehousePrint version="1"><pdf mode="normal" path=""/></warehousePrint>')) {
+            [IO.File]::WriteAllText($movedIndex, $badIndex)
+            $excel.Run($colleaguePrefix + 'TestConfigure', $false, 200)
+            $excel.Run($colleaguePrefix + 'VyskladneniTiskBeznePoradi')
+            $state = $excel.Run($colleaguePrefix + 'TestState')
+            if ($state[0] -ne 3 -or $state[3] -ne 0 -or $state[9] -ne 1) { throw 'Invalid or empty index fell back to older PDFs.' }
+        }
+        [IO.File]::WriteAllText($movedIndex, $indexText)
+        # Existing PDF sets produced by older versions have no index.
+        Move-Item -LiteralPath $movedIndex -Destination ($movedIndex + '.bak')
+        $legacy = $excel.Run($colleaguePrefix + 'TestResolvePdf', $moved, 0)
+        if ($legacy -ne $resolved) { throw 'Legacy day did not find its complete batch.' }
+        $newer = Join-Path $moved 'VyskladneniPDF/Prioritni-kusy-zvlast/Vyskladneni-20990101-010101-radABC-Prioritni-kusy-zvlast.pdf'
+        Copy-Item -LiteralPath $resolved -Destination $newer
+        if ([string]$excel.Run($colleaguePrefix + 'TestResolvePdf', $moved, 0) -ne '') { throw 'Legacy fallback mixed an older normal PDF with newer partial batch.' }
+        $ambiguous = Join-Path $moved 'VyskladneniPDF/Bezne-poradi/Vyskladneni-20990101-010101-radXYZ-Bezne-poradi.pdf'
+        Copy-Item -LiteralPath $resolved -Destination $ambiguous
+        if ($excel.Run($colleaguePrefix + 'TestResolvePdf', $moved, 0) -notlike 'ERROR:*') { throw 'Legacy fallback guessed between two batches with identical timestamp.' }
+    } finally {
+        if ($colleague) { $colleague.Close($false); [void][Runtime.InteropServices.Marshal]::ReleaseComObject($colleague) }
+    }
+    Write-Output 'PASS: pre-generation workbook copy reopened at another location prints all three without upload; relative XML, nested daily copy, sync lag, corrupt/empty/traversal index and coherent legacy batches.'
     foreach ($badDestination in @('', (Join-Path $folder 'not-created'))) {
         $excel.Run($prefix + 'TestConfigure', $false, 200)
         $before = $excel.Run($prefix + 'TestState')
