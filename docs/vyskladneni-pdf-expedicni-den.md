@@ -87,3 +87,9 @@ Uzavření je povoleno jen pro novou úlohu s názvem tištěného PDF na správ
 Pokud konkrétní úlohu nelze identifikovat, například je příliš rychlá na zachycení nebo ovladač změní její název, makro Adobe nezavře naslepo. Po 15 minutách oznámí neověřené dokončení. Při nedostupné frontě oznámí chybu; pokud chybí už vstupní přehled fronty, tisk ani nespustí. Pokud aplikace nereaguje na zavření do 30 sekund, oznámí problém a ponechá ji uživateli. Úspěšné dokončení je bez hlášky, automatický opakovaný tisk se neprovádí.
 
 Kontroly bez fyzického tisku: `tests/vba/warehouse-adobe.ps1` (původní generování a výběr PDF) a `tests/vba/warehouse-adobe-close.ps1` (sledování úloh, vlastnictví oken, chyby, časové limity). Oba používají izolovaný Excel s nahrazenými síťovými a tiskovými operacemi. Chování konkrétního Adobe a ovladače je nutné ověřit běžným tiskem na cílovém počítači.
+
+## Chybějící fotografie
+
+Jednotlivé nespárované fotografie (například prací sáčky) nevyvolávají hlášku v Excelu. Upozornění se zobrazí pouze tehdy, pokud chybí **více než 50 %** fotografických polí v konkrétní sestavě. Přesně polovina ještě hlášku nevyvolává. Všechny úspěšně vytvořené PDF se uloží i při tomto upozornění; skutečné chyby generování nebo stahování se hlásí vždy.
+
+Server vrací `X-Warehouse-Missing-Images` a `X-Warehouse-Image-Rows` podle skutečně vykreslených řádků, nikoli počtu vstupních variant. Poměr proto platí i pro režim „Prioritní kusy zvlášť“. Je potřeba aktualizovat modul `VyskladneniTisk.bas` v Excelu i serverovou verzi. Pokud starší server ještě nevrací celkový počet, nové makro neodhaduje poměr a fotografické upozornění nezobrazuje. Běžný text o chybějících obrázcích v ručním náhledu zůstává beze změny.

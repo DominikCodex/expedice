@@ -80,9 +80,10 @@ async def _generate_pdf(html):
             await page.wait_for_function("!document.getElementById('print').disabled", timeout=30000)
             await page.evaluate("document.fonts.ready")
             missing = await page.locator("#rows .no-photo").count()
+            image_rows = await page.locator("#rows img, #rows .no-photo").count()
             pdf = await page.pdf(prefer_css_page_size=True, print_background=True)
             if not pdf.startswith(b"%PDF-") or len(pdf) > 32 * 1024 * 1024:
                 raise ValueError("Invalid or oversized print PDF")
-            return pdf, missing
+            return pdf, missing, image_rows
         finally:
             await browser.close()

@@ -30,8 +30,10 @@ Public testConfirm As Boolean
 Public testMessageText As String
 Public testMessageCount As Long
 Public testMissingImages As Long
-Public Sub TestMissingPhotos(ByVal count As Long)
+Public testImageRows As Long
+Public Sub TestMissingPhotos(ByVal count As Long, ByVal total As Long)
     testMissingImages = count
+    testImageRows = total
 End Sub
 Public testMissingAdobe As Boolean
 Public testInvalidPdf As Boolean
@@ -100,6 +102,7 @@ Public Sub TestConfigure(ByVal confirm As Boolean, ByVal status As Long, Optiona
     testMessageCount = 0
     testMessageText = ""
     testMissingImages = 0
+    testImageRows = 1
 End Sub
 Public Function TestAdobeForPrint() As String
     If Not testMissingAdobe Then TestAdobeForPrint = WhPrintAdobePath()
@@ -169,6 +172,8 @@ Public Function getResponseHeader(ByVal header As String) As String
         If Not TestModule.testWrongMode Then getResponseHeader = Mid$(endpoint, InStr(endpoint, "priority=") + 9)
     ElseIf header = "X-Warehouse-Missing-Images" Then
         getResponseHeader = CStr(TestModule.testMissingImages)
+    ElseIf header = "X-Warehouse-Image-Rows" Then
+        If TestModule.testImageRows > 0 Then getResponseHeader = CStr(TestModule.testImageRows)
     Else
         getResponseHeader = "0"
     End If
@@ -334,12 +339,18 @@ try {
     if (-not $state[6].EndsWith('/render-print') -or $state[0] -ne 6) { throw 'Original manual HTML workflow changed.' }
     if ($state[10] -ne 1) { throw 'Manual browser preview was hidden or minimized.' }
     if ($state[9] -ne 0) { throw 'Successful HTML generation showed a message box.' }
-    $excel.Run($prefix + 'TestConfigure', $false, 200)
-    $excel.Run($prefix + 'TestMissingPhotos', 2)
-    $excel.Run($prefix + 'VyskladneniPdfVygenerovat')
-    $state = $excel.Run($prefix + 'TestState')
-    if ($state[9] -ne 1 -or $state[5] -notmatch 'Bez fotografie: 2' -or $state[5] -notmatch 'Ulozeno 3/3') { throw 'Missing photos were not reported in one warning.' }
-    Write-Output 'PASS: successful generation and printing are silent; errors and incomplete photos remain visible.'
+    foreach ($photos in @(@(0, 166, 0), @(1, 166, 0), @(5, 166, 0), @(83, 166, 0), @(84, 166, 1), @(166, 166, 1), @(1, 1, 1), @(2, 3, 1), @(1, 0, 0))) {
+        $excel.Run($prefix + 'TestConfigure', $false, 200)
+        $excel.Run($prefix + 'TestMissingPhotos', $photos[0], $photos[1])
+        $excel.Run($prefix + 'VyskladneniPdfVygenerovat')
+        $state = $excel.Run($prefix + 'TestState')
+        if ($state[9] -ne $photos[2]) { throw "Incorrect photo warning threshold: $($photos -join '/')" }
+        if ($photos[2] -eq 1 -and ($state[5] -notmatch "Chybi vetsina fotografii: $($photos[0]) z $($photos[1])" -or $state[5] -notmatch 'Ulozeno 3/3')) { throw 'Majority photo failure was not reported in one warning.' }
+        for ($i = 0; $i -lt 3; $i++) {
+            if (-not (Test-Path -LiteralPath ([string]$excel.Run($prefix + 'TestSavedPdf', $i)))) { throw 'Missing photos prevented PDF download.' }
+        }
+    }
+    Write-Output 'PASS: minority/half/unknown photo counts stay silent; majority warns once, all three PDFs remain available; real errors remain visible.'
     foreach ($datedPath in @('C:\sklad\17.09.2026', 'C:\sklad\17. 9. 2026 OBJEDNAVKA', '\\server\sklad\17.09.2026\Samostatne skladovky')) {
         if ($excel.Run($prefix + 'TestExpeditionDate', $datedPath) -ne '2026-09-17') { throw 'Saved-copy expedition date was replaced with today.' }
     }

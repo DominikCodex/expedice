@@ -4631,11 +4631,12 @@ def render_warehouse_pdf():
             html = html.replace(radio + " checked", radio)
             if mode == priority:
                 html = html.replace(radio, radio + " checked")
-        pdf, missing = generate_pdf(html)
+        pdf, missing, image_rows = generate_pdf(html)
         return Response(pdf, mimetype="application/pdf", headers={
             "Content-Disposition": 'attachment; filename="vyskladneni.pdf"',
             "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff",
             "X-Warehouse-Missing-Images": str(missing),
+            "X-Warehouse-Image-Rows": str(image_rows),
             "X-Warehouse-Priority": priority,
         })
     except Exception:

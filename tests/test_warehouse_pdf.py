@@ -17,13 +17,14 @@ def payload():
 def test_pdf_uses_same_template_defaults_without_database_writes(monkeypatch):
     monkeypatch.setattr(app, "product_image_cache", lambda: {"configured": True, "images": {}})
     monkeypatch.setattr(app, "db_conn", MagicMock(side_effect=AssertionError("No database")))
-    render = MagicMock(return_value=(b"%PDF-test", 1))
+    render = MagicMock(return_value=(b"%PDF-test", 1, 3))
     monkeypatch.setattr(app, "generate_pdf", render)
     response = app.app.test_client().post("/api/warehouse/render-pdf", json=payload())
     assert response.status_code == 200
     assert response.mimetype == "application/pdf"
     assert response.data == b"%PDF-test"
     assert response.headers["X-Warehouse-Missing-Images"] == "1"
+    assert response.headers["X-Warehouse-Image-Rows"] == "3"
     assert response.headers["Cache-Control"] == "no-store"
     html = render.call_args.args[0]
     for field, value in [("orientation", "portrait"), ("density", "compact"), ("priority", "split")]:
@@ -42,7 +43,7 @@ def test_invalid_pdf_upload_never_launches_browser(monkeypatch):
 @pytest.mark.parametrize("mode", ["normal", "first", "split"])
 def test_pdf_selects_requested_priority_mode(monkeypatch, mode):
     monkeypatch.setattr(app, "product_image_cache", lambda: {"images": {}})
-    render = MagicMock(return_value=(b"%PDF-test", 0))
+    render = MagicMock(return_value=(b"%PDF-test", 0, 1))
     monkeypatch.setattr(app, "generate_pdf", render)
     response = app.app.test_client().post(f"/api/warehouse/render-pdf?priority={mode}", json=payload())
     assert response.status_code == 200
@@ -111,13 +112,22 @@ def test_pdf_rejects_non_image_response():
 
 @pytest.mark.skipif(os.environ.get("RUN_PDF_BROWSER_TESTS") != "1", reason="Requires installed Playwright Chromium")
 @pytest.mark.parametrize("mode", ["normal", "first", "split"])
-def test_real_pdf_renderer_without_images_or_database(monkeypatch, tmp_path, mode):
+@pytest.mark.parametrize("mixed_priority", [False, True])
+def test_real_pdf_renderer_without_images_or_database(monkeypatch, tmp_path, mode, mixed_priority):
     monkeypatch.setattr(app, "product_image_cache", lambda: {"images": {}})
     monkeypatch.setattr(app, "db_conn", MagicMock(side_effect=AssertionError("No database")))
-    response = app.app.test_client().post(f"/api/warehouse/render-pdf?priority={mode}", json=payload())
+    data = payload()
+    if mixed_priority:
+        header, row = [""] * 18, [""] * 18
+        header[16], header[17] = "Expediční číslo:", "Kód pořadí expedice:"
+        row[16], row[17] = "1", "0,8"
+        data["helperSheets"] = {"KOMPLETACE": {"cells": [header, row]}}
+    response = app.app.test_client().post(f"/api/warehouse/render-pdf?priority={mode}", json=data)
     assert response.status_code == 200, response.text
     assert response.data.startswith(b"%PDF-")
     assert len(response.data) > 10000
-    assert response.headers["X-Warehouse-Missing-Images"] == "1"
+    expected_rows = "2" if mixed_priority and mode == "split" else "1"
+    assert response.headers["X-Warehouse-Missing-Images"] == expected_rows
+    assert response.headers["X-Warehouse-Image-Rows"] == expected_rows
     assert response.headers["X-Warehouse-Priority"] == mode
     (tmp_path / f"warehouse-{mode}.pdf").write_bytes(response.data)

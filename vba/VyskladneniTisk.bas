@@ -162,11 +162,13 @@ End Sub
 Private Function WhPrintPdfVariant(ByVal payload As String, ByVal root As String, ByVal folder As String, _
     ByVal mode As String, ByVal filename As String, ByRef saved As Long, ByRef generatedPath As String) As String
     On Error GoTo Failed
-    Dim path As String, missing As Long
-    path = WhPrintDownload(payload, CreateObject("Scripting.FileSystemObject").BuildPath(root, folder), filename, mode, missing)
+    Dim path As String, missing As Long, imageRows As Long
+    path = WhPrintDownload(payload, CreateObject("Scripting.FileSystemObject").BuildPath(root, folder), filename, mode, missing, imageRows)
     generatedPath = path
     saved = saved + 1
-    If missing > 0 Then WhPrintPdfVariant = folder & ": Bez fotografie: " & missing & " radku." & vbCrLf & path
+    ' Isolated unmatched products are normal. Warn only about a confirmed majority.
+    If imageRows > 0 And missing > imageRows / 2 Then _
+        WhPrintPdfVariant = folder & ": Chybi vetsina fotografii: " & missing & " z " & imageRows & " radku." & vbCrLf & path
     Exit Function
 Failed:
     WhPrintPdfVariant = folder & ": NEPODARILO SE - " & Err.Description
@@ -290,7 +292,7 @@ Private Function WhPrintLegacyPdf(ByVal root As String, ByVal variantIndex As Lo
 End Function
 
 Private Function WhPrintDownload(ByVal payload As String, ByVal outputFolder As String, ByVal filename As String, _
-    ByVal mode As String, ByRef missing As Long) As String
+    ByVal mode As String, ByRef missing As Long, Optional ByRef imageRows As Long = 0) As String
     Dim generatePdf As Boolean
     generatePdf = (Len(mode) > 0)
     Dim http As Object
@@ -326,6 +328,7 @@ Private Function WhPrintDownload(ByVal payload As String, ByVal outputFolder As 
     stream.SaveToFile printPath, 1
     stream.Close
     missing = Val(http.getResponseHeader("X-Warehouse-Missing-Images"))
+    imageRows = Val(http.getResponseHeader("X-Warehouse-Image-Rows"))
     WhPrintDownload = printPath
 End Function
 
