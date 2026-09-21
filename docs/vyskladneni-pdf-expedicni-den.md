@@ -76,6 +76,14 @@ Nový modul musí být i v kopii, kterou používá kolegyně. Aktualizace maste
 
 ## Okno Adobe při tisku
 
-Všechna čtyři tisková makra (tři varianty i ruční výběr PDF) spouštějí Adobe s `/s /h /t` a požadavkem Windows na minimalizované okno bez aktivace. `/s` potlačuje úvodní obrazovku, `/h` žádá minimalizované spuštění. Ruční HTML náhled v prohlížeči zůstává viditelný.
+Všechna čtyři tisková makra (tři varianty i ruční výběr PDF) spouštějí Adobe s `/n /s /h /t` do vlastní minimalizované instance. Po dokončení konkrétní úlohy ve frontě Windows makro této instanci pošle běžný požadavek na zavření aplikace. Nejde už pouze o minimalizaci. Názvy tiskových maker zůstávají stejné, tlačítka není nutné měnit. Ruční HTML náhled v prohlížeči se nemění.
 
-Adobe se násilně neukončuje a makro nezavírá jiná otevřená PDF. Proces nebo ikona mohou po tisku zůstat na liště; jde o omezení viditelného okna, nikoli zaručené ukončení aplikace. Chování již běžící instance závisí na konkrétní verzi Adobe. Adobe tyto příkazové přepínače popisuje v [SDK FAQ](https://opensource.adobe.com/dc-acrobat-sdk-docs/library/overview/apxDevFAQ.html), ale negarantuje jejich podporu napříč verzemi.
+Makro sleduje identifikátor a čas vzniku nového procesu. Jinou, dříve otevřenou instanci Adobe nezavírá. Nepoužívá násilné ukončení procesu. Pokud Adobe místo nové instance předá tisk již otevřené aplikaci, tu makro ponechá otevřenou. Adobe příkazové přepínače popisuje v [SDK FAQ](https://opensource.adobe.com/dc-acrobat-sdk-docs/library/overview/apxDevFAQ.html), ale negarantuje jejich podporu napříč verzemi.
+
+Během sledování ponechte tento sešit a Excel otevřený; kontrola probíhá na pozadí každé dvě sekundy přes `Application.OnTime`. Excel lze dál používat. Předchozí tisk z tohoto sešitu musí skončit, než se spustí další. Nejde o agenta ani o další instalaci. Po zavření sešitu nelze dokončení sledování garantovat; naplánované volání Excelu může požádat o opětovné otevření sešitu.
+
+Uzavření je povoleno jen pro novou úlohu s názvem tištěného PDF na správné tiskárně. Starší a cizí úlohy se ignorují. Za dokončení se bere stav „vytištěno / předáno tiskárně“ nebo zmizení již pozorované úlohy z fronty. To není potvrzení fyzicky vytištěných listů (úloha mohla být také zrušena). Chyba, pauza, offline tiskárna nebo stále probíhající tisk zavření blokují.
+
+Pokud konkrétní úlohu nelze identifikovat, například je příliš rychlá na zachycení nebo ovladač změní její název, makro Adobe nezavře naslepo. Po 15 minutách oznámí neověřené dokončení. Při nedostupné frontě oznámí chybu; pokud chybí už vstupní přehled fronty, tisk ani nespustí. Pokud aplikace nereaguje na zavření do 30 sekund, oznámí problém a ponechá ji uživateli. Úspěšné dokončení je bez hlášky, automatický opakovaný tisk se neprovádí.
+
+Kontroly bez fyzického tisku: `tests/vba/warehouse-adobe.ps1` (původní generování a výběr PDF) a `tests/vba/warehouse-adobe-close.ps1` (sledování úloh, vlastnictví oken, chyby, časové limity). Oba používají izolovaný Excel s nahrazenými síťovými a tiskovými operacemi. Chování konkrétního Adobe a ovladače je nutné ověřit běžným tiskem na cílovém počítači.

@@ -4,12 +4,31 @@ Private whPrintPdfPaths(0 To 2) As String
 Private whPrintPdfRoot As String
 Private whPrintPdfSelectionKnown As Boolean
 Private Const WHPRINT_PDF_INDEX As String = "posledni-sestava.xml"
+Private whPrintAdobePid As Long
+Private whPrintAdobeCreated As String
+Private whPrintAdobePrinter As String
+Private whPrintAdobeDocument As String
+Private whPrintAdobeBaseline As Object
+Private whPrintAdobeSeen As Object
+Private whPrintAdobeDeadline As Date
+Private whPrintAdobeClosing As Boolean
+Private whPrintAdobeClosePosted As Boolean
 
 #If VBA7 Then
+Private Declare PtrSafe Function WhPrintEnumWindows Lib "user32" Alias "EnumWindows" (ByVal callback As LongPtr, ByVal parameter As LongPtr) As Long
+Private Declare PtrSafe Function WhPrintWindowPid Lib "user32" Alias "GetWindowThreadProcessId" (ByVal hwnd As LongPtr, ByRef pid As Long) As Long
+Private Declare PtrSafe Function WhPrintGetWindow Lib "user32" Alias "GetWindow" (ByVal hwnd As LongPtr, ByVal command As Long) As LongPtr
+Private Declare PtrSafe Function WhPrintWindowTitleLength Lib "user32" Alias "GetWindowTextLengthW" (ByVal hwnd As LongPtr) As Long
+Private Declare PtrSafe Function WhPrintPostMessage Lib "user32" Alias "PostMessageW" (ByVal hwnd As LongPtr, ByVal message As Long, ByVal wParam As LongPtr, ByVal lParam As LongPtr) As Long
 Private Declare PtrSafe Function WhPrintShellExecute Lib "shell32.dll" Alias "ShellExecuteW" ( _
     ByVal hwnd As LongPtr, ByVal operation As LongPtr, ByVal file As LongPtr, _
     ByVal parameters As LongPtr, ByVal directory As LongPtr, ByVal show As Long) As LongPtr
 #Else
+Private Declare Function WhPrintEnumWindows Lib "user32" Alias "EnumWindows" (ByVal callback As Long, ByVal parameter As Long) As Long
+Private Declare Function WhPrintWindowPid Lib "user32" Alias "GetWindowThreadProcessId" (ByVal hwnd As Long, ByRef pid As Long) As Long
+Private Declare Function WhPrintGetWindow Lib "user32" Alias "GetWindow" (ByVal hwnd As Long, ByVal command As Long) As Long
+Private Declare Function WhPrintWindowTitleLength Lib "user32" Alias "GetWindowTextLengthW" (ByVal hwnd As Long) As Long
+Private Declare Function WhPrintPostMessage Lib "user32" Alias "PostMessageW" (ByVal hwnd As Long, ByVal message As Long, ByVal wParam As Long, ByVal lParam As Long) As Long
 Private Declare Function WhPrintShellExecute Lib "shell32.dll" Alias "ShellExecuteW" ( _
     ByVal hwnd As Long, ByVal operation As Long, ByVal file As Long, _
     ByVal parameters As Long, ByVal directory As Long, ByVal show As Long) As Long
@@ -167,7 +186,7 @@ Private Sub WhPrintSavedPdf(ByVal variantIndex As Long)
     If Len(adobe) = 0 Then Err.Raise vbObjectError + 818, , "Adobe Acrobat nebo Reader nebyl nalezen. PDF zustava ulozene."
     printer = WhPrintDefaultPrinter()
     arguments = WhPrintAdobeArguments(pdfPath, CStr(printer(0)), CStr(printer(1)), CStr(printer(2)))
-    WhPrintLaunchApplication adobe, arguments, 7
+    WhPrintStartAdobe adobe, arguments, pdfPath, CStr(printer(0))
     running = False
     Exit Sub
 Failed:
@@ -323,7 +342,7 @@ Public Sub VyskladneniPdfVytisknoutAdobe()
     If Len(adobe) = 0 Then Err.Raise vbObjectError + 818, , "Adobe Acrobat nebo Reader nebyl nalezen. PDF zustava ulozene; muzes je vytisknout rucne z nahledu."
     printer = WhPrintDefaultPrinter()
     arguments = WhPrintAdobeArguments(pdfPath, CStr(printer(0)), CStr(printer(1)), CStr(printer(2)))
-    WhPrintLaunchApplication adobe, arguments, 7
+    WhPrintStartAdobe adobe, arguments, pdfPath, CStr(printer(0))
 Finished:
     running = False
     Exit Sub
@@ -400,9 +419,162 @@ Private Function WhPrintDefaultPrinter() As Variant
     Err.Raise vbObjectError + 820, , "Ve Windows neni nastavena vychozi tiskarna."
 End Function
 
+Private Sub WhPrintStartAdobe(ByVal executable As String, ByVal arguments As String, ByVal pdf As String, ByVal printer As String)
+    If whPrintAdobePid <> 0 Then Err.Raise vbObjectError + 830, , _
+        "Predchozi tisk pres Adobe jeste neni dokonceny. Pockejte na dokonceni tiskove ulohy."
+    On Error GoTo Failed
+    whPrintAdobePrinter = printer
+    whPrintAdobeDocument = CreateObject("Scripting.FileSystemObject").GetFileName(pdf)
+    Set whPrintAdobeBaseline = WhPrintQueueSnapshot(printer)
+    Set whPrintAdobeSeen = CreateObject("Scripting.Dictionary")
+    whPrintAdobeClosing = False
+    whPrintAdobeClosePosted = False
+    whPrintAdobeDeadline = DateAdd("n", 15, Now)
+    whPrintAdobePid = WhPrintCreateAdobe(executable, arguments)
+    whPrintAdobeCreated = WhPrintProcessCreated(whPrintAdobePid)
+    ' Adobe may exit on its own or forward to another instance. Never close that instance.
+    If Len(whPrintAdobeCreated) = 0 Then
+        WhPrintResetAdobe
+        Exit Sub
+    End If
+    VyskladneniDokoncitTiskAdobe
+    Exit Sub
+Failed:
+    Dim description As String
+    description = Err.Description
+    WhPrintResetAdobe
+    Err.Raise vbObjectError + 831, , description
+End Sub
+
+Private Function WhPrintCreateAdobe(ByVal executable As String, ByVal arguments As String) As Long
+    Dim service As Object, startup As Object, pid As Variant, result As Long
+    Set service = GetObject("winmgmts:\\.\root\cimv2")
+    Set startup = service.Get("Win32_ProcessStartup").SpawnInstance_
+    startup.ShowWindow = 7
+    result = service.Get("Win32_Process").Create(WhPrintQuoteArgument(executable) & " " & arguments, Null, startup, pid)
+    If result <> 0 Then Err.Raise vbObjectError + 832, , "Adobe se nepodarilo spustit. Kod Windows: " & result
+    WhPrintCreateAdobe = CLng(pid)
+End Function
+
+Private Function WhPrintProcessCreated(ByVal pid As Long) As String
+    Dim process As Object
+    For Each process In GetObject("winmgmts:\\.\root\cimv2").ExecQuery("SELECT CreationDate FROM Win32_Process WHERE ProcessId = " & CStr(pid))
+        If Not IsNull(process.CreationDate) Then WhPrintProcessCreated = CStr(process.CreationDate)
+    Next process
+End Function
+
+Private Function WhPrintQueueSnapshot(ByVal printer As String) As Object
+    Dim jobs As Object, job As Object, name As String, submitted As String, document As String, status As Long
+    Set jobs = CreateObject("Scripting.Dictionary")
+    For Each job In GetObject("winmgmts:\\.\root\cimv2").ExecQuery("SELECT Name, TimeSubmitted, Document, StatusMask FROM Win32_PrintJob")
+        name = CStr(job.Name)
+        If StrComp(Left$(name, Len(printer) + 2), printer & ", ", vbTextCompare) = 0 Then
+            submitted = "": document = "": status = 0
+            If Not IsNull(job.TimeSubmitted) Then submitted = CStr(job.TimeSubmitted)
+            If Not IsNull(job.Document) Then document = CStr(job.Document)
+            If Not IsNull(job.StatusMask) Then status = CLng(job.StatusMask)
+            jobs(name & "|" & submitted) = Array(document, status)
+        End If
+    Next job
+    Set WhPrintQueueSnapshot = jobs
+End Function
+
+Private Function WhPrintDocumentMatches(ByVal document As String) As Boolean
+    Dim files As Object, name As String
+    Set files = CreateObject("Scripting.FileSystemObject")
+    name = files.GetFileName(document)
+    WhPrintDocumentMatches = (StrComp(name, whPrintAdobeDocument, vbTextCompare) = 0 Or _
+        StrComp(name, files.GetBaseName(whPrintAdobeDocument), vbTextCompare) = 0)
+End Function
+
+Private Function WhPrintQueueFinished(ByVal jobs As Object) As Boolean
+    Dim key As Variant, entry As Variant, status As Long
+    For Each key In jobs.Keys
+        entry = jobs(key)
+        If Not whPrintAdobeBaseline.Exists(key) Then
+            If WhPrintDocumentMatches(CStr(entry(0))) Then whPrintAdobeSeen(key) = True
+        End If
+    Next key
+    If whPrintAdobeSeen.Count = 0 Then Exit Function
+    For Each key In whPrintAdobeSeen.Keys
+        If jobs.Exists(key) Then
+            entry = jobs(key)
+            status = CLng(entry(1))
+            ' Error/offline/paused/spooling/printing states take precedence over completion.
+            If (status And 3711) <> 0 Then Exit Function
+            If (status And (128 Or 4096)) = 0 Then Exit Function
+        End If
+    Next key
+    WhPrintQueueFinished = True
+End Function
+
+Public Sub VyskladneniDokoncitTiskAdobe()
+    If whPrintAdobePid = 0 Then Exit Sub
+    On Error GoTo Failed
+    If WhPrintProcessCreated(whPrintAdobePid) <> whPrintAdobeCreated Then
+        WhPrintResetAdobe
+        Exit Sub
+    End If
+    If whPrintAdobeClosing Then
+        If Now >= whPrintAdobeDeadline Then Err.Raise vbObjectError + 833, , _
+            "Adobe nepotvrdilo ukonceni. Zavrete jej prosim rucne; tisk znovu nespoustejte automaticky."
+    Else
+        Dim jobs As Object
+        Set jobs = WhPrintQueueSnapshot(whPrintAdobePrinter)
+        If WhPrintQueueFinished(jobs) Then
+            ' A removed/completed queue job is safe to release; it is not proof of physical delivery.
+            whPrintAdobeClosing = True
+            whPrintAdobeDeadline = DateAdd("s", 30, Now)
+            WhPrintCloseOwnedAdobe
+        ElseIf Now >= whPrintAdobeDeadline Then
+            Err.Raise vbObjectError + 834, , _
+                "Dokonceni konkretni tiskove ulohy se nepodarilo overit. Adobe zustalo otevrene. Zkontrolujte tiskovou frontu pred dalsim tiskem."
+        End If
+    End If
+    WhPrintScheduleAdobeCheck
+    Exit Sub
+Failed:
+    Dim description As String
+    description = Err.Description
+    WhPrintResetAdobe
+    MsgBox "Automaticke zavreni Adobe se nepodarilo:" & vbCrLf & description, vbExclamation
+End Sub
+
+Private Sub WhPrintScheduleAdobeCheck()
+    Application.OnTime DateAdd("s", 2, Now), "'" & Replace(ThisWorkbook.Name, "'", "''") & "'!VyskladneniDokoncitTiskAdobe"
+End Sub
+
+Private Sub WhPrintCloseOwnedAdobe()
+    If WhPrintProcessCreated(whPrintAdobePid) <> whPrintAdobeCreated Then Exit Sub
+    WhPrintEnumWindows AddressOf WhPrintAdobeCloseWindow, 0
+    If Not whPrintAdobeClosePosted Then Err.Raise vbObjectError + 835, , "Okno tiskove instance Adobe nebylo nalezeno. Zavrete Adobe prosim rucne."
+End Sub
+
+#If VBA7 Then
+Public Function WhPrintAdobeCloseWindow(ByVal hwnd As LongPtr, ByVal parameter As LongPtr) As Long
+#Else
+Public Function WhPrintAdobeCloseWindow(ByVal hwnd As Long, ByVal parameter As Long) As Long
+#End If
+    Dim pid As Long
+    WhPrintAdobeCloseWindow = 1
+    WhPrintWindowPid hwnd, pid
+    If pid <> whPrintAdobePid Then Exit Function
+    If WhPrintGetWindow(hwnd, 4) <> 0 Then Exit Function
+    If WhPrintWindowTitleLength(hwnd) = 0 Then Exit Function
+    ' Normal WM_CLOSE, not termination; Adobe retains control over unsaved-document prompts.
+    If WhPrintPostMessage(hwnd, &H10, 0, 0) <> 0 Then whPrintAdobeClosePosted = True
+End Function
+
+Private Sub WhPrintResetAdobe()
+    whPrintAdobePid = 0
+    whPrintAdobeCreated = ""
+    Set whPrintAdobeBaseline = Nothing
+    Set whPrintAdobeSeen = Nothing
+End Sub
+
 Private Function WhPrintAdobeArguments(ByVal pdf As String, ByVal printer As String, ByVal driver As String, ByVal port As String) As String
-    ' Minimize Adobe and suppress its splash screen; never terminate a running reader.
-    WhPrintAdobeArguments = "/s /h /t " & WhPrintQuoteArgument(pdf) & " " & WhPrintQuoteArgument(printer) & " " & _
+    ' A separate instance lets us close only the reader started for this print job.
+    WhPrintAdobeArguments = "/n /s /h /t " & WhPrintQuoteArgument(pdf) & " " & WhPrintQuoteArgument(printer) & " " & _
         WhPrintQuoteArgument(driver) & " " & WhPrintQuoteArgument(port)
 End Function
 
