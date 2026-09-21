@@ -279,7 +279,9 @@
         if (images.ok === false || images.configured === false) imageWarning = "Produktové fotografie nejsou dostupné. ";
       } catch (_) { imageWarning = "Produktové fotografie se nepodařilo načíst. "; }
       const dataset = data.dataset;
-      els.batch.textContent = [String(dataset.workbookFolderName || "").trim(), "Skladovky k vyskladnění"].filter(Boolean).join(" · ");
+      const expeditionDate = String(dataset.datasetDate || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
+      const dayLabel = expeditionDate ? `${expeditionDate[3]}.${expeditionDate[2]}.${expeditionDate[1]}` : "";
+      els.batch.textContent = [dayLabel, "Skladovky k vyskladnění"].filter(Boolean).join(" · ");
       els.pieces.textContent = `${state.rows.reduce((sum, row) => sum + quantity(row), 0)} ks`;
       document.title = `Vyskladnění ${dataset.datasetDate || ""}`;
       render();

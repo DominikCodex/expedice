@@ -44,6 +44,16 @@ End Function
 Public Function TestFolderName(ByVal path As String) As String
     TestFolderName = WhPrintWorkbookFolderName(path)
 End Function
+Public Function TestExpeditionDate(ByVal path As String) As String
+    On Error GoTo Failed
+    TestExpeditionDate = Format$(WhPrintExpeditionDay(path), "yyyy-mm-dd")
+    Exit Function
+Failed:
+    TestExpeditionDate = "ERROR"
+End Function
+Public Sub TestArchive(ByVal path As String)
+    VyskladneniPdfDoSlozky path, DateSerial(2026, 9, 17)
+End Sub
 Public Sub TestForgetPdfs()
     Dim index As Long
     For index = 0 To 2
@@ -150,7 +160,7 @@ Public Function getResponseHeader(ByVal header As String) As String
     End If
 End Function
 '@
-$folder = Join-Path $root ('test-results/adobe-vba-' + [guid]::NewGuid().ToString('N'))
+$folder = Join-Path $root ('test-results/av-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 [void](New-Item -ItemType Directory -Path $folder)
 $excel = $null
 $book = $null
@@ -222,7 +232,7 @@ try {
         if ($state[9] -ne 0) { throw 'Successful direct print showed a message box.' }
     }
     $sent = $state[7] | ConvertFrom-Json
-    if ($sent.workbookFolderName -cne (Split-Path $folder -Leaf)) { throw 'Workbook folder name missing or full path exposed.' }
+    if ($sent.workbookFolderName -cne (Get-Date -Format 'dd.MM.yyyy') -or $sent.datasetDate -cne (Get-Date -Format 'yyyy-MM-dd')) { throw 'Default expedition date missing.' }
     $czechFolder = 'Ned' + [char]0x11b + 'le - ' + [char]0x10d + 'erven' + [char]0xe1
     foreach ($base in @('C:\sklad\', '\\server\sdilene\')) {
         if ($excel.Run($prefix + 'TestFolderName', ($base + $czechFolder)) -cne $czechFolder) { throw 'Unicode/local/UNC folder name changed.' }
@@ -313,6 +323,35 @@ try {
     $state = $excel.Run($prefix + 'TestState')
     if ($state[9] -ne 1 -or $state[5] -notmatch 'Bez fotografie: 2' -or $state[5] -notmatch 'Ulozeno 3/3') { throw 'Missing photos were not reported in one warning.' }
     Write-Output 'PASS: successful generation and printing are silent; errors and incomplete photos remain visible.'
+    foreach ($datedPath in @('C:\sklad\17.09.2026', 'C:\sklad\17. 9. 2026 OBJEDNAVKA', '\\server\sklad\17.09.2026\Samostatne skladovky')) {
+        if ($excel.Run($prefix + 'TestExpeditionDate', $datedPath) -ne '2026-09-17') { throw 'Saved-copy expedition date was replaced with today.' }
+    }
+    if ($excel.Run($prefix + 'TestExpeditionDate', 'C:\sklad\31.02.2026') -ne 'ERROR') { throw 'Invalid folder date accepted.' }
+    $archive = Join-Path $folder ('Bal' + [char]0xed + [char]0x10d + 'ky - Expedice\Expedice\17.09.2026')
+    [void](New-Item -ItemType Directory -Path $archive)
+    $excel.Run($prefix + 'TestConfigure', $false, 200)
+    $before = $excel.Run($prefix + 'TestState')
+    $excel.Run($prefix + 'TestArchive', $archive)
+    $state = $excel.Run($prefix + 'TestState')
+    $sent = $state[7] | ConvertFrom-Json
+    if ($state[0] -ne $before[0] -or $state[3] -ne ($before[3] + 3) -or $state[9] -ne 0) { throw ('Archive generation failed: ' + $state[5] + ' / Requests: ' + $state[3] + ' (before ' + $before[3] + ')') }
+    if ($sent.datasetDate -ne '2026-09-17' -or $sent.workbookFolderName -ne '17.09.2026') { throw 'Archive date did not override master date/folder.' }
+    if (@(Get-ChildItem -LiteralPath (Join-Path $archive 'VyskladneniPDF') -Recurse -Filter '*.pdf').Count -ne 3) { throw 'Archive did not receive all three PDFs.' }
+    for ($i = 0; $i -lt 3; $i++) {
+        $saved = $excel.Run($prefix + 'TestSavedPdf', $i)
+        if (-not $saved.StartsWith($archive + '\')) { throw 'Print macro still points at master folder.' }
+    }
+    foreach ($badDestination in @('', (Join-Path $folder 'not-created'))) {
+        $excel.Run($prefix + 'TestConfigure', $false, 200)
+        $before = $excel.Run($prefix + 'TestState')
+        $excel.Run($prefix + 'TestArchive', $badDestination)
+        $state = $excel.Run($prefix + 'TestState')
+        if ($state[3] -ne $before[3] -or $state[9] -ne 1) { throw 'Invalid archive folder used default path or contacted server.' }
+        for ($i = 0; $i -lt 3; $i++) {
+            if ([string]$excel.Run($prefix + 'TestSavedPdf', $i) -ne '') { throw 'Failed archive retained previous print paths.' }
+        }
+    }
+    Write-Output 'PASS: archive target independent of master, all three PDFs, explicit historical date, Czech paths, saved-copy dates, invalid paths and no automatic print.'
     foreach ($worksheet in $book.Worksheets) {
         if ($worksheet.Shapes.Count -ne 0) { throw 'A macro created a button or shape.' }
     }

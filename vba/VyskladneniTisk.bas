@@ -25,6 +25,10 @@ Public Sub VyskladneniPdfVygenerovat()
     WhPrintRun True
 End Sub
 
+Public Sub VyskladneniPdfDoSlozky(ByVal cilovaSlozka As String, ByVal expedicniDen As Date)
+    WhPrintRun True, cilovaSlozka, expedicniDen
+End Sub
+
 Public Sub VyskladneniTiskBeznePoradi()
     WhPrintSavedPdf 0
 End Sub
@@ -37,19 +41,29 @@ Public Sub VyskladneniTiskPrioritniKusy()
     WhPrintSavedPdf 2
 End Sub
 
-Private Sub WhPrintRun(ByVal generatePdf As Boolean)
+Private Sub WhPrintRun(ByVal generatePdf As Boolean, Optional ByVal destination As Variant, Optional ByVal expeditionDay As Date = 0)
     On Error GoTo Failed
     Static running As Boolean
     If running Then Exit Sub
     running = True
-    Dim pdfFolder As String, index As Long
+    Dim pdfFolder As String, index As Long, outputRoot As String
     If generatePdf Then
         ' Never reuse a previous batch after a failed or partial generation.
         For index = 0 To 2
             whPrintPdfPaths(index) = ""
         Next index
-        pdfFolder = WhPrintPdfFolder(ThisWorkbook.Path)
+        outputRoot = ThisWorkbook.Path
+        If Not IsMissing(destination) Then
+            outputRoot = CStr(destination)
+            If Len(outputRoot) = 0 Then Err.Raise vbObjectError + 824, , "Chybi cilova slozka expedicniho dne."
+            If Not CreateObject("Scripting.FileSystemObject").FolderExists(outputRoot) Then _
+                Err.Raise vbObjectError + 824, , "Cilova slozka expedicniho dne neexistuje. Nejprve uloz kopii sesitu."
+        End If
+        pdfFolder = WhPrintPdfFolder(outputRoot)
     End If
+    If expeditionDay = 0 Then expeditionDay = WhPrintExpeditionDay(ThisWorkbook.Path)
+    If Year(expeditionDay) < 1900 Or Year(expeditionDay) > 9999 Then _
+        Err.Raise vbObjectError + 825, , "Neplatne datum expedicniho dne."
     Dim ws As Worksheet
     Set ws = WhPrintWarehouseSheet(ThisWorkbook)
     Dim lastRow As Long, r As Long, payload As String, rows As String, helperSheets As String
@@ -76,9 +90,9 @@ Private Sub WhPrintRun(ByVal generatePdf As Boolean)
     payload = "{""datasetKind"":""warehouse"",""source"":""excel-vba-print""," & _
         """shopCode"":""unknown"",""shopName"":""Sklad""," & _
         """workbookName"":" & WhPrintJson(ws.Parent.Name) & "," & _
-        """workbookFolderName"":" & WhPrintJson(WhPrintWorkbookFolderName(ws.Parent.Path)) & "," & _
+        """workbookFolderName"":" & WhPrintJson(Format$(expeditionDay, "dd.mm.yyyy")) & "," & _
         """worksheetName"":" & WhPrintJson(ws.Name) & "," & _
-        """datasetDate"":" & WhPrintJson(Format$(Date, "yyyy-mm-dd")) & "," & _
+        """datasetDate"":" & WhPrintJson(Format$(expeditionDay, "yyyy-mm-dd")) & "," & _
         """datasetTime"":" & WhPrintJson(Format$(Now, "hh:nn:ss")) & "," & _
         """rows"": [" & rows & "],""helperSheets"":" & helperSheets & "}"
     ' WhPrintJson emits ASCII, so character count equals the UTF-8 byte count.
@@ -305,6 +319,33 @@ Private Function WhPrintWorkbookFolderName(ByVal workbookFolder As String) As St
     ' Send only the folder name, never the full local or network path.
     If Len(workbookFolder) = 0 Or InStr(1, workbookFolder, "://", vbTextCompare) > 0 Then Exit Function
     WhPrintWorkbookFolderName = CreateObject("Scripting.FileSystemObject").GetFileName(workbookFolder)
+End Function
+
+Private Function WhPrintExpeditionDay(ByVal workbookFolder As String) As Date
+    Dim files As Object, pattern As Object, matches As Object, match As Object
+    Dim folder As String, level As Long, day As Long, month As Long, year As Long, value As Date
+    Set files = CreateObject("Scripting.FileSystemObject")
+    Set pattern = CreateObject("VBScript.RegExp")
+    pattern.Pattern = "^([0-9]{1,2})\.\s*([0-9]{1,2})\.\s*([0-9]{4})( |$)"
+    folder = workbookFolder
+    ' A saved daily copy keeps its expedition date even when reopened another day.
+    ' Also handle the copy in the daily folder's Samostatne skladovky subfolder.
+    For level = 0 To 1
+        Set matches = pattern.Execute(WhPrintWorkbookFolderName(folder))
+        If matches.Count > 0 Then
+            Set match = matches(0)
+            day = CLng(match.SubMatches(0))
+            month = CLng(match.SubMatches(1))
+            year = CLng(match.SubMatches(2))
+            value = DateSerial(year, month, day)
+            If VBA.Day(value) <> day Or VBA.Month(value) <> month Or VBA.Year(value) <> year Then _
+                Err.Raise vbObjectError + 825, , "Nazev slozky obsahuje neplatne datum expedicniho dne."
+            WhPrintExpeditionDay = value
+            Exit Function
+        End If
+        folder = files.GetParentFolderName(folder)
+    Next level
+    WhPrintExpeditionDay = Date
 End Function
 
 Private Function WhPrintPdfFolder(ByVal workbookFolder As String) As String
