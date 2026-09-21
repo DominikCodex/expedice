@@ -167,7 +167,7 @@ Private Sub WhPrintSavedPdf(ByVal variantIndex As Long)
     If Len(adobe) = 0 Then Err.Raise vbObjectError + 818, , "Adobe Acrobat nebo Reader nebyl nalezen. PDF zustava ulozene."
     printer = WhPrintDefaultPrinter()
     arguments = WhPrintAdobeArguments(pdfPath, CStr(printer(0)), CStr(printer(1)), CStr(printer(2)))
-    WhPrintLaunchApplication adobe, arguments
+    WhPrintLaunchApplication adobe, arguments, 7
     running = False
     Exit Sub
 Failed:
@@ -323,7 +323,7 @@ Public Sub VyskladneniPdfVytisknoutAdobe()
     If Len(adobe) = 0 Then Err.Raise vbObjectError + 818, , "Adobe Acrobat nebo Reader nebyl nalezen. PDF zustava ulozene; muzes je vytisknout rucne z nahledu."
     printer = WhPrintDefaultPrinter()
     arguments = WhPrintAdobeArguments(pdfPath, CStr(printer(0)), CStr(printer(1)), CStr(printer(2)))
-    WhPrintLaunchApplication adobe, arguments
+    WhPrintLaunchApplication adobe, arguments, 7
 Finished:
     running = False
     Exit Sub
@@ -401,7 +401,8 @@ Private Function WhPrintDefaultPrinter() As Variant
 End Function
 
 Private Function WhPrintAdobeArguments(ByVal pdf As String, ByVal printer As String, ByVal driver As String, ByVal port As String) As String
-    WhPrintAdobeArguments = "/t " & WhPrintQuoteArgument(pdf) & " " & WhPrintQuoteArgument(printer) & " " & _
+    ' Minimize Adobe and suppress its splash screen; never terminate a running reader.
+    WhPrintAdobeArguments = "/s /h /t " & WhPrintQuoteArgument(pdf) & " " & WhPrintQuoteArgument(printer) & " " & _
         WhPrintQuoteArgument(driver) & " " & WhPrintQuoteArgument(port)
 End Function
 
@@ -548,7 +549,7 @@ Private Sub WhPrintOpenBrowser(ByVal printPath As String)
     WhPrintLaunchApplication browser, WhPrintQuoteArgument(printPath)
 End Sub
 
-Private Sub WhPrintLaunchApplication(ByVal executable As String, ByVal arguments As String)
+Private Sub WhPrintLaunchApplication(ByVal executable As String, ByVal arguments As String, Optional ByVal windowStyle As Long = 1)
     Dim operation As String
     operation = "open"
 #If VBA7 Then
@@ -556,7 +557,8 @@ Private Sub WhPrintLaunchApplication(ByVal executable As String, ByVal arguments
 #Else
     Dim result As Long
 #End If
-    result = WhPrintShellExecute(0, StrPtr(operation), StrPtr(executable), StrPtr(arguments), 0, 1)
+    ' 7 = SW_SHOWMINNOACTIVE for printing; browser previews keep normal visible mode (1).
+    result = WhPrintShellExecute(0, StrPtr(operation), StrPtr(executable), StrPtr(arguments), 0, windowStyle)
     If result <= 32 Then Err.Raise vbObjectError + 810, , "Aplikaci se nepodarilo spustit (kod Windows " & CStr(result) & ")."
 End Sub
 

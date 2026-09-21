@@ -73,3 +73,9 @@ Je nutné synchronizovat **celou složku dne včetně PDF a XML**, nejen XLSM. P
 Starší PDF bez XML se dohledají podle nejnovějšího časového označení v názvech vygenerovaných souborů. Vybere se vždy jedna společná sada všech variant, nikoli nejnovější soubor v každé složce zvlášť. Pokud jsou dvě různé sady označené stejnou sekundou, makro požádá o ruční výběr. Poškozené nebo prázdné XML se nikdy neobchází tímto dohledáváním.
 
 Nový modul musí být i v kopii, kterou používá kolegyně. Aktualizace masteru nezmění již dříve vytvořené XLSM kopie. U nové denní kopie vytvořené z aktualizovaného masteru není potřeba žádná další úprava tlačítek.
+
+## Okno Adobe při tisku
+
+Všechna čtyři tisková makra (tři varianty i ruční výběr PDF) spouštějí Adobe s `/s /h /t` a požadavkem Windows na minimalizované okno bez aktivace. `/s` potlačuje úvodní obrazovku, `/h` žádá minimalizované spuštění. Ruční HTML náhled v prohlížeči zůstává viditelný.
+
+Adobe se násilně neukončuje a makro nezavírá jiná otevřená PDF. Proces nebo ikona mohou po tisku zůstat na liště; jde o omezení viditelného okna, nikoli zaručené ukončení aplikace. Chování již běžící instance závisí na konkrétní verzi Adobe. Adobe tyto příkazové přepínače popisuje v [SDK FAQ](https://opensource.adobe.com/dc-acrobat-sdk-docs/library/overview/apxDevFAQ.html), ale negarantuje jejich podporu napříč verzemi.

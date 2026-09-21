@@ -3,10 +3,10 @@ param([switch]$ReadDefaultPrinter)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $source = Get-Content -LiteralPath (Join-Path $root 'vba/VyskladneniTisk.bas') -Raw
-$launchLine = 'result = WhPrintShellExecute(0, StrPtr(operation), StrPtr(executable), StrPtr(arguments), 0, 1)'
+$launchLine = 'result = WhPrintShellExecute(0, StrPtr(operation), StrPtr(executable), StrPtr(arguments), 0, windowStyle)'
 if (-not $source.Contains($launchLine)) { throw 'Launch interception no longer matches production code. Refusing to run.' }
 # Test production control flow with network, process launches and dialogs replaced.
-$source = $source.Replace($launchLine, 'result = TestLaunch(executable, arguments)')
+$source = $source.Replace($launchLine, 'result = TestLaunch(executable, arguments, windowStyle)')
 $source = $source.Replace('CreateObject("MSXML2.ServerXMLHTTP.6.0")', 'New FakeHttp')
 $source = $source.Replace('http.Open ', 'http.TestOpen ')
 $source = $source.Replace('printer = WhPrintDefaultPrinter()', 'printer = Array("Test Printer", "Test Driver", "WSD-TEST")')
@@ -16,6 +16,7 @@ $source = [regex]::Replace($source, '\bMsgBox\b', 'TestMessage')
 if ($source -match '(?m)^\s*result = WhPrintShellExecute\(') { throw 'Unintercepted launch.' }
 $harness = @'
 Public testLaunchCount As Long
+Public testWindowStyle As Long
 Public testLastExe As String
 Public testLastArguments As String
 Public testRequests As Long
@@ -73,10 +74,11 @@ Public Sub TestModeFailure(ByVal mode As String, Optional ByVal wrongMode As Boo
     testFailedMode = mode
     testWrongMode = wrongMode
 End Sub
-Public Function TestLaunch(ByVal exe As String, ByVal args As String) As Long
+Public Function TestLaunch(ByVal exe As String, ByVal args As String, ByVal windowStyle As Long) As Long
     testLaunchCount = testLaunchCount + 1
     testLastExe = exe
     testLastArguments = args
+    testWindowStyle = windowStyle
     TestLaunch = 33
 End Function
 Public Function TestMessage(ByVal prompt As String, Optional ByVal buttons As Long = 0, Optional ByVal title As String = "") As Long
@@ -100,7 +102,7 @@ Public Function TestAdobeForPrint() As String
     If Not testMissingAdobe Then TestAdobeForPrint = WhPrintAdobePath()
 End Function
 Public Function TestState() As Variant
-    TestState = Array(testLaunchCount, testLastExe, testLastArguments, testRequests, testSelectedPdf, testMessageText, testUrl, testPayload, testUrls, testMessageCount)
+    TestState = Array(testLaunchCount, testLastExe, testLastArguments, testRequests, testSelectedPdf, testMessageText, testUrl, testPayload, testUrls, testMessageCount, testWindowStyle)
 End Function
 Public Function TestAdobePath() As String
     TestAdobePath = WhPrintAdobePath()
@@ -236,9 +238,10 @@ try {
         if (-not (Test-Path -LiteralPath $savedPdf)) { throw 'Generated variant was not remembered.' }
         $excel.Run($prefix + $printMacros[$i])
         $state = $excel.Run($prefix + 'TestState')
-        $expected = '/t "' + $savedPdf + '" "Test Printer" "Test Driver" "WSD-TEST"'
+        $expected = '/s /h /t "' + $savedPdf + '" "Test Printer" "Test Driver" "WSD-TEST"'
         if ($state[0] -ne ($i + 1) -or $state[3] -ne 3 -or $state[1] -ne $adobe -or $state[2] -cne $expected) { throw 'Variant macro printed wrong PDF, opened browser or uploaded again.' }
         if ($state[9] -ne 0) { throw 'Successful direct print showed a message box.' }
+        if ($state[10] -ne 7) { throw 'Direct print did not request minimized, non-activating Adobe.' }
     }
     $sent = $state[7] | ConvertFrom-Json
     if ($sent.workbookFolderName -cne (Get-Date -Format 'dd.MM.yyyy') -or $sent.datasetDate -cne (Get-Date -Format 'yyyy-MM-dd')) { throw 'Default expedition date missing.' }
@@ -262,16 +265,17 @@ try {
     $excel.Run($prefix + 'TestConfigure', $true, 200)
     $excel.Run($prefix + 'VyskladneniPdfVytisknoutAdobe')
     $state = $excel.Run($prefix + 'TestState')
-    $expected = '/t "' + $pdf + '" "Test Printer" "Test Driver" "WSD-TEST"'
+    $expected = '/s /h /t "' + $pdf + '" "Test Printer" "Test Driver" "WSD-TEST"'
     if ($state[0] -ne 4 -or $state[1] -ne $adobe -or $state[2] -cne $expected -or $state[3] -ne 3) { throw 'Adobe print did not use selected PDF and explicit printer tuple.' }
     if ($state[9] -ne 0) { throw 'Successful selected-file print showed a message box.' }
+    if ($state[10] -ne 7) { throw 'Selected-file print did not request minimized Adobe.' }
     Write-Output 'PASS: generation saves all three without preview; three direct macros print their own saved PDF without upload or picker.'
     foreach ($bad in @('', 'bad"quote', "bad`nline")) {
         if ($excel.Run($prefix + 'TestArgumentFailure', $bad) -ne 821) { throw 'Invalid command argument accepted.' }
     }
     $unicodePath = '\\server\sklad s mezerou\' + [char]0x10d + 'erven' + [char]0xe1 + '%TEST% &.pdf'
     $args = $excel.Run($prefix + 'TestArguments', $unicodePath, 'Tiskarna & sklad')
-    if ($args -cne ('/t "' + $unicodePath + '" "Tiskarna & sklad" "Test Driver" "WSD-TEST"')) { throw 'Unicode/UNC command changed.' }
+    if ($args -cne ('/s /h /t "' + $unicodePath + '" "Tiskarna & sklad" "Test Driver" "WSD-TEST"')) { throw 'Unicode/UNC command changed.' }
     if ($excel.Run($prefix + 'TestValidate', $pdf) -ne 0) { throw 'Valid PDF rejected.' }
     if ($excel.Run($prefix + 'TestValidate', (Join-Path $folder 'missing.pdf')) -ne 819) { throw 'Missing PDF accepted.' }
     $badPdf = Join-Path $folder 'invalid.pdf'
@@ -325,6 +329,7 @@ try {
     $excel.Run($prefix + 'VyskladneniNahratATisk')
     $state = $excel.Run($prefix + 'TestState')
     if (-not $state[6].EndsWith('/render-print') -or $state[0] -ne 6) { throw 'Original manual HTML workflow changed.' }
+    if ($state[10] -ne 1) { throw 'Manual browser preview was hidden or minimized.' }
     if ($state[9] -ne 0) { throw 'Successful HTML generation showed a message box.' }
     $excel.Run($prefix + 'TestConfigure', $false, 200)
     $excel.Run($prefix + 'TestMissingPhotos', 2)
