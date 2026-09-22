@@ -26,8 +26,10 @@ button:disabled { opacity: .5; cursor: wait; }
 .sheet-heading > div:first-child { min-width: 0; overflow-wrap: anywhere; }
 #report-type { margin: 0 0 5px; font-size: 16px; line-height: 1.25; }
 h1 { margin: 0 0 5px; font-size: 24px; }
-.totals { display: grid; gap: 4px; text-align: right; white-space: nowrap; }
+.totals { display: flex; flex-direction: column; align-self: stretch; align-items: flex-end; flex-shrink: 0; gap: 8px; text-align: right; white-space: nowrap; }
 .totals strong { font-size: 24px; }
+#batch-date { font-size: 32px; font-weight: 700; line-height: 1.1; color: #b42318; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+#pieces { margin-top: auto; }
 .print-report { margin-bottom: 5mm; }
 .print-report h2 { margin: 0 0 5px; font-size: 13px; }
 .print-report-metrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); margin: 0 0 6px; border-block: 1px solid #53685d; break-inside: avoid; }
@@ -130,4 +132,8 @@ td img { display: block; width: 14mm; height: 14mm; object-fit: contain; margin:
   #sheet { padding: 12px; overflow-x: auto; }
   table { min-width: 850px; }
   [data-orientation="portrait"] table { min-width: 0; }
+}
+@media screen and (max-width: 560px) {
+  .sheet-heading { flex-direction: column; align-items: stretch; }
+  .totals { order: -1; }
 }

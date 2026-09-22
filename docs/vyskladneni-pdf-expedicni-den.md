@@ -48,7 +48,7 @@ Předchozí kopii `datum OBJEDNÁVKA` i následnou kopii `Samostatné skladovky`
 
 ## Datum v hlavičce
 
-Hlavička všech tří sestav používá datum expedičního dne: `21.09.2026 · Skladovky k vyskladnění`. Název složky masteru ani čas generování se zde nezobrazují. Datum se serveru předává jako `datasetDate`, nikoli jako lokální cesta.
+Hlavička všech tří sestav používá datum expedičního dne, například `21.09.2026`. Datum je samostatně vpravo nahoře, červené, tučné a velké 32 px (přibližně 2,3× původní velikost); počet kusů je pod ním. Vlevo zůstává `Skladovky k vyskladnění`. Platí pro náhled i PDF, obě orientace i hustoty tisku. Název složky masteru ani čas generování se zde nezobrazují. Datum se serveru předává jako `datasetDate`, nikoli jako lokální cesta. Chybějící datum se v sestavě nedoplňuje dnešním datem. Kvůli této vizuální úpravě není potřeba měnit Excel makro; už vytvořená PDF je třeba vygenerovat znovu.
 
 Původní bezparametrická makra zůstávají funkční. Při spuštění z uložené denní kopie rozpoznají datum z názvu složky `dd.mm.rrrr`, `d. m. rrrr` nebo `datum OBJEDNÁVKA`; podporovaná je také jejich přímá podsložka (například `Samostatné skladovky`). Při spuštění z masteru bez datované složky použijí dnešek. Pro jiné pojmenování složek předávej datum novou funkcí výslovně.
 

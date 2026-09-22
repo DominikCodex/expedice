@@ -1,7 +1,7 @@
 "use strict";
 
 (() => {
-  const els = Object.fromEntries(["sort", "print", "reload", "retry-images", "status", "login", "sheet", "batch", "report-type", "pieces", "rows"].map((id) => [id, document.getElementById(id)]));
+  const els = Object.fromEntries(["sort", "print", "reload", "retry-images", "status", "login", "sheet", "batch", "batch-date", "report-type", "pieces", "rows"].map((id) => [id, document.getElementById(id)]));
   const datasetId = new URLSearchParams(location.search).get("dataset");
   const embeddedData = document.getElementById("warehouse-print-data");
   const standalone = embeddedData ? JSON.parse(embeddedData.textContent) : null;
@@ -281,7 +281,10 @@
       const dataset = data.dataset;
       const expeditionDate = String(dataset.datasetDate || "").match(/^(\d{4})-(\d{2})-(\d{2})$/);
       const dayLabel = expeditionDate ? `${expeditionDate[3]}.${expeditionDate[2]}.${expeditionDate[1]}` : "";
-      els.batch.textContent = [dayLabel, "Skladovky k vyskladnění"].filter(Boolean).join(" · ");
+      els.batch.textContent = "Skladovky k vyskladnění";
+      els["batch-date"].textContent = dayLabel;
+      els["batch-date"].dateTime = expeditionDate ? expeditionDate[0] : "";
+      els["batch-date"].hidden = !dayLabel;
       els.pieces.textContent = `${state.rows.reduce((sum, row) => sum + quantity(row), 0)} ks`;
       document.title = `Vyskladnění ${dataset.datasetDate || ""}`;
       render();

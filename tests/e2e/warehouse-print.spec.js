@@ -34,7 +34,9 @@ test("hlavička uvádí typ sestavy v náhledu i tisku ve všech režimech", asy
   await expect(page.locator("#print")).toBeEnabled();
   const title = page.locator(".sheet-heading #report-type");
   await expect(title).toHaveText("Sestava: Prioritní kusy zvlášť");
-  await expect(page.locator("#batch")).toHaveText("19.09.2026 · Skladovky k vyskladnění");
+  await expect(page.locator("#batch")).toHaveText("Skladovky k vyskladnění");
+  await expect(page.locator("#batch-date")).toHaveText("19.09.2026");
+  await expect(page.locator("#batch-date")).toHaveAttribute("datetime", "2026-09-19");
   for (const [mode, label] of [["normal", "Běžné pořadí"], ["first", "Prioritní zásilky první"], ["split", "Prioritní kusy zvlášť"]]) {
     await page.getByText(label, { exact: true }).click();
     await expect(title).toHaveText(`Sestava: ${label}`);
@@ -51,8 +53,22 @@ test("hlavička uvádí typ sestavy v náhledu i tisku ve všech režimech", asy
         const bounds = await title.boundingBox();
         const batch = await page.locator("#batch").boundingBox();
         const totals = await page.locator(".totals").boundingBox();
+        const date = await page.locator("#batch-date").boundingBox();
+        const pieces = await page.locator("#pieces").boundingBox();
+        const heading = await page.locator(".sheet-heading").boundingBox();
         expect(bounds.y + bounds.height).toBeLessThanOrEqual(batch.y);
         expect(bounds.x + bounds.width).toBeLessThanOrEqual(totals.x);
+        expect(Math.abs(date.y - heading.y)).toBeLessThan(1);
+        expect(Math.abs(date.x + date.width - heading.x - heading.width)).toBeLessThan(1);
+        expect(date.y + date.height).toBeLessThanOrEqual(pieces.y);
+        const dateStyle = await page.locator("#batch-date").evaluate((node) => {
+          const style = getComputedStyle(node);
+          return { color: style.color, weight: style.fontWeight, scale: parseFloat(style.fontSize) / parseFloat(getComputedStyle(document.getElementById("batch")).fontSize) };
+        });
+        expect(dateStyle.color).toBe("rgb(180, 35, 24)");
+        expect(Number(dateStyle.weight)).toBeGreaterThanOrEqual(700);
+        expect(dateStyle.scale).toBeGreaterThanOrEqual(2);
+        expect(dateStyle.scale).toBeLessThanOrEqual(2.5);
         await page.emulateMedia({ media: "screen" });
       }
     }
@@ -60,6 +76,31 @@ test("hlavička uvádí typ sestavy v náhledu i tisku ve všech režimech", asy
     await page.emulateMedia({ media: "print" });
     await page.pdf({ path: testInfo.outputPath(`report-heading-${mode}.pdf`), preferCSSPageSize: true, printBackground: true });
     await page.emulateMedia({ media: "screen" });
+  }
+  await page.setViewportSize({ width: 375, height: 812 });
+  const date = await page.locator("#batch-date").boundingBox();
+  const heading = await page.locator(".sheet-heading").boundingBox();
+  expect(date.x).toBeGreaterThanOrEqual(heading.x);
+  expect(date.x + date.width).toBeLessThanOrEqual(heading.x + heading.width + 1);
+  expect(date.y).toBeLessThan((await title.boundingBox()).y);
+  await page.locator(".sheet-heading").screenshot({ path: testInfo.outputPath("report-heading-mobile.png") });
+});
+
+test("chybějící datum várky se nenahrazuje dnešním datem ani nezůstane po obnovení", async ({ page }) => {
+  let datasetDate = "2026-09-19";
+  await page.route("**/api/datasets/71", (route) => route.fulfill({ json: {
+    dataset: { datasetKind: "warehouse_print", datasetDate }, rows: fixture().slice(0, 1),
+  } }));
+  await page.route("**/api/product-images", (route) => route.fulfill({ json: { images: {} } }));
+  await page.goto("/warehouse-print.html?dataset=71");
+  await expect(page.locator("#batch-date")).toHaveText("19.09.2026");
+  for (const value of ["", "invalid"]) {
+    datasetDate = value;
+    await page.locator("#reload").click();
+    await expect(page.locator("#print")).toBeEnabled();
+    await expect(page.locator("#batch-date")).toBeHidden();
+    await expect(page.locator("#batch-date")).toHaveText("");
+    await expect(page.locator("#batch")).toHaveText("Skladovky k vyskladnění");
   }
 });
 
@@ -513,7 +554,8 @@ test("samostatná sestava tiskne všechny původní kusy na A4 na šířku", asy
   await openStandardPrint(page);
   await expect(page.locator("#print")).toBeEnabled();
   await expect(page.locator("#rows .item-row")).toHaveCount(rows.length);
-  await expect(page.locator("#batch")).toHaveText("18.09.2026 · Skladovky k vyskladnění");
+  await expect(page.locator("#batch")).toHaveText("Skladovky k vyskladnění");
+  await expect(page.locator("#batch-date")).toHaveText("18.09.2026");
   await expect(page.locator("thead th")).toHaveText(["Produkt / kód varianty", "Foto", "Varianta", "Celkem", "Kolik a kam do boxů"]);
   const firstCells = page.locator("#rows .item-row").first().locator("td");
   await expect(firstCells.nth(0).locator(".sku")).toHaveCount(1);
@@ -777,7 +819,8 @@ test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", as
   const redBoxCount = await page.locator(".allocation-red").count();
   expect(redBoxCount).toBeGreaterThan(0);
   expect(await page.locator(".allocation-red b:last-child").allTextContents()).toEqual(Array(redBoxCount).fill("3"));
-  await expect(page.locator("#batch")).toHaveText("18.09.2026 · Skladovky k vyskladnění");
+  await expect(page.locator("#batch")).toHaveText("Skladovky k vyskladnění");
+  await expect(page.locator("#batch-date")).toHaveText("18.09.2026");
   const expectedTotal = process.env.WAREHOUSE_PRINT_FIXTURE
     ? fixture().reduce((sum, row) => sum + Number(row.quantity), 0) : 135;
   await expect(page.locator("#pieces")).toHaveText(`${expectedTotal} ks`);
