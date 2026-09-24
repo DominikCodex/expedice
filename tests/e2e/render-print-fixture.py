@@ -30,6 +30,13 @@ for box, pieces in sorted(box_pieces.items()):
     row[11], row[14] = f"TEST-{box}", str(pieces)
     row[16:18] = [str(box), "0,8" if box == 3 else "1" if box < 8 else "3" if box < 18 else "7"]
     completion_rows.append(row)
+if "--carrier-ranges" in sys.argv:
+    completion_rows = []
+    for start, end, code in [(1, 5, "0,8"), (6, 10, "1"), (11, 15, "1,5"), (16, 18, "1,8")]:
+        for box in range(start, end + 1):
+            row = [""] * 18
+            row[11], row[14], row[16], row[17] = f"TEST-{box}", "1", str(box), code
+            completion_rows.append(row)
 with patch.object(app, "product_image_cache", return_value={"configured": True, "images": {}}), \
      patch.object(app, "db_conn", side_effect=AssertionError("No database allowed")):
     response = app.app.test_client().post("/api/warehouse/render-print", json={

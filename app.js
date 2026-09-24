@@ -1400,8 +1400,8 @@ function completionStockPiecesForReport(rows) {
 
 const EXPEDITION_ORDER_CODE_LABELS = {
   "0.8": "Komplet ze skladu Galantra.cz přes Zásilkovnu",
-  1: "Komplet ze skladu iVeronika.cz",
-  "1.5": "Komplet ze skladu iVeronika.sk",
+  1: "Komplet ze skladu iVeronika.cz přes Zásilkovnu",
+  "1.5": "Komplet ze skladu iVeronika.sk přes Zásilkovnu",
   "1.8": "Komplet ze skladu Galantra.cz přes DPD",
   "1.9": "Komplet ze skladu DPD mimo Galantra.cz",
   2: "Zásilkovna pouze Hotex",

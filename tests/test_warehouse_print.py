@@ -101,6 +101,27 @@ def test_print_report_uses_only_uploaded_completion_and_stock_pieces(monkeypatch
     assert report["priorityPieces"] == 3
 
 
+def test_print_report_names_carrier_for_all_stock_groups(monkeypatch):
+    monkeypatch.setattr(app, "product_image_cache", lambda: {"images": {}})
+    helpers = completion_helpers([
+        (str(box), code, "1")
+        for start, end, code in [(1, 5, "0,8"), (6, 10, "1"), (11, 15, "1,5"), (16, 18, "1,8")]
+        for box in range(start, end + 1)
+    ])
+    response = app.app.test_client().post("/api/warehouse/render-print", json={
+        "rows": [print_row()], "helperSheets": helpers,
+    })
+    assert response.status_code == 200
+    ranges = rendered_data(response)["printReport"]["ranges"]
+    assert [(r["start"], r["end"], r["label"]) for r in ranges] == [
+        (1, 5, "Komplet ze skladu Galantra.cz přes Zásilkovnu"),
+        (6, 10, "Komplet ze skladu iVeronika.cz přes Zásilkovnu"),
+        (11, 15, "Komplet ze skladu iVeronika.sk přes Zásilkovnu"),
+        (16, 18, "Komplet ze skladu Galantra.cz přes DPD"),
+    ]
+    assert [r["priority"] for r in ranges] == [True, False, False, False]
+
+
 def test_print_priority_pieces_count_only_red_allocations_including_second_quality():
     rows = app.normalize_warehouse_print_rows([
         {**print_row("5"), "sequence": "2x7, 3x8"},

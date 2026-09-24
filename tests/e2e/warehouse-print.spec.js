@@ -772,6 +772,30 @@ test("boxy využijí sloupec Hotovo a vejdou se alespoň tři vedle sebe", async
   }
 });
 
+test("Rozpis v hlavičce uvádí Zásilkovnu u všech tří skladových skupin", async ({ page }, testInfo) => {
+  const output = testInfo.outputPath("carrier-ranges.html");
+  const localPython = path.resolve(process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python");
+  execFileSync(process.env.TEST_PYTHON || (fs.existsSync(localPython) ? localPython : "python"), [
+    "tests/e2e/render-print-fixture.py", output, "--carrier-ranges",
+  ]);
+  await page.goto(pathToFileURL(output).href);
+  await expect(page.locator("#print")).toBeEnabled();
+  await expect(page.locator(".print-report-range b")).toHaveText(["1–5", "6–10", "11–15", "16–18"]);
+  await expect(page.locator(".print-report-range span")).toHaveText([
+    "Komplet ze skladu Galantra.cz přes Zásilkovnu",
+    "Komplet ze skladu iVeronika.cz přes Zásilkovnu",
+    "Komplet ze skladu iVeronika.sk přes Zásilkovnu",
+    "Komplet ze skladu Galantra.cz přes DPD",
+  ]);
+  for (const [orientation, label] of [["portrait", "Na výšku"], ["landscape", "Na šířku"]]) {
+    await page.getByText(label, { exact: true }).click();
+    await expect(page.locator("#print")).toBeEnabled();
+    expect(await page.locator(".print-report-range span").evaluateAll((nodes) =>
+      nodes.every((node) => node.scrollWidth <= node.clientWidth))).toBe(true);
+    await page.locator("#batch-report").screenshot({ path: `test-results/warehouse-carriers-${orientation}.png` });
+  }
+});
+
 test("Excel otevře vygenerované HTML z disku bez přihlášení a bez API", async ({ page }, testInfo) => {
   const output = testInfo.outputPath("vyskladneni.html");
   const localPython = path.resolve(process.platform === "win32" ? ".venv/Scripts/python.exe" : ".venv/bin/python");
